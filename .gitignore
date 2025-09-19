@@ -1,0 +1,64 @@
+# Build artifacts
+*.o
+*.a
+*.so
+*.gcno
+*.gcda
+*.gcov
+
+# Binaries
+/log_collector_server
+/log_agent
+/log_consumer
+/ipc_sender
+/proc_launcher
+
+# Coverage & artifacts
+/coverage/
+/artifacts/
+/pkgroot/
+/dist/
+/tools/cli/dist/
+
+# Runtime logs and data
+/tmp/
+nohup.out
+/server_files/*.log
+/server_files/rooms/**
+/server_files/users.txt
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+.venvs/
+.virtualenv/
+/tools/cli/.venv/
+/tools/cli/build/
+/tools/cli/src/ming_drlms.egg-info/
+/tools/cli/*.egg-info/
+/tools/cli/.pytest_cache/
+/tools/cli/.mypy_cache/
+/tools/cli/.ruff_cache/
+
+# Editors/IDE
+.vscode/
+.idea/
+*.iml
+.DS_Store
+
+# Docker
+*.tar
+
+# Packages
+*.deb
+*.rpm
+
+# Files
+lgn/
+*.tar.gz
+*.tgz
+.tasks/
+/tests/test_ipc
+/server_files/

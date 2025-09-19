@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -e
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SRC_DIR="$SCRIPT_DIR/../src"
+VENV_PY="$SCRIPT_DIR/../.venv/bin/python3"
+PY="$VENV_PY"
+if [ ! -x "$PY" ]; then
+  PY=python3
+fi
+exec env PYTHONPATH="$SRC_DIR" "$PY" -m ming_drlms.main "$@" 

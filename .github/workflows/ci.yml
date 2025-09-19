@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  push:
+    branches: [ "**" ]
+  pull_request:
+    branches: [ "**" ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      # 增加缓存 pip 依赖项以加快后续运行速度
+      - name: Cache Pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          # 当 pyproject.toml 文件内容变化时，缓存将重新生成
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      # 使用 Ruff 进行代码风格和格式检查
+      - name: Lint and Format Check with Ruff
+        run: |
+          python3 -m pip install ruff
+          echo "--- Linting code ---"
+          ruff check .
+          echo "--- Checking code formatting ---"
+          ruff format --check .
+
+      - name: Install deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libssl-dev netcat-openbsd lcov
+
+      - name: Build C targets
+        run: |
+          make all
+
+      - name: Install CLI via pipx (for space integration tests)
+        run: |
+          python3 -m pip install --user pipx
+          python3 -m pipx ensurepath || true
+          python3 -m pipx install tools/cli || python3 -m pipx reinstall ming-drlms
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Run tests (unit + integration minimal)
+        env:
+          COVERAGE_MIN: "1"
+        run: |
+          make test
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: drlms-binaries
+          path: |
+            log_collector_server
+            log_agent
+            log_consumer
+            ipc_sender
+            proc_launcher
+            libipc.so
+          if-no-files-found: warn
+
+      - name: Build CLI (wheel + sdist)
+        run: |
+          python3 -m pip install --upgrade pip build
+          # ensure C binaries are present and copy into the CLI package bin/
+          # make all (同 Build C 重复)
+          mkdir -p tools/cli/src/ming_drlms/bin
+          cp -f log_collector_server log_agent libipc.so proc_launcher log_consumer ipc_sender tools/cli/src/ming_drlms/bin/
+          python3 -m build tools/cli
+
+      - name: Upload CLI dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: ming-drlms-dist
+          path: tools/cli/dist/*
+          if-no-files-found: error
+
+  
+
+

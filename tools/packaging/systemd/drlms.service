@@ -1,0 +1,20 @@
+[Unit]
+Description=DRLMS Log Collector Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=LD_LIBRARY_PATH=/opt/drlms
+Environment=DRLMS_DATA_DIR=/var/lib/drlms
+ExecStart=/opt/drlms/log_collector_server
+WorkingDirectory=/opt/drlms
+Restart=on-failure
+RestartSec=2
+StandardOutput=append:/var/log/drlms/server.log
+StandardError=append:/var/log/drlms/server.log
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
+
