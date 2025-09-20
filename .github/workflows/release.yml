@@ -61,6 +61,9 @@ jobs:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.TEST_PYPI_API_TOKEN }}
         run: |
+          # 在执行任何操作前，强制升级所有相关工具到最新稳定版
+          python -m pip install --upgrade --upgrade-strategy eager twine
+          # 现在工具链是同步的，可以安全地上传了
           python -m twine upload --repository testpypi dist/*
 
   # Job 3: 负责发布到正式 PyPI
@@ -84,4 +87,7 @@ jobs:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
         run: |
+          # 在执行任何操作前，强制升级所有相关工具到最新稳定版
+          python -m pip install --upgrade --upgrade-strategy eager twine
+          # 现在工具链是同步的，可以安全地上传了
           python -m twine upload --repository testpypi dist/*
