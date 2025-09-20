@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -pthread
+CFLAGS = -Wall -Wextra -pthread -Werror -Wno-deprecated-declarations
 LIBS_COMMON = -lrt
 LIBS_SERVER = -lrt -lcrypto
 LIBS_AGENT = -lcrypto
