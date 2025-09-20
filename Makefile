@@ -25,7 +25,7 @@ libipc.a: $(SRC_LIBIPC:.c=.o)
 	ar rcs $@ $^
 
 libipc.so: $(SRC_LIBIPC:.c=.o)
-	$(CC) -shared -o $@ $^ $(LIBS_COMMON)
+	$(CC) $(CFLAGS) -shared -o $@ $^ $(LIBS_COMMON)
 
 log_collector_server: $(SRC_SERVER) libipc.a
 	$(CC) $(CFLAGS) -o $@ $(SRC_SERVER) -L. -lipc $(LIBS_SERVER) -Wl,-rpath,'$$ORIGIN'
