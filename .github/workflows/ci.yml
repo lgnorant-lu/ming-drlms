@@ -110,9 +110,9 @@ jobs:
 
       - name: Build CLI (wheel + sdist)
         run: |
+          
           python3 -m pip install --upgrade pip build
           # ensure C binaries are present and copy into the CLI package bin/
-          # make all (同 Build C 重复)
           mkdir -p tools/cli/src/ming_drlms/bin
           cp -f log_collector_server log_agent libipc.so proc_launcher log_consumer ipc_sender tools/cli/src/ming_drlms/bin/
           python3 -m build tools/cli
