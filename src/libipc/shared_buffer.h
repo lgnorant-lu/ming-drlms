@@ -12,9 +12,9 @@
 
 // 分片头（位于每个槽位起始处）
 typedef struct {
-    uint32_t len;    // 本帧有效负载长度（字节）
-    uint32_t seq;    // 本消息内分片序号，从0递增
-    uint32_t flags;  // bit0=LAST（最后一片）
+    uint32_t len;   // 本帧有效负载长度（字节）
+    uint32_t seq;   // 本消息内分片序号，从0递增
+    uint32_t flags; // bit0=LAST（最后一片）
 } MsgHdr;
 
 typedef struct {
@@ -29,11 +29,8 @@ typedef struct {
 
 // API（文档口径）
 int shm_init(void);
-int shm_write(const unsigned char* data, size_t len);
-ssize_t shm_read(unsigned char* out, size_t out_size);
+int shm_write(const unsigned char *data, size_t len);
+ssize_t shm_read(unsigned char *out, size_t out_size);
 int shm_cleanup(void);
 
 #endif // SHARED_BUFFER_H
-
-
-

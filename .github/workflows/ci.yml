@@ -28,19 +28,38 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pip-
 
-      # 使用 Ruff 进行代码风格和格式检查
+      # All system-level dependencies are installed in one step for clarity and efficiency.
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            libssl-dev \
+            netcat-openbsd \
+            lcov \
+            clang-format \
+            cppcheck
+
+      # Python linting and formatting checks.
       - name: Lint and Format Check with Ruff
         run: |
           python3 -m pip install ruff
-          echo "--- Linting code ---"
+          echo "--- Linting Python code ---"
           ruff check .
-          echo "--- Checking code formatting ---"
+          echo "--- Checking Python code formatting ---"
           ruff format --check .
 
-      - name: Install deps
+      # C/C++ formatting checks.
+      - name: Check C code formatting with clang-format
         run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential libssl-dev netcat-openbsd lcov
+          echo "--- Checking C/C++ code formatting ---"
+          find src tests -name "*.c" -o -name "*.h" | xargs clang-format --dry-run --Werror
+
+      # C/C++ static analysis security scan.
+      - name: Run Cppcheck Security Scan
+        run: |
+          echo "--- Running Cppcheck SAST scan ---"
+          cppcheck --enable=all --error-exitcode=1 --language=c -I src/libipc --suppress=missingIncludeSystem src/ tests/
 
       - name: Build C targets
         run: |
@@ -49,15 +68,32 @@ jobs:
       - name: Install CLI via pipx (for space integration tests)
         run: |
           python3 -m pip install --user pipx
-          python3 -m pipx ensurepath || true
-          python3 -m pipx install tools/cli || python3 -m pipx reinstall ming-drlms
+          python3 -m pipx ensurepath
+          # Install the CLI tool from the 'tools/cli' directory.
+          # Use --force to ensure it overwrites any existing installation.
+          python3 -m pipx install --force ./tools/cli
           echo "$HOME/.local/bin" >> $GITHUB_PATH
 
-      - name: Run tests (unit + integration minimal)
+      - name: Run All Tests and Generate Coverage Report
         env:
+          # Use FAST mode to prevent timeouts in CI
+          FAST: 1
+          IDLE_SECONDS: 10
+          DELEGATE_POLL_LOOPS: 10
+          TEARDOWN_WAIT_LOOPS: 10
+          RETAIN_LOG_WAIT_LOOPS: 50
+          NC_FLAGS: '-w 2'
+          # This variable is used by the test scripts
           COVERAGE_MIN: "1"
         run: |
-          make test
+          make coverage
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/gcov.txt
+          if-no-files-found: error
 
       - name: Upload binaries
         uses: actions/upload-artifact@v4
