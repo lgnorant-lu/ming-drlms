@@ -176,3 +176,21 @@ After the `make coverage` command completes, the reports will be available in th
 
 *   **Python Code Coverage Report**:
     *   Open `coverage/html/python/index.html` in your web browser to view the detailed coverage for the Python CLI codebase.
+
+### Coverage Details and Tips
+
+- C Coverage now includes `src/server/`, `src/libipc/`, `src/agent/`, and `src/tools/` (e.g., `ipc_sender`, `proc_launcher`, `log_consumer`). Tools are exercised during coverage via smoke tests to produce `.gcda` quickly.
+- Branch coverage is enabled for C reports (`lcov --rc lcov_branch_coverage=1`, `genhtml --branch-coverage`).
+- If you need C reports locally, ensure lcov is installed:
+
+```bash
+sudo apt-get update && sudo apt-get install -y lcov
+```
+
+- Python coverage aggregates both E2E shell tests and pytest-based unit/integration tests under `tests/python/`. You can run extra Python tests and append to the same database:
+
+```bash
+PYTHONPATH=tools/cli/src python3 -m coverage run -a -m pytest -q tests/python
+```
+
+- Note: To avoid module shadowing by the `coverage/` directory, Makefile defers directory creation and runs `python3 -m coverage` from a temporary working directory.

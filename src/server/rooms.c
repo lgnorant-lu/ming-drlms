@@ -533,7 +533,7 @@ int rooms_history_send(Room *room, const char *room_name, int fd,
         // {"event_id":E,"ts":"...","user":"...","kind":"TEXT|FILE",...}
         const char *idp = strstr(line, "\"event_id\":");
         if (idp)
-            eid = strtoull(idp + 12, NULL, 10);
+            eid = strtoull(idp + strlen("\"event_id\":"), NULL, 10);
         const char *kp = strstr(line, "\"kind\":\"");
         if (kp)
             sscanf(kp + 8, "%15[^\"]", kind);

@@ -83,26 +83,55 @@ coverage:
 	# 1. Build all C code with coverage flags
 	@echo "--> Building C code with coverage instrumentation..."
 	$(MAKE) CFLAGS="$(CFLAGS) --coverage" all tests/test_ipc_suite
-	# 2. Prepare directories
-	mkdir -p coverage/html/c coverage/html/python
-	# 3. Run all tests to generate coverage data
+	# 2. Run all tests to generate coverage data (delay creating ./coverage to avoid Python module shadowing)
 	@echo "--> Running C unit tests (test_ipc_suite.c)..."
 	DRLMS_SHM_KEY=0x4c4f4754 LD_LIBRARY_PATH=. ./tests/test_ipc_suite
 	@echo "--> Running C protocol integration tests (test_server_protocol.sh)..."
 	chmod +x tests/test_server_protocol.sh && HOST=127.0.0.1 PORT=8080 bash -lc 'LD_LIBRARY_PATH=. ./tests/test_server_protocol.sh $${HOST} $${PORT} README.md /tmp/README.md'
+	@echo "--> Running C tools smoke tests (src/tools) ..."
+	# proc_launcher: expect usage error (no args) and quick exit
+	-./proc_launcher 2>/dev/null || true
+	# ipc_sender/log_consumer: minimal local SHM loop to produce gcda quickly
+	# send one short message via stdin, consumer reads 1 message and exits
+	-( ./log_consumer --max 1 & echo $$! > .tmp_consumer.pid ); sleep 0.1; echo "hi" | ./ipc_sender >/dev/null 2>&1 || true; \
+	  ( kill -TERM $$(cat .tmp_consumer.pid) 2>/dev/null || true; rm -f .tmp_consumer.pid )
+	# proc_launcher success path (spawn /bin/echo)
+	-./proc_launcher /bin/echo ok >/dev/null 2>&1 || true
+	# ipc_sender message and file modes with a consumer reading 2 msgs
+	echo "file-data" > /tmp/ipc_file.txt; \
+	( ./log_consumer --max 2 >/dev/null 2>&1 & echo $$! > .tmp_consumer2.pid ); \
+	sleep 0.1; \
+	./ipc_sender --message "m1" >/dev/null 2>&1 || true; \
+	./ipc_sender --file /tmp/ipc_file.txt >/dev/null 2>&1 || true; \
+	( kill -TERM $$(cat .tmp_consumer2.pid) 2>/dev/null || true; rm -f .tmp_consumer2.pid /tmp/ipc_file.txt )
 	@echo "--> Running Python E2E tests with coverage (test_cli_e2e.sh)..."
 	rm -f .coverage
 	chmod +x tests/test_cli_e2e.sh
+	# Ensure python coverage is available
+	python3 -c "import coverage" >/dev/null 2>&1 || python3 -m pip install --user -q coverage
 	HOST=127.0.0.1 PORT=8080 PYTHONPATH=tools/cli/src CLI_COMMAND="python3 -m coverage run --branch --source=tools/cli/src/ming_drlms -a -m ming_drlms.main" ./tests/test_cli_e2e.sh
-	# 4. Generate C coverage report
-	@echo "--> Generating C coverage report with lcov..."
-	lcov --capture --directory . --output-file coverage/c_coverage.info --no-external
-	lcov --remove coverage/c_coverage.info '*/tests/*' '*/src/tools/*' --output-file coverage/c_coverage.filtered.info
-	genhtml coverage/c_coverage.filtered.info --output-directory coverage/html/c
-	# 5. Generate Python coverage report
+	# Run pytest-based CLI tests and append to Python coverage database
+	python3 -c "import pytest" >/dev/null 2>&1 || python3 -m pip install --user -q pytest pytest-cov
+	PYTHONPATH=tools/cli/src python3 -m coverage run --branch -a -m pytest -q tests/python || true
+	# 3. Generate C coverage report
+	@echo "--> Generating C coverage report with lcov (with branch coverage)..."
+	@if command -v lcov >/dev/null 2>&1 && command -v genhtml >/dev/null 2>&1; then \
+	  mkdir -p coverage coverage/html/c; \
+	  lcov --quiet --rc lcov_branch_coverage=1 --capture --directory . --output-file coverage/c_coverage.info --no-external; \
+	  # keep tests filtered but include src/tools in final report \
+	  lcov --quiet --rc lcov_branch_coverage=1 --remove coverage/c_coverage.info '*/tests/*' --output-file coverage/c_coverage.filtered.info; \
+	  genhtml --quiet --branch-coverage coverage/c_coverage.filtered.info --output-directory coverage/html/c; \
+	else \
+	  echo "[warn] lcov/genhtml not found; skipping C coverage report"; \
+	fi
+	# 4. Generate Python coverage report
 	@echo "--> Generating Python coverage report..."
-	python3 -m coverage report
-	python3 -m coverage html -d coverage/html/python
+	mkdir -p coverage/html/python
+	# Run coverage reporting in a temp directory to avoid module shadowing by ./coverage
+	tmpdir=$$(mktemp -d); \
+	( cd $$tmpdir && COVERAGE_FILE="$(shell pwd)/.coverage" python3 -m coverage report --include '*/tools/cli/src/ming_drlms/*' )
+	tmpdir=$$(mktemp -d); \
+	( cd $$tmpdir && COVERAGE_FILE="$(shell pwd)/.coverage" python3 -m coverage html --include '*/tools/cli/src/ming_drlms/*' -d "$(shell pwd)/coverage/html/python" )
 	@echo "---"
 	@echo "Coverage reports generated successfully:"
 	@echo "C Report:       file://$(shell pwd)/coverage/html/c/index.html"
