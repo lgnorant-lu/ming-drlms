@@ -423,6 +423,7 @@ int rooms_store_text(Room *room, const char *room_name, const char *ts,
             "{\"event_id\":%llu,\"ts\":\"%s\",\"user\":\"%s\",\"kind\":"
             "\"TEXT\",\"len\":%zu,\"sha\":\"%s\"}\n",
             eid, ts, user, len, sha_hex);
+    fflush(f);
     fclose(f);
     // 文本 payload 按事件落地，便于 HISTORY 回放正文
     char texts_dir[1024];
