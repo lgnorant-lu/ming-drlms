@@ -149,8 +149,13 @@ echo ""
 
 # 11. JSON Output Formatting
 echo "--- Running test: JSON Output ---"
-# The jq command will fail if the input is not valid JSON
-$CLI_COMMAND space room info -r json_room --json | jq .
+# The jq command will fail if the input is not valid JSON（with fallback to Python）
+if command -v jq >/dev/null 2>&1; then
+  $CLI_COMMAND space room info -r json_room --json | jq .
+else
+  # use Python to validate JSON, failure will return a non-zero exit code to trigger assert_success（with fallback to jq）
+  $CLI_COMMAND space room info -r json_room --json | python3 -c 'import sys,json; json.load(sys.stdin); print("ok")'
+fi
 assert_success
 echo "PASS: JSON Output"
 echo ""

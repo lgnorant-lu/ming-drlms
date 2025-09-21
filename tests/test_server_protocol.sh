@@ -115,6 +115,88 @@ run_test "Unauthorized" \
     "LIST\n" \
     "ERR\|PERM\|login required"
 
+# --- Test 6: HISTORY single event (eid=1) ---
+ROOM1="proto_hist_room_$$_a"
+MSG1="msg1_$$_a"
+LEN1=${#MSG1}
+SHA1=$(printf "%s" "$MSG1" | sha256sum | cut -d' ' -f1)
+
+echo -n "Running test: HISTORY single event (eid=1)... "
+exec 3<>/dev/tcp/"$HOST"/"$PORT"
+# Login and PUBT header
+echo -e "LOGIN|pub1|pass\nPUBT|$ROOM1|$LEN1|$SHA1" >&3
+IFS= read -r login_resp <&3
+IFS= read -r ready_resp <&3
+# Send payload exactly LEN1 bytes (no newline)
+printf "%s" "$MSG1" >&3
+# Read final OK|PUBT|<id>
+IFS= read -r pubt_ok <&3
+exec 3>&-
+# Basic sanity
+if [[ "$login_resp" != "OK|WELCOME" || "$ready_resp" != "READY" || "$pubt_ok" != OK\|PUBT\|1 ]]; then
+  echo "FAIL"
+  echo "  login_resp=$login_resp"
+  echo "  ready_resp=$ready_resp"
+  echo "  pubt_ok=$pubt_ok"
+  exit 1
+fi
+# HISTORY request and verification
+output=$(echo -e "LOGIN|sub1|pass\nHISTORY|$ROOM1|10\n" | nc -w 5 "$HOST" "$PORT")
+flat=$(echo "$output" | tr -d '\n')
+# Expect: EVT|TEXT|<room>|...|1|<len>|<sha><payload>...OK|HISTORY
+if echo "$flat" | grep -qE "EVT\|TEXT\|$ROOM1\|[^|]*\|[^|]*\|1\|[0-9]+\|[0-9a-f]{64}.*$MSG1.*OK\|HISTORY"; then
+  echo "PASS"
+else
+  echo "FAIL"
+  echo "  HISTORY output:"
+  echo "$output"
+  exit 1
+fi
+
+# --- Test 7: HISTORY since_id filtering (1 -> expect 2,3) ---
+ROOM2="proto_hist_room_$$_b"
+for i in 1 2 3; do
+  MSG="m${i}_$$_b"
+  LEN=${#MSG}
+  SHA=$(printf "%s" "$MSG" | sha256sum | cut -d' ' -f1)
+  exec 3<>/dev/tcp/"$HOST"/"$PORT"
+  echo -e "LOGIN|pub2|pass\nPUBT|$ROOM2|$LEN|$SHA" >&3
+  IFS= read -r login_resp <&3
+  IFS= read -r ready_resp <&3
+  printf "%s" "$MSG" >&3
+  IFS= read -r pubt_ok <&3
+  exec 3>&-
+  # Require OK|PUBT|<i>
+  if [[ "$login_resp" != "OK|WELCOME" || "$ready_resp" != "READY" || "$pubt_ok" != OK\|PUBT\|$i ]]; then
+    echo "FAIL"
+    echo "  login_resp=$login_resp"
+    echo "  ready_resp=$ready_resp"
+    echo "  pubt_ok=$pubt_ok (expected OK|PUBT|$i)"
+    exit 1
+  fi
+done
+
+echo -n "Running test: HISTORY since_id=1 returns ids 2,3 only... "
+out=$(echo -e "LOGIN|sub2|pass\nHISTORY|$ROOM2|50|1\n" | nc -w 5 "$HOST" "$PORT")
+flat=$(echo "$out" | tr -d '\n')
+ok=1
+# Positive checks for id=2 and id=3 headers (field-anchored)
+echo "$flat" | grep -qE "EVT\|TEXT\|$ROOM2\|[^|]*\|[^|]*\|2\|" || ok=0
+echo "$flat" | grep -qE "EVT\|TEXT\|$ROOM2\|[^|]*\|[^|]*\|3\|" || ok=0
+# Negative check: no id=1 header
+if echo "$flat" | grep -qE "EVT\|TEXT\|$ROOM2\|[^|]*\|[^|]*\|1\|"; then
+  ok=0
+fi
+# Finalize
+if [[ $ok -eq 1 ]] && echo "$flat" | grep -q "OK|HISTORY"; then
+  echo "PASS"
+else
+  echo "FAIL"
+  echo "  HISTORY output:"
+  echo "$out"
+  exit 1
+fi
+
 echo ""
 echo "--- All server protocol tests passed! ---"
 # Note: Interactive commands like PUBT and room policy checks were removed
