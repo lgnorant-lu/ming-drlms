@@ -12,5 +12,3 @@ def ensure_pythonpath():
     if str(cli_src) not in sys.path:
         sys.path.insert(0, str(cli_src))
     yield
-
-

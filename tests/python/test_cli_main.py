@@ -15,7 +15,9 @@ def test_server_up_down_status(runner, tmp_path: Path):
     # choose a non-default port to avoid clashes
     port = 8099
     data_dir = tmp_path / "srv"
-    result = runner.invoke(app, ["server-up", "-p", str(port), "-d", str(data_dir), "--no-strict"])  # noqa: E501
+    result = runner.invoke(
+        app, ["server-up", "-p", str(port), "-d", str(data_dir), "--no-strict"]
+    )  # noqa: E501
     assert result.exit_code in (0, None)
 
     # status should show listening yes
@@ -37,7 +39,9 @@ def test_client_argument_errors(runner):
     assert result.exit_code != 0
 
     # server-up with invalid port
-    result = runner.invoke(app, ["server-up", "--port", "not-a-port"], catch_exceptions=True)  # noqa: E501
+    result = runner.invoke(
+        app, ["server-up", "--port", "not-a-port"], catch_exceptions=True
+    )  # noqa: E501
     assert result.exit_code != 0
 
 
@@ -49,9 +53,24 @@ def test_space_send_validation(runner):
 
 def test_space_history_cli_parsing(runner):
     # only CLI argument parsing path; network mocked by unreachable port
-    result = runner.invoke(app, [
-        "space", "history", "-r", "r1", "-n", "5", "-s", "0", "-H", "127.0.0.1", "-p", "65500"
-    ], catch_exceptions=True)
+    result = runner.invoke(
+        app,
+        [
+            "space",
+            "history",
+            "-r",
+            "r1",
+            "-n",
+            "5",
+            "-s",
+            "0",
+            "-H",
+            "127.0.0.1",
+            "-p",
+            "65500",
+        ],
+        catch_exceptions=True,
+    )
     assert result.exit_code != 0
 
 
@@ -75,5 +94,3 @@ def test_space_leave_parsing_error(runner):
     # missing room argument should fail before network
     result = runner.invoke(app, ["space", "leave"], catch_exceptions=True)
     assert result.exit_code != 0
-
-
