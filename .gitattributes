@@ -1,0 +1,11 @@
+# 默认所有文本文件都用 LF
+* text=auto eol=lf
+
+# 保证脚本文件是 LF（避免 Linux 跑不动）
+*.sh text eol=lf
+*.py text eol=lf
+Makefile text eol=lf
+
+# Windows 专用文件保留 CRLF（比如 bat/cmd 脚本）
+*.bat text eol=crlf
+*.cmd text eol=crlf

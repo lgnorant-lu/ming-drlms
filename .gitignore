@@ -41,6 +41,7 @@ __pycache__/
 /tools/cli/.pytest_cache/
 /tools/cli/.mypy_cache/
 /tools/cli/.ruff_cache/
+/.coverage
 
 # Editors/IDE
 .vscode/
@@ -61,4 +62,5 @@ lgn/
 *.tgz
 .tasks/
 /tests/test_ipc
+/tests/test_ipc_suite
 /server_files/
