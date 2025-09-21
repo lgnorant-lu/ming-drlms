@@ -129,3 +129,50 @@ This document contains the detailed test cases for the DRLMS project, broken dow
     2.  Execute `ming-drlms space room info -r json_test_room --json | jq .`.
 *   **Expected Outcome**: The output is a single, valid JSON object. The `jq` command exits with status 0, indicating the JSON is well-formed.
 *   **Automation**: To be added to `tests/test_cli_e2e.sh`.
+
+---
+
+## 4. Code Coverage
+
+This project is configured to measure and report code coverage for both the C application code and the Python CLI code.
+
+### New Development Dependencies
+
+To generate a full coverage report, you will need the following additional tools installed in your development environment:
+
+*   `lcov`: A graphical front-end for `gcov` to generate HTML reports for C/C++ code.
+    *   Installation (Ubuntu/Debian): `sudo apt-get install lcov`
+*   `pytest`: A framework for writing and running Python tests.
+*   `pytest-cov`: A plugin for `pytest` that generates coverage reports for Python code.
+
+The Python dependencies can be installed by running:
+```bash
+pip install -r requirements-dev.txt
+```
+
+### Generating the Coverage Report
+
+A unified command has been configured in the `Makefile` to run all tests and generate a comprehensive coverage report.
+
+To run it, simply execute:
+```bash
+make coverage
+```
+
+This command will:
+1.  Clean any previous build or coverage artifacts.
+2.  Compile all C source code with coverage instrumentation flags.
+3.  Run the C unit tests (`test_ipc_suite.c`).
+4.  Run the C integration tests (`test_server_protocol.sh`).
+5.  Run the Python end-to-end tests (`test_cli_e2e.sh`) under the Python `coverage` tool.
+6.  Process the raw coverage data and generate user-friendly HTML reports.
+
+### Viewing the Reports
+
+After the `make coverage` command completes, the reports will be available in the `coverage/html/` directory.
+
+*   **C Code Coverage Report**:
+    *   Open `coverage/html/c/index.html` in your web browser to view the detailed, line-by-line coverage for the C source files.
+
+*   **Python Code Coverage Report**:
+    *   Open `coverage/html/python/index.html` in your web browser to view the detailed coverage for the Python CLI codebase.
