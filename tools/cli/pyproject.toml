@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ming-drlms"
-version = "0.1.0.dev1"
+version = "0.1.0"
 description = "CLI wrapper for DRLMS server/agent with pretty UX"
 readme = "README.md"
 authors = [{ name = "lgnorant-lu", email = "zhouzihan825@gmail.com" }]
