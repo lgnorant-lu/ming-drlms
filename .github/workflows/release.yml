@@ -90,4 +90,4 @@ jobs:
           # 在执行任何操作前，强制升级所有相关工具到最新稳定版
           python -m pip install --upgrade --upgrade-strategy eager twine
           # 现在工具链是同步的，可以安全地上传了
-          python -m twine upload --repository testpypi dist/*
+          python -m twine upload dist/*
