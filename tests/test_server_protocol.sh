@@ -35,6 +35,34 @@ function stop_server() {
     fi
     rm -rf "$DATA_DIR"
 }
+# Start server in STRICT auth mode with current DATA_DIR
+function start_server_strict() {
+    echo "--- Starting Server STRICT (data: $DATA_DIR) ---"
+    DRLMS_AUTH_STRICT=1 DRLMS_DATA_DIR="$DATA_DIR" ./log_collector_server > "$SERVER_LOG" 2>&1 &
+    SERVER_PID=$!
+    for i in {1..10}; do
+        if nc -z "$HOST" "$PORT"; then
+            echo "Server started with PID $SERVER_PID (STRICT)"
+            return
+        fi
+        sleep 0.2
+    done
+    echo "Server failed to start (STRICT). Logs:"
+    cat "$SERVER_LOG"
+    exit 1
+}
+
+function sha256_hex_concat() {
+    local a="$1"; local b="$2"
+    printf "%s%s" "$a" "$b" | sha256sum | cut -d' ' -f1
+}
+
+# Prepare users.txt with legacy SHA256 format: user:salt:shahex
+function prepare_legacy_user() {
+    local user="$1"; local pass="$2"; local salt="$3"
+    local hex=$(sha256_hex_concat "$pass" "$salt")
+    echo "${user}:${salt}:${hex}" > "$DATA_DIR/users.txt"
+}
 
 # Cleanup on exit
 trap stop_server EXIT
@@ -199,6 +227,41 @@ fi
 
 echo ""
 echo "--- All server protocol tests passed! ---"
+# --- Argon2 Transparent Upgrade Test ---
+# Restart server with STRICT auth and legacy users.txt, then verify upgrade to Argon2id
+
+# Stop current server and clean up
+stop_server
+
+# New data dir
+DATA_DIR=$(mktemp -d)
+SERVER_LOG="$DATA_DIR/server.log"
+SERVER_PID=0
+
+# Prepare legacy user and start server STRICT
+prepare_legacy_user "alice" "secret123" "somesalt"
+start_server_strict
+
+echo -n "Running test: Legacy user login triggers Argon2 upgrade... "
+out=$(echo -e "LOGIN|alice|secret123\n" | nc -w 5 "$HOST" "$PORT")
+if echo "$out" | tr -d '\n' | grep -q "OK|WELCOME"; then
+  # users.txt should now contain argon2id encoded line
+  if grep -qE '^alice::\$argon2id\$' "$DATA_DIR/users.txt"; then
+    echo "PASS"
+  else
+    echo "FAIL"; echo "  users.txt was not upgraded to argon2id"; cat "$DATA_DIR/users.txt"; exit 1
+  fi
+else
+  echo "FAIL"; echo "  Login output: $out"; exit 1
+fi
+
+echo -n "Running test: Argon2-verified login after upgrade... "
+out2=$(echo -e "LOGIN|alice|secret123\n" | nc -w 5 "$HOST" "$PORT")
+if echo "$out2" | tr -d '\n' | grep -q "OK|WELCOME"; then
+  echo "PASS"
+else
+  echo "FAIL"; echo "  Second login output: $out2"; exit 1
+fi
 # Note: Interactive commands like PUBT and room policy checks were removed
 # as they require a more robust test harness than simple netcat pipes.
 # The passing tests cover basic protocol correctness and error handling.

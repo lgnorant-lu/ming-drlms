@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Determine repo root
+REPO_ROOT=$(git rev-parse --show-toplevel)
+cd "$REPO_ROOT"
+
+# Get staged files
+STAGED=$(git diff --cached --name-only --diff-filter=ACMRT | tr '\n' ' ')
+
+if [ -z "$STAGED" ]; then
+  exit 0
+fi
+
+have_failed=0
+
+# Format C/C++ files with clang-format
+CF_FILES=$(echo $STAGED | tr ' ' '\n' | grep -E '\.(c|h)$' || true)
+if [ -n "$CF_FILES" ]; then
+  if command -v clang-format >/dev/null 2>&1; then
+    echo "[pre-commit] Running clang-format..."
+    echo "$CF_FILES" | xargs clang-format -i
+  else
+    echo "[pre-commit] ERROR: clang-format not found in PATH" >&2
+    have_failed=1
+  fi
+fi
+
+# Format Python files with ruff (limit to tracked repo files)
+PY_FILES=$(echo $STAGED | tr ' ' '\n' | grep -E '\.py$' | grep -vE '^src/ming_drlms/_version.py$' || true)
+if [ -n "$PY_FILES" ]; then
+  if command -v ruff >/dev/null 2>&1; then
+    echo "[pre-commit] Running ruff format + fix..."
+    ruff format $PY_FILES || have_failed=1
+    ruff check --fix $PY_FILES || have_failed=1
+  else
+    echo "[pre-commit] ERROR: ruff not found in PATH" >&2
+    have_failed=1
+  fi
+fi
+
+# Re-stage any changes done by formatters
+git add -A
+
+if [ "$have_failed" -ne 0 ]; then
+  echo "[pre-commit] Formatting failed or tools missing. Aborting commit." >&2
+  exit 1
+fi
+
+exit 0
+
+

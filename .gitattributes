@@ -1,11 +1,28 @@
-# 默认所有文本文件都用 LF
+# .gitattributes (推荐的最终版本)
+
+# 默认将所有被识别为文本的文件，统一设置为 LF 换行符
 * text=auto eol=lf
 
-# 保证脚本文件是 LF（避免 Linux 跑不动）
-*.sh text eol=lf
+# 明确指定这些常见的文本文件类型使用 LF
+# 这在某些情况下比上面的通配符更可靠
+*.c text eol=lf
+*.h text eol=lf
 *.py text eol=lf
+*.sh text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+.gitignore text eol=lf
+.gitattributes text eol=lf
 Makefile text eol=lf
 
-# Windows 专用文件保留 CRLF（比如 bat/cmd 脚本）
+# 明确指定 Windows 批处理文件保留 CRLF
 *.bat text eol=crlf
 *.cmd text eol=crlf
+
+# 明确指定二进制文件，防止 Git 错误地修改它们
+*.so binary
+*.a binary
+*.o binary
+*.png binary
+*.jpg binary

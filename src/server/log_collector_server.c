@@ -18,6 +18,8 @@
 #include "../libipc/shared_buffer.h"
 #include <openssl/sha.h>
 #include "rooms.h"
+#include <argon2.h>
+#include <fcntl.h>
 
 typedef struct {
     int client_fd;
@@ -36,16 +38,205 @@ static int g_active_conn = 0;
 static long long g_max_upload = 100LL * 1024 * 1024; // default 100MB
 static int g_auth_strict = 0; // 0: accept any if users empty; 1: require file
 static int g_rcv_timeout_sec = 319; // default recv/send timeout seconds
+static pthread_mutex_t g_users_file_mu =
+    PTHREAD_MUTEX_INITIALIZER; // protect users.txt writes
 
 // users.txt cache
 typedef struct {
     char user[64];
     char salt[64];
-    char hash_hex[65];
+    char hash_str[256]; // supports full Argon2 encoded string or legacy hex
 } user_cred_t;
 
 static user_cred_t g_users[256];
 static int g_users_count = 0;
+
+// --- Argon2 configuration ---
+static int g_argon2_t_cost = 2;     // iterations
+static int g_argon2_m_cost = 65536; // KiB (64 MiB)
+static int g_argon2_parallel = 1;   // lanes
+
+static void argon2_load_params_from_env(void) {
+    const char *t = getenv("DRLMS_ARGON2_T_COST");
+    const char *m = getenv("DRLMS_ARGON2_M_COST");
+    const char *p = getenv("DRLMS_ARGON2_PARALLELISM");
+    if (t && *t) {
+        int v = atoi(t);
+        if (v >= 1 && v <= 10)
+            g_argon2_t_cost = v;
+    }
+    if (m && *m) {
+        int v = atoi(m);
+        if (v >= 1024 && v <= 1048576)
+            g_argon2_m_cost = v;
+    }
+    if (p && *p) {
+        int v = atoi(p);
+        if (v >= 1 && v <= 8)
+            g_argon2_parallel = v;
+    }
+}
+
+// Forward declaration to avoid implicit external declaration before static
+// definition
+static int load_users_file(void);
+
+static int is_argon2_encoded(const char *s) {
+    if (!s)
+        return 0;
+    return (strncmp(s, "$argon2id$", 9) == 0) ? 1 : 0;
+}
+
+static int generate_random_bytes(unsigned char *buf, size_t len) {
+    if (!buf || len == 0)
+        return -1;
+    int fd = open("/dev/urandom", O_RDONLY);
+    if (fd < 0)
+        return -1;
+    size_t got = 0;
+    while (got < len) {
+        ssize_t n = read(fd, buf + got, len - got);
+        if (n <= 0) {
+            close(fd);
+            return -1;
+        }
+        got += (size_t)n;
+    }
+    close(fd);
+    return 0;
+}
+
+static int hash_password_argon2(const char *password, char *out_encoded,
+                                size_t out_sz) {
+    if (!password || !out_encoded || out_sz == 0)
+        return -1;
+    unsigned char salt[16];
+    if (generate_random_bytes(salt, sizeof salt) != 0)
+        return -1;
+    int rc = argon2id_hash_encoded(
+        g_argon2_t_cost, g_argon2_m_cost, g_argon2_parallel, password,
+        strlen(password), salt, sizeof salt, 32, out_encoded, out_sz);
+    return (rc == ARGON2_OK) ? 0 : -1;
+}
+
+static int upgrade_user_password_to_argon2(const char *username,
+                                           const char *password) {
+    if (!username || !*username || !password)
+        return -1;
+    char path[PATH_MAX];
+    if (snprintf(path, sizeof path, "%s/%s", g_data_dir, "users.txt") >=
+        (int)sizeof path)
+        return -1;
+    // Prepare temp path in same dir
+    char tmp_path[PATH_MAX];
+    if (snprintf(tmp_path, sizeof tmp_path, "%s/.users.txt.%d.tmp", g_data_dir,
+                 getpid()) >= (int)sizeof tmp_path)
+        return -1;
+
+    fprintf(stderr, "[DEBUG] Attempting to upgrade password for user: %s\n",
+            username);
+    char encoded[256];
+    if (hash_password_argon2(password, encoded, sizeof encoded) != 0) {
+        fprintf(stderr,
+                "[DEBUG] FAILED to upgrade password for user: %s. Error: "
+                "argon2 encode failed\n",
+                username);
+        return -1;
+    }
+
+    pthread_mutex_lock(&g_users_file_mu);
+    FILE *fin = fopen(path, "r");
+    int created_new = 0;
+    if (!fin) {
+        // If no file, we'll create a new one
+        created_new = 1;
+    }
+    int fd = open(tmp_path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (fd < 0) {
+        if (fin)
+            fclose(fin);
+        pthread_mutex_unlock(&g_users_file_mu);
+        fprintf(stderr,
+                "[DEBUG] FAILED to upgrade password for user: %s. Error: open "
+                "tmp failed\n",
+                username);
+        return -1;
+    }
+    FILE *fout = fdopen(fd, "w");
+    if (!fout) {
+        close(fd);
+        if (fin)
+            fclose(fin);
+        pthread_mutex_unlock(&g_users_file_mu);
+        fprintf(stderr,
+                "[DEBUG] FAILED to upgrade password for user: %s. Error: "
+                "fdopen failed\n",
+                username);
+        return -1;
+    }
+
+    if (!created_new) {
+        char line[512];
+        while (fgets(line, sizeof line, fin)) {
+            // Preserve comments and blank lines
+            if (line[0] == '#' || line[0] == '\n') {
+                fputs(line, fout);
+                continue;
+            }
+            char work[512];
+            snprintf(work, sizeof work, "%s", line);
+            char *nl = strchr(work, '\n');
+            if (nl)
+                *nl = '\0';
+            char *p1 = strchr(work, ':');
+            if (!p1) {
+                // keep original line as-is
+                fputs(line, fout);
+                continue;
+            }
+            *p1 = '\0';
+            const char *user = work;
+            if (strcmp(user, username) == 0) {
+                // overwrite with argon2 format: user::<encoded>
+                fprintf(fout, "%s::%s\n", username, encoded);
+            } else {
+                // keep original line as-is
+                fputs(line, fout);
+            }
+        }
+        fclose(fin);
+    } else {
+        // Create only the upgraded user line
+        fprintf(fout, "%s::%s\n", username, encoded);
+    }
+
+    fflush(fout);
+    fsync(fd);
+    fclose(fout);
+    // Atomic replace
+    if (rename(tmp_path, path) != 0) {
+        remove(tmp_path);
+        pthread_mutex_unlock(&g_users_file_mu);
+        fprintf(stderr,
+                "[DEBUG] FAILED to upgrade password for user: %s. Error: "
+                "rename failed\n",
+                username);
+        return -1;
+    }
+    // Ensure directory entry durability
+    int dfd = open(g_data_dir, O_RDONLY | O_DIRECTORY);
+    if (dfd >= 0) {
+        (void)fsync(dfd);
+        close(dfd);
+    }
+    // Reload users cache
+    (void)load_users_file();
+    pthread_mutex_unlock(&g_users_file_mu);
+    fprintf(stderr,
+            "[DEBUG] Successfully wrote upgraded password for user: %s\n",
+            username);
+    return 0;
+}
 
 static void on_signal(int sig) {
     (void)sig;
@@ -229,7 +420,7 @@ static int load_users_file(void) {
     FILE *f = fopen(path, "r");
     if (!f)
         return -1;
-    char line[256];
+    char line[512];
     g_users_count = 0;
     while (fgets(line, sizeof line, f)) {
         if (line[0] == '#' || line[0] == '\n')
@@ -255,10 +446,10 @@ static int load_users_file(void) {
                 sizeof(g_users[g_users_count].salt) - 1);
         g_users[g_users_count].salt[sizeof(g_users[g_users_count].salt) - 1] =
             '\0';
-        strncpy(g_users[g_users_count].hash_hex, p2 + 1,
-                sizeof(g_users[g_users_count].hash_hex) - 1);
+        strncpy(g_users[g_users_count].hash_str, p2 + 1,
+                sizeof(g_users[g_users_count].hash_str) - 1);
         g_users[g_users_count]
-            .hash_hex[sizeof(g_users[g_users_count].hash_hex) - 1] = '\0';
+            .hash_str[sizeof(g_users[g_users_count].hash_str) - 1] = '\0';
         g_users_count++;
     }
     fclose(f);
@@ -270,7 +461,13 @@ static int verify_password(const char *username, const char *password) {
         return g_auth_strict ? 0 : 1; // no users configured
     for (int i = 0; i < g_users_count; ++i) {
         if (strcmp(username, g_users[i].user) == 0) {
-            // compute sha256(password+salt)
+            // Argon2 path
+            if (is_argon2_encoded(g_users[i].hash_str)) {
+                int rc = argon2id_verify(g_users[i].hash_str, password,
+                                         strlen(password));
+                return (rc == ARGON2_OK) ? 1 : 0;
+            }
+            // Legacy SHA256(password+salt)
             unsigned char dg[SHA256_DIGEST_LENGTH];
             SHA256_CTX ctx;
             SHA256_Init(&ctx);
@@ -281,7 +478,17 @@ static int verify_password(const char *username, const char *password) {
             SHA256_Final(dg, &ctx);
             char hx[SHA256_DIGEST_LENGTH * 2 + 1];
             to_hex(dg, sizeof dg, hx, sizeof hx);
-            return hex_equal_nocase(hx, g_users[i].hash_hex);
+            if (hex_equal_nocase(hx, g_users[i].hash_str)) {
+                // Transparent upgrade on success
+                if (upgrade_user_password_to_argon2(username, password) != 0) {
+                    fprintf(stderr,
+                            "[warn] password upgrade to argon2 failed for user "
+                            "%s\n",
+                            username);
+                }
+                return 1;
+            }
+            return 0;
         }
     }
     return 0;
@@ -1074,6 +1281,7 @@ static long long getenv_ll(const char *name, long long defval) {
 }
 
 int main(void) {
+    argon2_load_params_from_env();
     int port = getenv_int("DRLMS_PORT", 8080);
     const char *dd = getenv("DRLMS_DATA_DIR");
     if (dd && *dd) {

@@ -1,7 +1,7 @@
 CC = gcc
 CFLAGS = -Wall -Wextra -pthread -Werror -Wno-deprecated-declarations
 LIBS_COMMON = -lrt
-LIBS_SERVER = -lrt -lcrypto
+LIBS_SERVER = -lrt -lcrypto -largon2
 LIBS_AGENT = -lcrypto
 
 # install destinations
@@ -105,14 +105,16 @@ coverage:
 	./ipc_sender --file /tmp/ipc_file.txt >/dev/null 2>&1 || true; \
 	( kill -TERM $$(cat .tmp_consumer2.pid) 2>/dev/null || true; rm -f .tmp_consumer2.pid /tmp/ipc_file.txt )
 	@echo "--> Running Python E2E tests with coverage (test_cli_e2e.sh)..."
+	@echo "--> Installing package in editable mode to generate _version.py..."
+	@python3 -m pip install -e .
 	rm -f .coverage
 	chmod +x tests/test_cli_e2e.sh
 	# Ensure python coverage is available
 	python3 -c "import coverage" >/dev/null 2>&1 || python3 -m pip install --user -q coverage
-	HOST=127.0.0.1 PORT=8080 PYTHONPATH=tools/cli/src CLI_COMMAND="python3 -m coverage run --branch --source=tools/cli/src/ming_drlms -a -m ming_drlms.main" ./tests/test_cli_e2e.sh
+	HOST=127.0.0.1 PORT=8080 PYTHONPATH=src CLI_COMMAND="python3 -m coverage run --branch --source=src/ming_drlms -a -m ming_drlms.main" ./tests/test_cli_e2e.sh
 	# Run pytest-based CLI tests and append to Python coverage database
 	python3 -c "import pytest" >/dev/null 2>&1 || python3 -m pip install --user -q pytest pytest-cov
-	PYTHONPATH=tools/cli/src python3 -m coverage run --branch -a -m pytest -q tests/python || true
+	PYTHONPATH=src python3 -m coverage run --branch -a -m pytest -q tests/python || true
 	# 3. Generate C coverage report
 	@echo "--> Generating C coverage report with lcov (with branch coverage)..."
 	@if command -v lcov >/dev/null 2>&1 && command -v genhtml >/dev/null 2>&1; then \
@@ -129,9 +131,9 @@ coverage:
 	mkdir -p coverage/html/python
 	# Run coverage reporting in a temp directory to avoid module shadowing by ./coverage
 	tmpdir=$$(mktemp -d); \
-	( cd $$tmpdir && COVERAGE_FILE="$(shell pwd)/.coverage" python3 -m coverage report --include '*/tools/cli/src/ming_drlms/*' )
+	( cd $$tmpdir && COVERAGE_FILE="$(shell pwd)/.coverage" python3 -m coverage report --include '*/src/ming_drlms/*' )
 	tmpdir=$$(mktemp -d); \
-	( cd $$tmpdir && COVERAGE_FILE="$(shell pwd)/.coverage" python3 -m coverage html --include '*/tools/cli/src/ming_drlms/*' -d "$(shell pwd)/coverage/html/python" )
+	( cd $$tmpdir && COVERAGE_FILE="$(shell pwd)/.coverage" python3 -m coverage html --include '*/src/ming_drlms/*' -d "$(shell pwd)/coverage/html/python" )
 	@echo "---"
 	@echo "Coverage reports generated successfully:"
 	@echo "C Report:       file://$(shell pwd)/coverage/html/c/index.html"
@@ -184,3 +186,13 @@ cli-install:
 
 cli-uninstall:
 	python3 -m pipx uninstall ming-drlms || true
+
+.PHONY: hook-install hook-uninstall
+hook-install:
+	@git config core.hooksPath .githooks
+	@chmod +x .githooks/pre-commit || true
+	@echo "Git hooks installed (core.hooksPath=.githooks)"
+
+hook-uninstall:
+	@git config --unset core.hooksPath || true
+	@echo "Git hooks uninstalled"

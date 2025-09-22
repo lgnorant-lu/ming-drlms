@@ -1,0 +1,52 @@
+# tools/cli/pyproject.toml
+
+[build-system]
+requires = ["setuptools>=61.0", "setuptools-scm>=7.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ming-drlms"
+dynamic = ["version"]
+description = "CLI wrapper for DRLMS server/agent with pretty UX"
+readme = "README.md"
+authors = [{ name = "lgnorant-lu", email = "zhouzihan825@gmail.com" }]
+license = "MIT"
+license-files = ["LICENSE"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: POSIX :: Linux",
+]
+requires-python = ">=3.8"
+dependencies = [
+    "typer[all]",
+    "pyyaml",
+    "rich",
+    "psutil",
+]
+
+[project.urls]
+"Source" = "https://github.com/lgnorant-lu/ming-drlms"
+
+[project.scripts]
+ming-drlms = "ming_drlms.main:app"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+include-package-data = true
+
+[tool.setuptools_scm]
+write_to = "src/ming_drlms/_version.py"
+fallback_version = "0.0.0"
+version_scheme = "no-guess-dev"
+local_scheme = "no-local-version"
+
+[tool.ruff]
+# 在所有检查中（lint, format等）排除以下文件和目录
+exclude = [
+    ".git",
+    ".venv",
+    "__pycache__",
+    "build", 
+    "dist", 
+    "tools/cli/src/ming_drlms/_version.py",
+]

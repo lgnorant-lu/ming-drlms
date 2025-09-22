@@ -1,66 +1,73 @@
-# Build artifacts
-*.o
-*.a
-*.so
-*.gcno
-*.gcda
-*.gcov
-
-# Binaries
-/log_collector_server
-/log_agent
-/log_consumer
-/ipc_sender
-/proc_launcher
-
-# Coverage & artifacts
-/coverage/
-/artifacts/
-/pkgroot/
-/dist/
-/tools/cli/dist/
-
-# Runtime logs and data
-/tmp/
-nohup.out
-/server_files/*.log
-/server_files/rooms/**
-/server_files/users.txt
-
-# Python
-__pycache__/
-*.pyc
-*.egg-info/
-.venv/
-.venvs/
-.virtualenv/
-/tools/cli/.venv/
-/tools/cli/build/
-/tools/cli/src/ming_drlms.egg-info/
-/tools/cli/*.egg-info/
-/tools/cli/.pytest_cache/
-/tools/cli/.mypy_cache/
-/tools/cli/.ruff_cache/
-/.coverage
-
-# Editors/IDE
+# ==================================
+# IDE and Editor Files
+# ==================================
 .vscode/
 .idea/
 *.iml
 .DS_Store
 
-# Docker
-*.tar
-
-# Packages
+# ==================================
+# Build & Packaging Output
+# ==================================
+build/
+dist/
+pkgroot/
 *.deb
 *.rpm
-
-# Files
-lgn/
+*.tar
 *.tar.gz
 *.tgz
-.tasks/
+
+# ==================================
+# C/C++ Artifacts
+# ==================================
+# Object files, libraries, and executables
+**/*.o
+**/*.a
+**/*.so
+/log_collector_server
+/log_agent
+/log_consumer
+/ipc_sender
+/proc_launcher
 /tests/test_ipc
 /tests/test_ipc_suite
+
+# Coverage files
+**/*.gcno
+**/*.gcda
+**/*.gcov
+/coverage/
+
+# ==================================
+# Python Artifacts
+# ==================================
+# Caches and virtual environments
+**/__pycache__/
+*.pyc
+.venv/
+.venvs/
+.virtualenv/
+
+# Packaging & test metadata
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+/.coverage
+
+# Auto-generated files by our build process
+src/ming_drlms/_version.py
+src/ming_drlms/bin/
+
+# ==================================
+# Runtime Data & Logs
+# ==================================
+/artifacts/
+/tmp/
+nohup.out
 /server_files/
+.tasks/
+
+# Miscellaneous
+lgn/
