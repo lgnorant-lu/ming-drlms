@@ -20,6 +20,39 @@ make
 DRLMS_AUTH_STRICT=0 DRLMS_DATA_DIR=server_files LD_LIBRARY_PATH=. ./log_collector_server > /tmp/drlms_server.log 2>&1 &
 ```
 
+### 用户管理（users.txt）
+
+CLI 提供对 `$DRLMS_DATA_DIR/users.txt` 的离线管理命令（并发安全，原子写入）：
+
+```bash
+# 创建用户（交互输入密码，Argon2id 编码）
+ming-drlms user add alice -d server_files
+
+# 修改密码（仅限已存在用户）
+ming-drlms user passwd alice -d server_files
+
+# 删除用户（不存在时报错；--force 可忽略）
+ming-drlms user del alice -d server_files
+
+# 列表（默认表格；--json 输出 JSON）
+ming-drlms user list -d server_files --json
+```
+
+说明：
+- 支持两种行格式：
+  - Legacy (SHA256)：`legacy_user:some_salt:a1b2c3...`（仅读取，服务器可在首次登录时透明升级）
+  - Argon2id（推荐）：`argon2_user::$argon2id$...`（CLI 写入统一采用此格式）
+- 存储格式统一为 `user::<argon2id_encoded_string>` 与服务器严格认证兼容；旧格式（`user:salt:shahex`）可读取并显示为 `legacy`，但 CLI 不会写入旧格式。
+- 写操作采用“临时文件 + fsync + 原子重命名”，允许在服务器运行时安全编辑。
+- Argon2 参数默认与服务器一致（`t=2, m=65536, p=1`），可通过环境变量覆盖：`DRLMS_ARGON2_T_COST`、`DRLMS_ARGON2_M_COST`、`DRLMS_ARGON2_PARALLELISM`。
+
+非交互密码输入（自动化/CI）：
+
+```bash
+echo "my_secure_password" | ming-drlms user add alice -d server_files --password-from-stdin
+echo "new_password" | ming-drlms user passwd alice -d server_files --password-from-stdin
+```
+
 3) 订阅/发布/历史/退订（短参已支持）
 ```bash
 # 订阅（沉浸式，自动重连，JSON 输出头+正文）
