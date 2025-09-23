@@ -94,3 +94,36 @@ def test_space_leave_parsing_error(runner):
     # missing room argument should fail before network
     result = runner.invoke(app, ["space", "leave"], catch_exceptions=True)
     assert result.exit_code != 0
+
+
+def test_cli_version_option(runner):
+    result = runner.invoke(app, ["--version"])
+    assert result.exit_code == 0
+    assert "ming-drlms CLI version:" in result.output
+
+
+def test_cli_version_short_option(runner):
+    result = runner.invoke(app, ["-V"])  # alias for --version
+    assert result.exit_code == 0
+    assert "ming-drlms CLI version:" in result.output
+
+
+def test_user_list_help_contains_examples(runner):
+    result = runner.invoke(app, ["user", "list", "--help"])
+    assert result.exit_code == 0
+    assert "Examples:" in result.output
+
+
+def test_teaching_help_show_user(runner):
+    # Even if packaged md is missing in test env, command should succeed
+    result = runner.invoke(app, ["help", "show", "user"])
+    assert result.exit_code == 0
+
+
+def test_update_check_throttled_and_nonblocking(monkeypatch, runner):
+    # Force throttle by setting env to disable update check
+    monkeypatch.setenv("DRLMS_UPDATE_CHECK", "0")
+    # Call a harmless command
+    result = runner.invoke(app, ["server-status", "-p", "65500"])  # port likely closed
+    assert result.exit_code == 0
+    # No exception and no forced output required

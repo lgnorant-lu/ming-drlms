@@ -8,14 +8,19 @@ import signal
 import subprocess
 from pathlib import Path
 from typing import Optional
+import atexit
+from typing_extensions import Annotated
 import socket
 import hashlib
 import typer
 from rich import print
 from rich.progress import Progress, BarColumn, TimeRemainingColumn, TransferSpeedColumn
 from rich.table import Table
+from .i18n import t
 from .config import load_config, write_template
 from .state import load_state, save_state, get_last_event_id, set_last_event_id
+from . import __version__
+from .update_check import maybe_notify_new_version
 from .users import (
     users_file_path,
     validate_username,
@@ -128,9 +133,28 @@ def _maybe_check_update():
         pass
 
 
+def version_callback(value: bool):
+    if value:
+        typer.echo(f"ming-drlms CLI version: {__version__}")
+        raise typer.Exit()
+
+
 @app.callback()
-def _app_entry():
-    _maybe_check_update()
+def _app_entry(
+    version: Annotated[
+        bool,
+        typer.Option(
+            "--version",
+            "-V",
+            help="show CLI version and exit",
+            callback=version_callback,
+            is_eager=True,
+        ),
+    ] = False,
+):
+    # 取消启动时的更新检查，改为程序退出时统一提醒（更非侵入）
+    pass
+    # 在入口处不打印，延迟到命令执行末尾再提醒（非侵入）
 
 
 def _banner():
@@ -166,7 +190,7 @@ def _resolve_data_dir(data_dir: Optional[Path], config_path: Optional[Path]) -> 
     return Path(cfg.data_dir)
 
 
-@user_app.command("add")
+@user_app.command("add", help=t("HELP.USER.ADD"))
 def user_add(
     username: str = typer.Argument(..., help="username to add"),
     data_dir: Optional[Path] = typer.Option(None, "--data-dir", "-d"),
@@ -176,6 +200,7 @@ def user_add(
     password_from_stdin: bool = typer.Option(
         False,
         "--password-from-stdin",
+        "-x",
         help="read password from stdin (single line) instead of interactive prompts",
     ),
 ):
@@ -225,7 +250,7 @@ def user_add(
     print(f"[green]user added[/green]: {username}")
 
 
-@user_app.command("passwd")
+@user_app.command("passwd", help=t("HELP.USER.PASSWD"))
 def user_passwd(
     username: str = typer.Argument(..., help="existing username"),
     data_dir: Optional[Path] = typer.Option(None, "--data-dir", "-d"),
@@ -233,6 +258,7 @@ def user_passwd(
     password_from_stdin: bool = typer.Option(
         False,
         "--password-from-stdin",
+        "-x",
         help="read password from stdin (single line) instead of interactive prompts",
     ),
 ):
@@ -280,7 +306,7 @@ def user_passwd(
     print(f"[green]password updated[/green]: {username}")
 
 
-@user_app.command("del")
+@user_app.command("del", help=t("HELP.USER.DEL"))
 def user_del(
     username: str = typer.Argument(..., help="username to delete"),
     data_dir: Optional[Path] = typer.Option(None, "--data-dir", "-d"),
@@ -310,7 +336,7 @@ def user_del(
     print(f"[green]user deleted[/green]: {username}")
 
 
-@user_app.command("list")
+@user_app.command("list", help=t("HELP.USER.LIST"))
 def user_list(
     data_dir: Optional[Path] = typer.Option(None, "--data-dir", "-d"),
     config: Optional[Path] = typer.Option(None, "--config", "-c"),
@@ -344,7 +370,7 @@ def _is_listening(port: int, host: str = "127.0.0.1") -> bool:
             return False
 
 
-@app.command("server-up")
+@app.command("server-up", help=t("HELP.SERVER.UP"))
 def server_up(
     port: int = typer.Option(8080, "--port", "-p"),
     data_dir: Path = typer.Option(DATA_DIR, "--data-dir", "-d"),
@@ -423,7 +449,7 @@ def server_up(
     raise typer.Exit(code=1)
 
 
-@app.command("server-down")
+@app.command("server-down", help=t("HELP.SERVER.DOWN"))
 def server_down():
     """Stop server via PID file; fallback to pkill."""
     if SERVER_PID.exists():
@@ -443,7 +469,7 @@ def server_down():
     print("[green]server stopped[/green]")
 
 
-@app.command("server-status")
+@app.command("server-status", help=t("HELP.SERVER.STATUS"))
 def server_status(port: int = typer.Option(8080, "--port", "-p")):
     """Show server status and recent log tail."""
     _maybe_banner()
@@ -465,7 +491,7 @@ def server_status(port: int = typer.Option(8080, "--port", "-p")):
             pass
 
 
-@app.command("server-logs")
+@app.command("server-logs", help=t("HELP.SERVER.LOGS"))
 def server_logs(n: int = typer.Option(50, "-n")):
     """Show server log tail."""
     if not SERVER_LOG.exists():
@@ -476,7 +502,7 @@ def server_logs(n: int = typer.Option(50, "-n")):
         print(line)
 
 
-@client_app.command("list")
+@client_app.command("list", help=t("HELP.CLIENT.LIST"))
 def client_list(
     host: str = typer.Option("127.0.0.1", "--host", "-H", help="server host"),
     port: int = typer.Option(8080, "--port", "-p", help="server port"),
@@ -491,7 +517,7 @@ def client_list(
     subprocess.run(cmd, env=env, check=False)
 
 
-@client_app.command("upload")
+@client_app.command("upload", help=t("HELP.CLIENT.UPLOAD"))
 def client_upload(
     file: Path = typer.Argument(..., help="local file to upload"),
     host: str = typer.Option("127.0.0.1", "--host", "-H", help="server host"),
@@ -514,7 +540,7 @@ def client_upload(
     subprocess.run(cmd, env=env, check=False)
 
 
-@client_app.command("download")
+@client_app.command("download", help=t("HELP.CLIENT.DOWNLOAD"))
 def client_download(
     filename: str = typer.Argument(..., help="remote filename on server"),
     out: Optional[Path] = typer.Option(
@@ -542,7 +568,7 @@ def client_download(
     subprocess.run(args, env=env, check=False)
 
 
-@client_app.command("log")
+@client_app.command("log", help=t("HELP.CLIENT.LOG"))
 def client_log(
     text: str = typer.Argument(..., help="log message to send"),
     host: str = typer.Option("127.0.0.1", "--host", "-H", help="server host"),
@@ -575,14 +601,14 @@ def client_log(
     s.close()
 
 
-@config_app.command("init")
+@config_app.command("init", help=t("HELP.CONFIG.INIT"))
 def config_init(path: Path = typer.Option(Path("drlms.yaml"), "--path")):
     # add short -o for path
     write_template(path)
     print(f"[green]wrote config template to {path}[/green]")
 
 
-# Additional command groups: test / coverage / dist / demo
+# Additional command groups: test / coverage / dist / demo / help (teaching)
 test_app = typer.Typer(help="run tests")
 coverage_app = typer.Typer(help="coverage helpers (run/show)")
 dist_app = typer.Typer(help="build/install")
@@ -607,6 +633,32 @@ app.add_typer(space_app, name="space")
 # Room management sub-app under space
 room_app = typer.Typer(help="room manager: info/set-policy/transfer")
 space_app.add_typer(room_app, name="room")
+
+
+# Teaching-style help using rich markdown
+help_app = typer.Typer(help=t("HELP.TOPIC"))
+app.add_typer(help_app, name="help")
+
+
+@help_app.command("show")
+def help_show(
+    topic: str = typer.Argument(..., help="topic: user|space|server|ipc|client|room"),
+):
+    """Render a rich help topic from packaged markdown."""
+    import importlib.resources as ir
+    from rich.console import Console
+    from rich.markdown import Markdown
+
+    valid = {"user", "space", "server", "ipc", "client", "room"}
+    if topic not in valid:
+        print(f"[red]unknown topic[/red]: {topic}; valid: {sorted(valid)}")
+        raise typer.Exit(code=2)
+    try:
+        base = ir.files("ming_drlms") / "cli_help" / f"{topic}.md"
+        text = base.read_text(encoding="utf-8")
+        Console().print(Markdown(text))
+    except Exception:
+        print("no topic content available")
 
 
 def _gather_metadata() -> str:
@@ -653,7 +705,7 @@ def _safe_add(tar, path: Path, arcname: str):
         pass
 
 
-@collect_app.command("artifacts")
+@collect_app.command("artifacts", help=t("HELP.COLLECT.ARTIFACTS"))
 def collect_artifacts(
     out: Path = typer.Option(Path("artifacts"), "--out", help="output directory"),
 ):
@@ -684,7 +736,7 @@ def collect_artifacts(
     print(f"[green]artifacts written to {tgz}[/green]")
 
 
-@collect_app.command("run")
+@collect_app.command("run", help=t("HELP.COLLECT.RUN"))
 def collect_run(
     out: Path = typer.Option(Path("artifacts"), "--out", help="output directory"),
 ):
@@ -747,7 +799,7 @@ def _login(sock: socket.socket, user: str, password: str) -> bool:
 _POLICY_NAME = {0: "retain", 1: "delegate", 2: "teardown"}
 
 
-@room_app.command("info")
+@room_app.command("info", help=t("HELP.ROOM.INFO"))
 def room_info(
     room: str = typer.Option(..., "--room", "-r", help="房间名"),
     host: str = typer.Option("127.0.0.1", "--host", "-H"),
@@ -843,7 +895,7 @@ def room_info(
             pass
 
 
-@room_app.command("set-policy")
+@room_app.command("set-policy", help=t("HELP.ROOM.SETPOLICY"))
 def room_set_policy(
     room: str = typer.Option(..., "--room", "-r", help="房间名"),
     policy: str = typer.Option(..., "--policy", help="策略名", case_sensitive=False),
@@ -883,7 +935,7 @@ def room_set_policy(
             pass
 
 
-@room_app.command("transfer")
+@room_app.command("transfer", help=t("HELP.ROOM.TRANSFER"))
 def room_transfer(
     room: str = typer.Option(..., "--room", "-r", help="房间名"),
     new_owner: str = typer.Option(..., "--new-owner", "-n", help="新的拥有者用户名"),
@@ -927,7 +979,7 @@ def room_transfer(
             pass
 
 
-@space_app.command("join")
+@space_app.command("join", help=t("HELP.SPACE.JOIN"))
 def space_join(
     room: str = typer.Option(..., "--room", "-r"),
     host: str = typer.Option("127.0.0.1", "--host", "-H"),
@@ -1069,7 +1121,7 @@ def space_join(
             break
 
 
-@space_app.command("leave")
+@space_app.command("leave", help=t("HELP.SPACE.LEAVE"))
 def space_leave(
     room: str = typer.Option(..., "--room", "-r"),
     host: str = typer.Option("127.0.0.1", "--host", "-H"),
@@ -1090,7 +1142,7 @@ def space_leave(
     s.close()
 
 
-@space_app.command("history")
+@space_app.command("history", help=t("HELP.SPACE.HISTORY"))
 def space_history(
     room: str = typer.Option(..., "--room", "-r"),
     limit: int = typer.Option(50, "--limit", "-n"),
@@ -1255,7 +1307,7 @@ def space_history(
     s.close()
 
 
-@space_app.command("send")
+@space_app.command("send", help=t("HELP.SPACE.SEND"))
 def space_send(
     room: str = typer.Option(..., "--room", "-r"),
     text: Optional[str] = typer.Option(None, "--text", "-t"),
@@ -1329,7 +1381,7 @@ def space_send(
             save_state(state)
 
 
-@space_app.command("chat")
+@space_app.command("chat", help=t("HELP.SPACE.CHAT"))
 def space_chat(
     room: str = typer.Option(..., "--room"),
     host: str = typer.Option("127.0.0.1", "--host"),
@@ -1437,7 +1489,7 @@ def space_chat(
     pass
 
 
-@ipc_app.command("send")
+@ipc_app.command("send", help=t("HELP.IPC.SEND"))
 def ipc_send(
     text: Optional[str] = typer.Option(
         None, "--text", help="text to send (mutually exclusive with --file)"
@@ -1490,7 +1542,7 @@ def ipc_send(
         raise typer.Exit(code=p.returncode)
 
 
-@ipc_app.command("tail")
+@ipc_app.command("tail", help=t("HELP.IPC.TAIL"))
 def ipc_tail(
     key: Optional[str] = typer.Option(None, "--key", help="DRLMS_SHM_KEY"),
     max_msgs: Optional[int] = typer.Option(
@@ -1511,7 +1563,7 @@ def ipc_tail(
     subprocess.run(cmd, env=env)
 
 
-@test_app.command("ipc")
+@test_app.command("ipc", help=t("HELP.TEST.IPC"))
 def test_ipc():
     # Build minimal target via Makefile rule (links libipc correctly)
     subprocess.run(["make", "tests/test_ipc"], cwd=ROOT)
@@ -1520,7 +1572,7 @@ def test_ipc():
     raise typer.Exit(code=p.returncode)
 
 
-@test_app.command("integration")
+@test_app.command("integration", help=t("HELP.TEST.INTEGRATION"))
 def test_integration(host: str = "127.0.0.1", port: int = 8080):
     env = _env(HOST=host, PORT=str(port))
     script = ROOT / "tests" / "integration_protocol.sh"
@@ -1530,7 +1582,7 @@ def test_integration(host: str = "127.0.0.1", port: int = 8080):
     raise typer.Exit(code=p.returncode)
 
 
-@test_app.command("all")
+@test_app.command("all", help=t("HELP.TEST.ALL"))
 def test_all(host: str = "127.0.0.1", port: int = 8080):
     env = _env(DRLMS_SHM_KEY="0x4c4f4754")
     rc1 = subprocess.run(
@@ -1553,13 +1605,13 @@ def test_all(host: str = "127.0.0.1", port: int = 8080):
     raise typer.Exit(code=0 if (rc1 == 0 and rc2 == 0) else 1)
 
 
-@coverage_app.command("run")
+@coverage_app.command("run", help=t("HELP.COVERAGE.RUN"))
 def coverage_run():
     p = subprocess.run(["make", "coverage"], cwd=ROOT)
     raise typer.Exit(code=p.returncode)
 
 
-@coverage_app.command("show")
+@coverage_app.command("show", help=t("HELP.COVERAGE.SHOW"))
 def coverage_show(lines: int = 120):
     p = ROOT / "coverage" / "gcov.txt"
     if not p.exists():
@@ -1570,13 +1622,13 @@ def coverage_show(lines: int = 120):
         print(line)
 
 
-@dist_app.command("build")
+@dist_app.command("build", help=t("HELP.DIST.BUILD"))
 def dist_build():
     p = subprocess.run(["make", "dist"], cwd=ROOT)
     raise typer.Exit(code=p.returncode)
 
 
-@dist_app.command("install")
+@dist_app.command("install", help=t("HELP.DIST.INSTALL"))
 def dist_install(use_sudo: bool = typer.Option(False, "--sudo")):
     cmd = ["make", "install"]
     if use_sudo:
@@ -1585,7 +1637,7 @@ def dist_install(use_sudo: bool = typer.Option(False, "--sudo")):
     raise typer.Exit(code=p.returncode)
 
 
-@dist_app.command("uninstall")
+@dist_app.command("uninstall", help=t("HELP.DIST.UNINSTALL"))
 def dist_uninstall(use_sudo: bool = typer.Option(False, "--sudo")):
     cmd = ["make", "uninstall"]
     if use_sudo:
@@ -1594,7 +1646,7 @@ def dist_uninstall(use_sudo: bool = typer.Option(False, "--sudo")):
     raise typer.Exit(code=p.returncode)
 
 
-@demo_app.command("quickstart")
+@demo_app.command("quickstart", help=t("HELP.DEMO.QUICKSTART"))
 def demo_quickstart():
     _maybe_banner()
     try:
@@ -1608,6 +1660,16 @@ def demo_quickstart():
     finally:
         server_down()
     print("[green]demo completed[/green]")
+
+
+def _notify_exit():
+    try:
+        maybe_notify_new_version(_get_cli_version())
+    except Exception:
+        pass
+
+
+atexit.register(_notify_exit)
 
 
 if __name__ == "__main__":

@@ -23,6 +23,8 @@ dependencies = [
     "rich",
     "psutil",
     "argon2-cffi",
+    "requests",
+    "packaging",
 ]
 
 [project.urls]
@@ -34,6 +36,9 @@ ming-drlms = "ming_drlms.main:app"
 [tool.setuptools]
 package-dir = {"" = "src"}
 include-package-data = true
+
+[tool.setuptools.package-data]
+"ming_drlms" = ["cli_help/*.md"]
 
 [tool.setuptools_scm]
 write_to = "src/ming_drlms/_version.py"

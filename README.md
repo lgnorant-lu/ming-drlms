@@ -53,6 +53,12 @@ echo "my_secure_password" | ming-drlms user add alice -d server_files --password
 echo "new_password" | ming-drlms user passwd alice -d server_files --password-from-stdin
 ```
 
+获取更详细的教程，请运行：
+
+```bash
+ming-drlms help show user
+```
+
 3) 订阅/发布/历史/退订（短参已支持）
 ```bash
 # 订阅（沉浸式，自动重连，JSON 输出头+正文）
@@ -73,6 +79,12 @@ ming-drlms space leave -H 127.0.0.1 -p 8080 -r demo
 - join：`-s/--since-id`, `-o/--save-dir`, `-j/--json`, `-R/--reconnect`
 - send：`-t/--text`, `-f/--file`
 - history：`-n/--limit`, `-s/--since-id`
+
+获取更详细的教程，请运行：
+
+```bash
+ming-drlms help show space
+```
 
 更新提示：CLI 启动时会每日检查一次 PyPI 最新版本（`DRLMS_UPDATE_CHECK=0` 可关闭）。
 
@@ -225,6 +237,27 @@ CLI 提供 `ming-drlms collect artifacts`，会将以下内容打包为 `artifac
 - space：`space join/send/history/leave/chat`、`space room info/set-policy/transfer`
 - ipc：`ipc send/tail`
 - test/coverage/dist/collect：`test ipc/integration/all`、`coverage run/show`、`dist build/install/uninstall`、`collect run/artifacts`
+
+### 教学式帮助（Rich 渲染）
+
+提供更友好的教学式帮助页面（包内 Markdown 渲染）：
+
+```bash
+ming-drlms help show user
+ming-drlms help show space
+ming-drlms help show server
+ming-drlms help show ipc
+ming-drlms help show client
+ming-drlms help show room
+```
+
+### 语言切换（伪国际化基础）
+
+CLI 文案集中管理于 `i18n.py`，当前仅提供英文。可通过环境变量切换语言占位（后续版本将增加中文文案）：
+
+```bash
+export DRLMS_LANG=en
+```
 
 ---
 
