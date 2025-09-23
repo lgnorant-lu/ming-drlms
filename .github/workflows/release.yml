@@ -43,7 +43,7 @@ jobs:
           sudo apt-get install -y \
             build-essential libssl-dev libargon2-dev \
             netcat-openbsd lcov clang-format cppcheck
-          python -m pip install --upgrade pip build setuptools twine ruff pytest pytest-cov coverage
+          python -m pip install --upgrade pip build setuptools twine ruff pytest pytest-cov coverage argon2-cffi
           # (可选) 如果有 requirements-dev.txt, 在这里安装
           # pip install -r requirements-dev.txt
 

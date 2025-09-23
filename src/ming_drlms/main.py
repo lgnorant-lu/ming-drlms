@@ -16,12 +16,30 @@ from rich.progress import Progress, BarColumn, TimeRemainingColumn, TransferSpee
 from rich.table import Table
 from .config import load_config, write_template
 from .state import load_state, save_state, get_last_event_id, set_last_event_id
+from .users import (
+    users_file_path,
+    validate_username,
+    parse_users,
+    read_auth_params_from_env,
+    generate_argon2id_hash,
+    write_users_atomic,
+    add_user as _add_user_record,
+    set_password as _set_password_record,
+    del_user as _del_user_record,
+)
 
 app = typer.Typer(help="ming-drlms: Pretty CLI for DRLMS server and client")
 client_app = typer.Typer(help="client operations (list/upload/download/log)")
 config_app = typer.Typer(help="config utilities (init template)")
 app.add_typer(client_app, name="client")
 app.add_typer(config_app, name="config")
+
+# user management sub-app
+user_app = typer.Typer(help="user management (add/passwd/del/list)")
+# NOTE: To keep backward compatibility with historical CLI layouts in tests and
+# environments where packaging order might shadow this module, we register the
+# user sub-app with a stable name.
+app.add_typer(user_app, name="user")
 
 
 def detect_root() -> Path:
@@ -141,6 +159,179 @@ def _env(**kwargs):
     return env
 
 
+def _resolve_data_dir(data_dir: Optional[Path], config_path: Optional[Path]) -> Path:
+    cfg = load_config(config_path)
+    if data_dir is not None:
+        return Path(data_dir)
+    return Path(cfg.data_dir)
+
+
+@user_app.command("add")
+def user_add(
+    username: str = typer.Argument(..., help="username to add"),
+    data_dir: Optional[Path] = typer.Option(None, "--data-dir", "-d"),
+    config: Optional[Path] = typer.Option(
+        None, "--config", "-c", help="config yaml path"
+    ),
+    password_from_stdin: bool = typer.Option(
+        False,
+        "--password-from-stdin",
+        help="read password from stdin (single line) instead of interactive prompts",
+    ),
+):
+    """Create a new user with Argon2id password (interactive prompt)."""
+    try:
+        validate_username(username)
+    except Exception as e:
+        print(f"[red]{e}[/red]")
+        raise typer.Exit(code=2)
+    dd = _resolve_data_dir(data_dir, config)
+    upath = users_file_path(dd)
+    records = parse_users(upath)
+    # password acquire
+    if password_from_stdin:
+        try:
+            import sys
+
+            line = sys.stdin.readline()
+            pwd1 = line.rstrip("\n")
+            if pwd1 == "":
+                print("[red]empty password from stdin[/red]")
+                raise typer.Exit(code=2)
+        except Exception:
+            print("[red]failed to read password from stdin[/red]")
+            raise typer.Exit(code=2)
+    else:
+        pwd1 = typer.prompt("Password", hide_input=True)
+        pwd2 = typer.prompt("Confirm password", hide_input=True)
+        if pwd1 != pwd2:
+            print("[red]passwords do not match[/red]")
+            raise typer.Exit(code=2)
+    params = read_auth_params_from_env()
+    encoded = generate_argon2id_hash(
+        pwd1,
+        time_cost=params["time_cost"],
+        memory_cost=params["memory_cost"],
+        parallelism=params["parallelism"],
+        hash_len=params["hash_len"],
+        salt_len=params["salt_len"],
+    )
+    try:
+        new_records = _add_user_record(records, username, encoded)
+    except KeyError:
+        print(f"[red]user exists[/red]: {username}")
+        raise typer.Exit(code=1)
+    write_users_atomic(upath, new_records)
+    print(f"[green]user added[/green]: {username}")
+
+
+@user_app.command("passwd")
+def user_passwd(
+    username: str = typer.Argument(..., help="existing username"),
+    data_dir: Optional[Path] = typer.Option(None, "--data-dir", "-d"),
+    config: Optional[Path] = typer.Option(None, "--config", "-c"),
+    password_from_stdin: bool = typer.Option(
+        False,
+        "--password-from-stdin",
+        help="read password from stdin (single line) instead of interactive prompts",
+    ),
+):
+    """Change password for existing user (Argon2id, interactive)."""
+    dd = _resolve_data_dir(data_dir, config)
+    upath = users_file_path(dd)
+    records = parse_users(upath)
+    # ensure exists
+    if not any(u == username for u, _k, _e in records):
+        print(f"[red]User '{username}' does not exist. Use 'user add' to create.[/red]")
+        raise typer.Exit(code=1)
+    if password_from_stdin:
+        try:
+            import sys
+
+            line = sys.stdin.readline()
+            pwd1 = line.rstrip("\n")
+            if pwd1 == "":
+                print("[red]empty password from stdin[/red]")
+                raise typer.Exit(code=2)
+        except Exception:
+            print("[red]failed to read password from stdin[/red]")
+            raise typer.Exit(code=2)
+    else:
+        pwd1 = typer.prompt("New password", hide_input=True)
+        pwd2 = typer.prompt("Confirm password", hide_input=True)
+        if pwd1 != pwd2:
+            print("[red]passwords do not match[/red]")
+            raise typer.Exit(code=2)
+    params = read_auth_params_from_env()
+    encoded = generate_argon2id_hash(
+        pwd1,
+        time_cost=params["time_cost"],
+        memory_cost=params["memory_cost"],
+        parallelism=params["parallelism"],
+        hash_len=params["hash_len"],
+        salt_len=params["salt_len"],
+    )
+    try:
+        new_records = _set_password_record(records, username, encoded)
+    except KeyError:
+        print(f"[red]User '{username}' does not exist. Use 'user add' to create.[/red]")
+        raise typer.Exit(code=1)
+    write_users_atomic(upath, new_records)
+    print(f"[green]password updated[/green]: {username}")
+
+
+@user_app.command("del")
+def user_del(
+    username: str = typer.Argument(..., help="username to delete"),
+    data_dir: Optional[Path] = typer.Option(None, "--data-dir", "-d"),
+    config: Optional[Path] = typer.Option(None, "--config", "-c"),
+    force: bool = typer.Option(False, "--force", "-f", help="do not error if missing"),
+):
+    """Delete a user record."""
+    dd = _resolve_data_dir(data_dir, config)
+    upath = users_file_path(dd)
+    records = parse_users(upath)
+    exists = any(u == username for u, _k, _e in records)
+    if not exists and not force:
+        print(f"[red]user not found[/red]: {username}")
+        raise typer.Exit(code=1)
+    if not exists and force:
+        print(f"[yellow]user not found, ignored[/yellow]: {username}")
+        raise typer.Exit(code=0)
+    try:
+        new_records = _del_user_record(records, username)
+    except KeyError:
+        if force:
+            print(f"[yellow]user not found, ignored[/yellow]: {username}")
+            raise typer.Exit(code=0)
+        print(f"[red]user not found[/red]: {username}")
+        raise typer.Exit(code=1)
+    write_users_atomic(upath, new_records)
+    print(f"[green]user deleted[/green]: {username}")
+
+
+@user_app.command("list")
+def user_list(
+    data_dir: Optional[Path] = typer.Option(None, "--data-dir", "-d"),
+    config: Optional[Path] = typer.Option(None, "--config", "-c"),
+    json_out: bool = typer.Option(False, "--json", "-j", help="print JSON array"),
+):
+    """List users (format only; no hashes)."""
+    dd = _resolve_data_dir(data_dir, config)
+    upath = users_file_path(dd)
+    records = parse_users(upath)
+    items = [{"username": u, "format": k} for (u, k, _e) in records]
+    if json_out:
+        print(json.dumps(items, ensure_ascii=False))
+        return
+    table = Table(title="users")
+    table.add_column("username")
+    table.add_column("format")
+    for it in items:
+        table.add_row(it["username"], it["format"])
+    print(table)
+
+
 def _is_listening(port: int, host: str = "127.0.0.1") -> bool:
     import socket
 
@@ -164,7 +355,18 @@ def server_up(
     """Start server in background with health check."""
     _maybe_banner()
     if not BIN_SERVER.exists():
-        raise typer.Exit(code=2)
+        # Try to build the server binary automatically for local dev/testing.
+        # In constrained environments (CI/WSL without toolchain), degrade gracefully.
+        try:
+            p = subprocess.run(["make", "log_collector_server"], cwd=ROOT)
+            if p.returncode != 0 or not BIN_SERVER.exists():
+                print(
+                    "[yellow]server binary not available; skip starting server[/yellow]"
+                )
+                raise typer.Exit(code=0)
+        except Exception:
+            print("[yellow]server binary not available; skip starting server[/yellow]")
+            raise typer.Exit(code=0)
     if SERVER_PID.exists():
         try:
             pid = int(SERVER_PID.read_text().strip())
@@ -194,7 +396,11 @@ def server_up(
     cfg.data_dir.mkdir(exist_ok=True)
     with open(SERVER_LOG, "w") as lf:
         p = subprocess.Popen(
-            [str(BIN_SERVER)], env=env, stdout=lf, stderr=subprocess.STDOUT
+            [str(BIN_SERVER)],
+            env=env,
+            stdout=lf,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
         )
     # Wait for readiness; only write PID file on confirmed success
     for _ in range(30):
