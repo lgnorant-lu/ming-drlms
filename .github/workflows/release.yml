@@ -141,3 +141,24 @@ jobs:
           path: dist
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+
+  # Job 4: （新增）负责创建 GitHub Release 并上传构建产物
+  create-release:
+    runs-on: ubuntu-latest
+    needs: build-and-test  # 必须在构建和测试成功后运行
+    if: startsWith(github.ref, 'refs/tags/v') # 只在推送标签时运行
+
+    steps:
+      - name: Download dist from build job
+        uses: actions/download-artifact@v4
+        with:
+          name: ming-drlms-dist
+          path: dist
+
+      - name: Create GitHub Release and Upload Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          # 从 dist/ 目录上传所有文件 (*.whl 和 *.tar.gz)
+          files: dist/*
+          # (可选) 自动生成发行说明，它会包含从上一个 tag 到现在的 commit 列表
+          generate_release_notes: true
