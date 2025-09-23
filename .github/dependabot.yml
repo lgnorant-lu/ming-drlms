@@ -1,0 +1,35 @@
+# Dependabot 配置：自动检查与更新依赖
+# 说明：
+# - 该配置每周一检查一次 Python (pip) 依赖和 GitHub Actions 的更新。
+# - 自动创建带有 "dependencies" 标签的 PR，标题前缀使用 conventional commit 风格。
+# - 将 PR 指派给仓库拥有者，便于及时评审与合并。
+
+version: 2
+updates:
+  # Python pip 依赖（读取根目录 pyproject.toml）
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    assignees:
+      - "lgnorant-lu"
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "chore(deps)"
+
+  # GitHub Actions 依赖（检查 .github/workflows/*.yml 文件）
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    assignees:
+      - "lgnorant-lu"
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "chore(deps-actions)"
+
+
