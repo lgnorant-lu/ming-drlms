@@ -1,6 +1,7 @@
 """
 Generate a flowchart for user management (add/passwd/del/list) using graphviz.
 """
+
 from graphviz import Digraph
 
 
@@ -34,5 +35,3 @@ def build() -> Digraph:
 if __name__ == "__main__":
     dot = build()
     dot.render("user_mgmt_flow", format="png", cleanup=True)
-
-

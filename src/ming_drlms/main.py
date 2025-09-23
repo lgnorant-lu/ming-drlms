@@ -170,7 +170,9 @@ def _resolve_data_dir(data_dir: Optional[Path], config_path: Optional[Path]) -> 
 def user_add(
     username: str = typer.Argument(..., help="username to add"),
     data_dir: Optional[Path] = typer.Option(None, "--data-dir", "-d"),
-    config: Optional[Path] = typer.Option(None, "--config", "-c", help="config yaml path"),
+    config: Optional[Path] = typer.Option(
+        None, "--config", "-c", help="config yaml path"
+    ),
     password_from_stdin: bool = typer.Option(
         False,
         "--password-from-stdin",
@@ -358,7 +360,9 @@ def server_up(
         try:
             p = subprocess.run(["make", "log_collector_server"], cwd=ROOT)
             if p.returncode != 0 or not BIN_SERVER.exists():
-                print("[yellow]server binary not available; skip starting server[/yellow]")
+                print(
+                    "[yellow]server binary not available; skip starting server[/yellow]"
+                )
                 raise typer.Exit(code=0)
         except Exception:
             print("[yellow]server binary not available; skip starting server[/yellow]")

@@ -7,7 +7,7 @@ Description:                用户文件(users.txt)的解析、校验、Argon2id
                             原子写入以及增删改查操作。
 ----------------------------------------------------------------
 
-Changed history:            
+Changed history:
                             2025/09/22: 初始创建;
 ----
 """
@@ -25,7 +25,7 @@ from argon2 import low_level as argon2_ll
 
 # 用户记录的内部表示： (username, kind, encoded)
 # - kind: "argon2" | "legacy" | "unknown"
-# - encoded: 
+# - encoded:
 #   - kind=="argon2": "$argon2id$..." 完整编码串
 #   - kind=="legacy": "<salt>:<shahex>"
 #   - kind=="unknown": 原始右侧片段（尽量保留）
@@ -33,7 +33,9 @@ from argon2 import low_level as argon2_ll
 
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_.\-]{1,32}$")
 ARGON2_LINE_RE = re.compile(r"^(?P<user>[^:\s][^:]*)::(?P<enc>\$argon2id\$.*)$")
-LEGACY_LINE_RE = re.compile(r"^(?P<user>[^:\s][^:]*)\:(?P<salt>[^:\s]+)\:(?P<hash>[0-9a-fA-F]{64})$")
+LEGACY_LINE_RE = re.compile(
+    r"^(?P<user>[^:\s][^:]*)\:(?P<salt>[^:\s]+)\:(?P<hash>[0-9a-fA-F]{64})$"
+)
 
 
 @dataclass
@@ -96,7 +98,8 @@ def parse_users(users_path: Path) -> List[Tuple[str, str, str]]:
         return records
     try:
         for raw in users_path.read_text(errors="ignore").splitlines():
-            line = raw.strip()
+            # Trim whitespace and tolerate CRLF; keep internal spaces for robust regex
+            line = raw.strip().rstrip("\r")
             if not line or line.startswith("#"):
                 continue
             # 优先匹配新格式 user::<argon2id>
@@ -107,16 +110,24 @@ def parse_users(users_path: Path) -> List[Tuple[str, str, str]]:
                 records.append((user, "argon2", enc))
                 continue
             # 尝试旧格式 user:salt:shahex（严格判定）
-            m_old = LEGACY_LINE_RE.match(line)
+            # Allow optional internal spaces around ':' for legacy lines
+            # Normalize by removing spaces around ':' before matching
+            normalized = re.sub(r"\s*:\s*", ":", line)
+            m_old = LEGACY_LINE_RE.match(normalized)
             if m_old:
                 user = m_old.group("user").strip()
                 salt = m_old.group("salt").strip()
                 shahex = m_old.group("hash").strip()
                 records.append((user, "legacy", f"{salt}:{shahex}"))
                 continue
-            # 兜底：unknown
-            user = parts[0] if parts else line
-            right = line[len(user) + 1 :] if len(line) > len(user) + 1 else ""
+            # 兜底：unknown（尽量解析出 username:rest 的基本形态）
+            colon_idx = line.find(":")
+            if colon_idx != -1:
+                user = line[:colon_idx].strip()
+                right = line[colon_idx + 1 :].strip()
+            else:
+                user = line
+                right = ""
             records.append((user, "unknown", right))
     except Exception:
         # 解析错误时尽量返回已解析部分
@@ -154,7 +165,15 @@ def read_auth_params_from_env() -> Dict[str, int]:
     }
 
 
-def generate_argon2id_hash(password: str, *, time_cost: int, memory_cost: int, parallelism: int, hash_len: int, salt_len: int) -> str:
+def generate_argon2id_hash(
+    password: str,
+    *,
+    time_cost: int,
+    memory_cost: int,
+    parallelism: int,
+    hash_len: int,
+    salt_len: int,
+) -> str:
     """Generate Argon2id encoded string like $argon2id$... .
 
     Args:
@@ -245,7 +264,9 @@ def _find_index_by_username(records: List[Tuple[str, str, str]], username: str) 
     return -1
 
 
-def add_user(records: List[Tuple[str, str, str]], username: str, encoded: str) -> List[Tuple[str, str, str]]:
+def add_user(
+    records: List[Tuple[str, str, str]], username: str, encoded: str
+) -> List[Tuple[str, str, str]]:
     """Add a new user (argon2 only). Raises KeyError if exists.
 
     Args:
@@ -263,7 +284,9 @@ def add_user(records: List[Tuple[str, str, str]], username: str, encoded: str) -
     return [*records, (username, "argon2", encoded)]
 
 
-def set_password(records: List[Tuple[str, str, str]], username: str, encoded: str) -> List[Tuple[str, str, str]]:
+def set_password(
+    records: List[Tuple[str, str, str]], username: str, encoded: str
+) -> List[Tuple[str, str, str]]:
     """Update password for an existing user to argon2 encoding.
 
     Raises KeyError if user does not exist.
@@ -285,7 +308,9 @@ def set_password(records: List[Tuple[str, str, str]], username: str, encoded: st
     return new_records
 
 
-def del_user(records: List[Tuple[str, str, str]], username: str) -> List[Tuple[str, str, str]]:
+def del_user(
+    records: List[Tuple[str, str, str]], username: str
+) -> List[Tuple[str, str, str]]:
     """Delete user. Raises KeyError if not exists.
 
     Args:
@@ -302,5 +327,3 @@ def del_user(records: List[Tuple[str, str, str]], username: str) -> List[Tuple[s
     new_records = list(records)
     del new_records[idx]
     return new_records
-
-

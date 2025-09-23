@@ -22,7 +22,9 @@ def test_user_add_and_list_table_and_json(tmp_path: Path, runner: CliRunner):
     data_dir = tmp_path / "srv"
     users = data_dir / "users.txt"
     # add user
-    res = runner.invoke(app, ["user", "add", "alice", "-d", str(data_dir)], input="p\np\n")
+    res = runner.invoke(
+        app, ["user", "add", "alice", "-d", str(data_dir)], input="p\np\n"
+    )
     assert res.exit_code == 0, res.output
     txt = read_users(users)
     assert "alice::" in txt
@@ -43,15 +45,21 @@ def test_user_add_and_list_table_and_json(tmp_path: Path, runner: CliRunner):
 
 def test_user_add_duplicate_fails(tmp_path: Path, runner: CliRunner):
     data_dir = tmp_path / "srv"
-    _ = runner.invoke(app, ["user", "add", "alice", "-d", str(data_dir)], input="p\np\n")
-    res = runner.invoke(app, ["user", "add", "alice", "-d", str(data_dir)], input="p\np\n")
+    _ = runner.invoke(
+        app, ["user", "add", "alice", "-d", str(data_dir)], input="p\np\n"
+    )
+    res = runner.invoke(
+        app, ["user", "add", "alice", "-d", str(data_dir)], input="p\np\n"
+    )
     assert res.exit_code != 0
     assert "user exists" in res.output
 
 
 def test_user_passwd_nonexist_fails(tmp_path: Path, runner: CliRunner):
     data_dir = tmp_path / "srv"
-    res = runner.invoke(app, ["user", "passwd", "missing", "-d", str(data_dir)], input="p\np\n")
+    res = runner.invoke(
+        app, ["user", "passwd", "missing", "-d", str(data_dir)], input="p\np\n"
+    )
     assert res.exit_code != 0
     assert "does not exist" in res.output
 
@@ -59,9 +67,13 @@ def test_user_passwd_nonexist_fails(tmp_path: Path, runner: CliRunner):
 def test_user_passwd_updates_hash(tmp_path: Path, runner: CliRunner):
     data_dir = tmp_path / "srv"
     users = data_dir / "users.txt"
-    _ = runner.invoke(app, ["user", "add", "alice", "-d", str(data_dir)], input="x\nx\n")
+    _ = runner.invoke(
+        app, ["user", "add", "alice", "-d", str(data_dir)], input="x\nx\n"
+    )
     before = read_users(users)
-    res = runner.invoke(app, ["user", "passwd", "alice", "-d", str(data_dir)], input="y\ny\n")
+    res = runner.invoke(
+        app, ["user", "passwd", "alice", "-d", str(data_dir)], input="y\ny\n"
+    )
     assert res.exit_code == 0
     after = read_users(users)
     assert before != after
@@ -84,10 +96,13 @@ def test_list_legacy_entries_are_detected(tmp_path: Path, runner: CliRunner):
     data_dir = tmp_path / "srv"
     users = data_dir / "users.txt"
     data_dir.mkdir(parents=True, exist_ok=True)
-    users.write_text("alice:abcd:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n")
+    users.write_text(
+        "alice:abcd:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n"
+    )
     res = runner.invoke(app, ["user", "list", "-d", str(data_dir), "--json"])
     assert res.exit_code == 0
     arr = json.loads(res.output)
+    # Jules case: must recognize legacy format
     assert any(it["username"] == "alice" and it["format"] == "legacy" for it in arr)
 
 
@@ -123,3 +138,31 @@ def test_parse_users_unit(tmp_path: Path):
     # parsing unit test only; no CLI invocation here
 
 
+def test_list_legacy_with_spaces_is_detected(tmp_path: Path, runner: CliRunner):
+    data_dir = tmp_path / "srv"
+    users = data_dir / "users.txt"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    # 64-hex sha
+    sha = "0123456789abcdef" * 4
+    users.write_text(f"   legacy_user_ws : some_salt : {sha}   \n")
+    res = runner.invoke(app, ["user", "list", "-d", str(data_dir), "--json"])
+    assert res.exit_code == 0
+    arr = json.loads(res.output)
+    assert any(
+        it["username"] == "legacy_user_ws" and it["format"] == "legacy" for it in arr
+    )
+
+
+def test_list_legacy_with_crlf_is_detected(tmp_path: Path, runner: CliRunner):
+    data_dir = tmp_path / "srv"
+    users = data_dir / "users.txt"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    sha = "abcdef0123456789" * 4
+    # Write CRLF line ending explicitly
+    users.write_bytes(f"legacy_user_crlf:salt:{sha}\r\n".encode("utf-8"))
+    res = runner.invoke(app, ["user", "list", "-d", str(data_dir), "--json"])
+    assert res.exit_code == 0
+    arr = json.loads(res.output)
+    assert any(
+        it["username"] == "legacy_user_crlf" and it["format"] == "legacy" for it in arr
+    )
