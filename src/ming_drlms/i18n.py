@@ -59,6 +59,11 @@ en_texts: Dict[str, str] = {
     # Collect
     "HELP.COLLECT.ARTIFACTS": "Pack logs/coverage/meta into a tar.gz under --out directory.\n\nExamples:\n  ming-drlms collect artifacts --out artifacts\n",
     "HELP.COLLECT.RUN": "Run minimal coverage flow then pack artifacts.\n\nExamples:\n  ming-drlms collect run --out artifacts\n",
+    # Dev group (new)
+    "HELP.DEV.TEST": "Developer: run tests (ipc/integration/all).\n\nExamples:\n  ming-drlms dev test ipc\n  ming-drlms dev test integration --host 127.0.0.1 --port 8080\n  ming-drlms dev test all\n",
+    "HELP.DEV.COVERAGE": "Developer: coverage helpers (run/show).\n\nExamples:\n  ming-drlms dev coverage run\n  ming-drlms dev coverage show -\n",
+    "HELP.DEV.PKG": "Developer: package build/install/uninstall.\n\nExamples:\n  ming-drlms dev pkg build\n  ming-drlms dev pkg install --sudo\n  ming-drlms dev pkg uninstall --sudo\n",
+    "HELP.DEV.ARTIFACTS": "Developer: collect artifacts (logs/coverage/meta).\n\nExamples:\n  ming-drlms dev artifacts run --out artifacts\n",
 }
 
 

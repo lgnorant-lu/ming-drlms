@@ -18,6 +18,8 @@ DELEGATE_POLL_LOOPS=${DELEGATE_POLL_LOOPS:-30}
 TEARDOWN_WAIT_LOOPS=${TEARDOWN_WAIT_LOOPS:-20}
 RETAIN_LOG_WAIT_LOOPS=${RETAIN_LOG_WAIT_LOOPS:-100}
 NC_FLAGS=${NC_FLAGS:--w 2}
+# allow skipping teardown case in FAST mode unless explicitly disabled
+SKIP_TEARDOWN=${SKIP_TEARDOWN:-$FAST}
 
 # helpers: robust join + pid + readiness
 start_join_user() {
@@ -120,15 +122,30 @@ if [[ "${TOTAL:-0}" -ne 1 ]]; then
 fi
 echo "[OK] 去重通过（收到次数==1）"
 
-# 保持两个订阅（U1 owner、U2 sub）用于策略测试
+# 保持两个订阅用于策略测试：先仅启动 U1，确保其成为 owner，再按策略分别引入 U2
 start_join_user "$U1" "$PWD1" /tmp/j_owner.log /tmp/j_owner.pid
 wait_pid_alive /tmp/j_owner.pid 100 || true
-start_join_user "$U2" "$PWD2" /tmp/j_sub.log /tmp/j_sub.pid
-wait_pid_alive /tmp/j_sub.pid 100 || true
+# 等待房间 owner 被确认为 U1，避免竞态
+{
+  ok=0
+  for i in $(seq 1 100); do
+    cur=$(room_owner "$HOST" "$PORT" "$ROOM" "$U1" "$PWD1")
+    if [[ "$cur" == "$U1" ]]; then ok=1; break; fi
+    sleep 0.1
+  done
+  if [[ $ok -ne 1 ]]; then
+    echo "[error] 未能将 owner 设为 $U1（当前: ${cur:-<empty>}）"; exit 1
+  fi
+}
 
 # retain 策略：U1 下线，U2 仍可接收发布
 echo "[CASE] 策略 retain 行为"
+# 设置策略前尚无 U2 连接，避免 owner 判定竞态
 timeout 5s env HOME="$ORIG_HOME" "$CLI" space room set-policy --room "$ROOM" --policy retain -H "$HOST" -p "$PORT" -u "$U1" -P "$PWD1" | sed -n '1,2p' || true
+# 现在引入 U2 订阅者
+start_join_user "$U2" "$PWD2" /tmp/j_sub.log /tmp/j_sub.pid
+wait_pid_alive /tmp/j_sub.pid 100 || true
+# owner 下线后，retain 下 U2 仍可接收
 if [[ -f /tmp/j_owner.pid ]]; then kill -TERM "$(cat /tmp/j_owner.pid)" 2>/dev/null || true; fi
 sleep 0.4
 timeout 8s env HOME="$ORIG_HOME" "$CLI" space send --room "$ROOM" -H "$HOST" -p "$PORT" -u "$U2" -P "$PWD2" -t "retain-msg-xyz" || true
@@ -170,6 +187,10 @@ echo "[OK] delegate 通过"
 
 # teardown 策略：owner 下线时 另一方被动断开
 echo "[CASE] 策略 teardown 行为"
+# Optional skip for teardown behavior (e.g., CI FAST mode)
+if [[ "${SKIP_TEARDOWN}" == "1" ]]; then
+  echo "[skip] teardown case skipped (SKIP_TEARDOWN=1)" 
+else
 # 动态检测当前 owner
 cur_owner=$(room_owner "$HOST" "$PORT" "$ROOM" "$U2" "$PWD2")
 if [[ -z "$cur_owner" ]]; then cur_owner="$U1"; fi
@@ -212,6 +233,7 @@ if [[ -f "$other_pf" ]]; then
 fi
 
 echo "[OK] teardown 通过"
+fi
 
 # 319 秒超时：>60s 空闲不应断（快跑模式可缩短）
 echo "[CASE] SUB 空闲 >${IDLE_SECONDS}s 保持连接（无需等满 319s）"

@@ -7,7 +7,7 @@
 - 仅作用于“已暂存（staged）”的文件；格式化后会自动重新加入暂存区
 - 如工具缺失或格式失败，将中止本次提交并提示错误
 
-## 安装/卸载
+## 安装/卸载 (install / uninstall)
 
 在仓库根目录执行：
 
@@ -19,7 +19,7 @@ make hook-install
 make hook-uninstall
 ```
 
-## 依赖
+## 依赖 (dependence)
 
 - `clang-format`（格式化 C/C++）
 - `ruff`（格式化/修复 Python）
