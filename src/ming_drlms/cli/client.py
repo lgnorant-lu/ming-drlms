@@ -30,7 +30,8 @@ def client_list(
         raise typer.Exit(code=2)
     env = env_with()
     cmd = [str(BIN_AGENT), host, str(port), "login", user, password, "list"]
-    subprocess.run(cmd, env=env, check=False)
+    p = subprocess.run(cmd, env=env, check=False)
+    raise typer.Exit(code=p.returncode)
 
 
 @client_app.command("upload", help=t("HELP.CLIENT.UPLOAD"))
@@ -59,7 +60,8 @@ def client_upload(
         "upload",
         str(file),
     ]
-    subprocess.run(cmd, env=env, check=False)
+    p = subprocess.run(cmd, env=env, check=False)
+    raise typer.Exit(code=p.returncode)
 
 
 @client_app.command("download", help=t("HELP.CLIENT.DOWNLOAD"))
@@ -93,7 +95,8 @@ def client_download(
     ]
     if out is not None:
         args.append(str(out))
-    subprocess.run(args, env=env, check=False)
+    p = subprocess.run(args, env=env, check=False)
+    raise typer.Exit(code=p.returncode)
 
 
 @client_app.command("log", help=t("HELP.CLIENT.LOG"))

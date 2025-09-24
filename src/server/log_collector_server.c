@@ -40,6 +40,17 @@ static int g_auth_strict = 0; // 0: accept any if users empty; 1: require file
 static int g_rcv_timeout_sec = 319; // default recv/send timeout seconds
 static pthread_mutex_t g_users_file_mu =
     PTHREAD_MUTEX_INITIALIZER; // protect users.txt writes
+// TCP keepalive tuning (env-overridable)
+static int g_tcp_keepalive_enabled = 1;
+#ifdef TCP_KEEPIDLE
+static int g_tcp_keepidle = 300; // seconds before first probe
+#endif
+#ifdef TCP_KEEPINTVL
+static int g_tcp_keepintvl = 10; // interval between probes
+#endif
+#ifdef TCP_KEEPCNT
+static int g_tcp_keepcnt = 3; // number of probes
+#endif
 
 // users.txt cache
 typedef struct {
@@ -254,18 +265,20 @@ static void set_socket_timeouts(int fd, int seconds) {
 }
 
 static void enable_tcp_keepalive(int fd) {
+    if (!g_tcp_keepalive_enabled)
+        return;
     int yes = 1;
     (void)setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &yes, sizeof(yes));
 #ifdef TCP_KEEPIDLE
-    int idle = 60;
+    int idle = g_tcp_keepidle;
     (void)setsockopt(fd, IPPROTO_TCP, TCP_KEEPIDLE, &idle, sizeof(idle));
 #endif
 #ifdef TCP_KEEPINTVL
-    int intvl = 10;
+    int intvl = g_tcp_keepintvl;
     (void)setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, &intvl, sizeof(intvl));
 #endif
 #ifdef TCP_KEEPCNT
-    int cnt = 3;
+    int cnt = g_tcp_keepcnt;
     (void)setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, &cnt, sizeof(cnt));
 #endif
 }
@@ -461,8 +474,22 @@ static int load_users_file(void) {
 }
 
 static int verify_password(const char *username, const char *password) {
-    if (g_users_count == 0)
-        return g_auth_strict ? 0 : 1; // no users configured
+    if (g_users_count == 0) {
+        // 尝试按需加载如果 users.txt 存在且非空
+        char path[PATH_MAX];
+        if (snprintf(path, sizeof path, "%s/%s", g_data_dir, "users.txt") <
+            (int)sizeof path) {
+            struct stat st;
+            if (stat(path, &st) == 0 && (st.st_mode & S_IFMT) == S_IFREG &&
+                st.st_size > 0) {
+                (void)load_users_file();
+            }
+        }
+        if (g_users_count == 0) {
+            // 仍然没有配置用户
+            return g_auth_strict ? 0 : 1;
+        }
+    }
     for (int i = 0; i < g_users_count; ++i) {
         if (strcmp(username, g_users[i].user) == 0) {
             // Argon2 path
@@ -759,10 +786,14 @@ static void *handle_client(void *arg) {
                               "");
                 }
             } else if (strncmp(start, "LOG|", 4) == 0) {
-                const char *msg = start + 4;
-                shm_write((const unsigned char *)msg, strlen(msg));
-                append_central_log(peer_ip, authenticated ? username : "", msg);
-                send_ok(ctx->client_fd, NULL);
+                if (!authenticated) {
+                    send_err(ctx->client_fd, "PERM", "login required");
+                } else {
+                    const char *msg = start + 4;
+                    shm_write((const unsigned char *)msg, strlen(msg));
+                    append_central_log(peer_ip, username, msg);
+                    send_ok(ctx->client_fd, NULL);
+                }
             } else if (strncmp(start, "UPLOAD|", 7) == 0) {
                 if (!authenticated) {
                     send_err(ctx->client_fd, "PERM", "login required");
@@ -933,26 +964,34 @@ static void *handle_client(void *arg) {
                                             char ts[64];
                                             rfc3339_time(ts, sizeof ts);
                                             uint64_t event_id = 0;
-                                            rooms_store_text(
+                                            int st_rc = rooms_store_text(
                                                 r, room, ts, username, buf,
                                                 (size_t)len, hx, &event_id);
-                                            rooms_fanout_text(
-                                                r, room, ts, username, event_id,
-                                                buf, (size_t)len, hx,
-                                                g_rate_down_bps);
-                                            {
-                                                char okbuf[128];
-                                                snprintf(okbuf, sizeof okbuf,
-                                                         "PUBT|%llu",
-                                                         (unsigned long long)
-                                                             event_id);
-                                                send_ok(ctx->client_fd, okbuf);
+                                            if (st_rc != 0 || event_id == 0) {
+                                                send_err(ctx->client_fd,
+                                                         "INTERNAL",
+                                                         "store text");
+                                            } else {
+                                                rooms_fanout_text(
+                                                    r, room, ts, username,
+                                                    event_id, buf, (size_t)len,
+                                                    hx, g_rate_down_bps);
+                                                {
+                                                    char okbuf[128];
+                                                    snprintf(
+                                                        okbuf, sizeof okbuf,
+                                                        "PUBT|%llu",
+                                                        (unsigned long long)
+                                                            event_id);
+                                                    send_ok(ctx->client_fd,
+                                                            okbuf);
+                                                }
+                                                audit_log(peer_ip, username,
+                                                          "PUBT", "", room,
+                                                          (unsigned long long)
+                                                              event_id,
+                                                          len, hx, "OK", "");
                                             }
-                                            audit_log(
-                                                peer_ip, username, "PUBT", "",
-                                                room,
-                                                (unsigned long long)event_id,
-                                                len, hx, "OK", "");
                                             free(buf);
                                         }
                                     }
@@ -1073,37 +1112,51 @@ static void *handle_client(void *arg) {
                                                         rfc3339_time(ts,
                                                                      sizeof ts);
                                                         uint64_t event_id = 0;
-                                                        rooms_store_file(
-                                                            r, room, ts,
-                                                            username, filename,
-                                                            (size_t)size, hx,
-                                                            tmp_path,
-                                                            &event_id);
-                                                        rooms_fanout_file(
-                                                            r, room, ts,
-                                                            username, event_id,
-                                                            filename,
-                                                            (size_t)size, hx,
-                                                            g_rate_down_bps);
-                                                        {
-                                                            char okbuf[128];
-                                                            snprintf(
-                                                                okbuf,
-                                                                sizeof okbuf,
-                                                                "PUBF|%llu",
-                                                                (unsigned long long)
-                                                                    event_id);
-                                                            send_ok(
+                                                        int sf_rc =
+                                                            rooms_store_file(
+                                                                r, room, ts,
+                                                                username,
+                                                                filename,
+                                                                (size_t)size,
+                                                                hx, tmp_path,
+                                                                &event_id);
+                                                        if (sf_rc != 0 ||
+                                                            event_id == 0) {
+                                                            send_err(
                                                                 ctx->client_fd,
-                                                                okbuf);
-                                                        }
-                                                        audit_log(
-                                                            peer_ip, username,
-                                                            "PUBF", filename,
-                                                            room,
-                                                            (unsigned long long)
+                                                                "INTERNAL",
+                                                                "store file");
+                                                        } else {
+                                                            rooms_fanout_file(
+                                                                r, room, ts,
+                                                                username,
                                                                 event_id,
-                                                            size, hx, "OK", "");
+                                                                filename,
+                                                                (size_t)size,
+                                                                hx,
+                                                                g_rate_down_bps);
+                                                            {
+                                                                char okbuf[128];
+                                                                snprintf(
+                                                                    okbuf,
+                                                                    sizeof okbuf,
+                                                                    "PUBF|%llu",
+                                                                    (unsigned long long)
+                                                                        event_id);
+                                                                send_ok(
+                                                                    ctx->client_fd,
+                                                                    okbuf);
+                                                            }
+                                                            audit_log(
+                                                                peer_ip,
+                                                                username,
+                                                                "PUBF",
+                                                                filename, room,
+                                                                (unsigned long long)
+                                                                    event_id,
+                                                                size, hx, "OK",
+                                                                "");
+                                                        }
                                                     }
                                                 }
                                             }
@@ -1302,6 +1355,17 @@ int main(void) {
     g_rate_down_bps = getenv_ll("DRLMS_RATE_DOWN_BPS", 0);
     g_max_upload = getenv_ll("DRLMS_MAX_UPLOAD", 100LL * 1024 * 1024);
     g_rcv_timeout_sec = getenv_int("DRLMS_RCV_TIMEOUT", 319);
+    // TCP keepalive tuning via env
+    g_tcp_keepalive_enabled = getenv_int("DRLMS_TCP_KEEPALIVE", 1) ? 1 : 0;
+#ifdef TCP_KEEPIDLE
+    g_tcp_keepidle = getenv_int("DRLMS_TCP_KEEPIDLE", g_tcp_keepidle);
+#endif
+#ifdef TCP_KEEPINTVL
+    g_tcp_keepintvl = getenv_int("DRLMS_TCP_KEEPINTVL", g_tcp_keepintvl);
+#endif
+#ifdef TCP_KEEPCNT
+    g_tcp_keepcnt = getenv_int("DRLMS_TCP_KEEPCNT", g_tcp_keepcnt);
+#endif
     umask(0077);
     if (ensure_dir_mode(g_data_dir, 0700) != 0) {
         perror("ensure data dir");
