@@ -437,7 +437,7 @@ static int load_users_file(void) {
             continue;
         *p1 = '\0';
         char *p2 = strchr(p1 + 1, ':');
-            if (!p2)
+        if (!p2)
             continue;
         *p2 = '\0';
         if (g_users_count >= (int)(sizeof g_users / sizeof g_users[0]))
