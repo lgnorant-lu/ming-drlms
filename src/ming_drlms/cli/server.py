@@ -100,20 +100,44 @@ def server_up(
 @server_app.command("down", help=t("HELP.SERVER.DOWN"))
 def server_down():
     """Stop server via PID file; fallback to pkill."""
+    pid = 0
     if SERVER_PID.exists():
         try:
             pid = int(SERVER_PID.read_text().strip())
             os.kill(pid, signal.SIGTERM)
-            time.sleep(0.2)
+            # Wait up to 5 seconds for the process to die
+            for _ in range(50):
+                time.sleep(0.1)
+                os.kill(pid, 0)  # Raises OSError if process doesn't exist
+        except (ProcessLookupError, OSError):
+            pid = 0  # Process is gone
         except Exception:
-            pass
+            pass  # Other errors (e.g., file read error), fallback to pkill
         finally:
+            if pid == 0:
+                SERVER_PID.unlink(missing_ok=True)
+
+    # Fallback for cases where PID file is missing, or process didn't die
+    if pid != 0:
+        # If loop finished but process still exists, force kill it
+        try:
+            os.kill(pid, signal.SIGKILL)
             SERVER_PID.unlink(missing_ok=True)
-    subprocess.run(
-        ["pkill", "-f", "log_collector_server"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+        except Exception:
+            # Final fallback to pkill
+            subprocess.run(
+                ["pkill", "-9", "-f", "log_collector_server"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+    else:
+        # PID file was missing or process terminated gracefully
+        subprocess.run(
+            ["pkill", "-f", "log_collector_server"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
     print("[green]server stopped[/green]")
 
 

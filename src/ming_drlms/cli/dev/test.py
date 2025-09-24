@@ -12,9 +12,9 @@ test_app = typer.Typer(help=t("HELP.DEV.TEST"))
 
 @test_app.command("ipc", help=t("HELP.TEST.IPC"))
 def test_ipc():
-    subprocess.run(["make", "tests/test_ipc"], cwd=ROOT)
-    env = env_with(DRLMS_SHM_KEY="0x4c4f4754")
-    p = subprocess.run([str(ROOT / "tests" / "test_ipc")], env=env)
+    subprocess.run(["make", "tests/test_ipc_suite"], cwd=ROOT, check=True)
+    env = env_with(DRLMS_SHM_KEY="0x4c4f4754", LD_LIBRARY_PATH=".")
+    p = subprocess.run([str(ROOT / "tests" / "test_ipc_suite")], env=env)
     raise typer.Exit(code=p.returncode)
 
 
