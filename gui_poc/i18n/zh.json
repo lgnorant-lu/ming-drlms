@@ -1,0 +1,14 @@
+{
+  "app.title": "文件传输聊天",
+  "panel.files.title": "文件",
+  "panel.chat.title": "聊天",
+  "nav.upload": "上传",
+  "nav.download": "下载",
+  "nav.connect": "连接",
+  "selfcheck.title": "二进制自检",
+  "selfcheck.run": "开始检测",
+  "selfcheck.ok": "通过",
+  "selfcheck.fail": "失败"
+}
+
+

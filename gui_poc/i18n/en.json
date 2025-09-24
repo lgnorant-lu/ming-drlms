@@ -1,0 +1,14 @@
+{
+  "app.title": "File Transfer Chat",
+  "panel.files.title": "Files",
+  "panel.chat.title": "Chat",
+  "nav.upload": "Upload",
+  "nav.download": "Download",
+  "nav.connect": "Connect",
+  "selfcheck.title": "Binary Self-check",
+  "selfcheck.run": "Run Checks",
+  "selfcheck.ok": "OK",
+  "selfcheck.fail": "Fail"
+}
+
+
