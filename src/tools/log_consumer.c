@@ -51,5 +51,7 @@ int main(int argc, char **argv) {
         }
     }
     free(buf);
+    // 在 consumer 中尽力清理共享资源（best-effort）
+    (void)shm_cleanup();
     return 0;
 }

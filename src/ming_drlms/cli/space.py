@@ -63,7 +63,11 @@ def space_join(
                 s.sendall(f"SUB|{room}|{since_id}\n".encode())
             else:
                 s.sendall(f"SUB|{room}\n".encode())
-            _ = recv_line(s)
+            resp = recv_line(s)
+            if resp.startswith("ERR|"):
+                print(resp)
+                s.close()
+                raise typer.Exit(code=1)
             try:
                 s.settimeout(None)
             except Exception:
@@ -129,6 +133,9 @@ def space_join(
                         save_state(state)
                 else:
                     print(line)
+                    if line.startswith("ERR|"):
+                        s.close()
+                        raise typer.Exit(code=1)
         except KeyboardInterrupt:
             break
         except Exception:
@@ -171,6 +178,9 @@ def space_leave(
     s.sendall(f"UNSUB|{room}\n".encode())
     resp = recv_line(s)
     print(resp)
+    if resp.startswith("ERR|"):
+        s.close()
+        raise typer.Exit(code=1)
     if resp.startswith("OK"):
         print(f"[green]Left room '{room}'.[/green]")
     s.sendall(b"QUIT\n")
@@ -325,6 +335,9 @@ def space_history(
                 prefetch_line = header_rest
                 continue
             print(line)
+            if line.startswith("ERR|"):
+                s.close()
+                raise typer.Exit(code=1)
     s.sendall(b"QUIT\n")
     s.close()
 

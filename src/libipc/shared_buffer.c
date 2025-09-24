@@ -77,7 +77,9 @@ int shm_write(const unsigned char *data, size_t len) {
         if (offset + payload >= len)
             hdr.flags |= LAST_FLAG;
 
-        sem_wait(&shared->sem_empty);
+        // 处理 EINTR 以避免过早终止信号处理
+        while (sem_wait(&shared->sem_empty) == -1 && errno == EINTR) {
+        }
         pthread_rwlock_wrlock(&shared->rwlock);
         memcpy(shared->buffer[shared->write_index], &hdr, sizeof(MsgHdr));
         memcpy(shared->buffer[shared->write_index] + sizeof(MsgHdr),
@@ -85,7 +87,8 @@ int shm_write(const unsigned char *data, size_t len) {
         shared->write_index = (shared->write_index + 1) % NUM_SLOTS;
         shared->count++;
         pthread_rwlock_unlock(&shared->rwlock);
-        sem_post(&shared->sem_full);
+        while (sem_post(&shared->sem_full) == -1 && errno == EINTR) {
+        }
         offset += payload;
     }
     return 0;
@@ -99,7 +102,8 @@ ssize_t shm_read(unsigned char *out, size_t out_size) {
     size_t total = 0;
     MsgHdr hdr;
     for (;;) {
-        sem_wait(&shared->sem_full);
+        while (sem_wait(&shared->sem_full) == -1 && errno == EINTR) {
+        }
         pthread_rwlock_rdlock(&shared->rwlock);
         memcpy(&hdr, shared->buffer[shared->read_index], sizeof(MsgHdr));
         size_t payload = hdr.len;
@@ -115,7 +119,8 @@ ssize_t shm_read(unsigned char *out, size_t out_size) {
         shared->read_index = (shared->read_index + 1) % NUM_SLOTS;
         shared->count--;
         pthread_rwlock_unlock(&shared->rwlock);
-        sem_post(&shared->sem_empty);
+        while (sem_post(&shared->sem_empty) == -1 && errno == EINTR) {
+        }
         if (hdr.flags & LAST_FLAG)
             break;
     }

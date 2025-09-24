@@ -119,12 +119,22 @@ def client_log(
     s.settimeout(3)
     s.connect((host, port))
     s.sendall(f"LOGIN|{user}|{password}\n".encode())
-    _ = recv_line(s)
+    resp = recv_line(s)
+    if resp.startswith("ERR|"):
+        print(resp)
+        s.close()
+        raise typer.Exit(code=1)
     s.sendall(f"LOG|{text}\n".encode())
     ack = recv_line(s)
     print(ack)
+    if ack.startswith("ERR|"):
+        s.close()
+        raise typer.Exit(code=1)
     s.sendall(b"QUIT\n")
-    _ = recv_line(s)
+    bye = recv_line(s)
+    if bye.startswith("ERR|"):
+        s.close()
+        raise typer.Exit(code=1)
     s.close()
 
 

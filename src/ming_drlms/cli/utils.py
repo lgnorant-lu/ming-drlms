@@ -114,7 +114,14 @@ def recv_line(sock: _socket.socket) -> str:
         if not ch or ch == b"\n":
             break
         buf.extend(ch)
-    return buf.decode(errors="ignore")
+    # 修剪 CRLF 文件可能遗存的尾随回车符
+    try:
+        s = buf.decode(errors="ignore")
+        if s.endswith("\r"):
+            return s[:-1]
+        return s
+    except Exception:
+        return buf.decode(errors="ignore")
 
 
 def recv_exact(sock: _socket.socket, nbytes: int) -> bytes:

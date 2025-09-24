@@ -428,12 +428,16 @@ static int load_users_file(void) {
         char *nl = strchr(line, '\n');
         if (nl)
             *nl = '\0';
+        // 修剪 CRLF 文件可能遗存的尾随回车符
+        size_t llen = strlen(line);
+        if (llen > 0 && line[llen - 1] == '\r')
+            line[--llen] = '\0';
         char *p1 = strchr(line, ':');
         if (!p1)
             continue;
         *p1 = '\0';
         char *p2 = strchr(p1 + 1, ':');
-        if (!p2)
+            if (!p2)
             continue;
         *p2 = '\0';
         if (g_users_count >= (int)(sizeof g_users / sizeof g_users[0]))
@@ -724,7 +728,12 @@ static void *handle_client(void *arg) {
                 } else {
                     *p = '\0';
                     const char *user = u;
-                    const char *pass = p + 1;
+                    char *pass_mut = p + 1;
+                    // 修剪 CRLF 文件可能遗存的尾随回车符
+                    size_t plen_tmp = strlen(pass_mut);
+                    if (plen_tmp > 0 && pass_mut[plen_tmp - 1] == '\r')
+                        pass_mut[--plen_tmp] = '\0';
+                    const char *pass = pass_mut;
                     if (!*user || !*pass) {
                         send_err(ctx->client_fd, "AUTH", "empty user or pass");
                         audit_log(peer_ip, user, "LOGIN", "", "", 0, 0, "",
