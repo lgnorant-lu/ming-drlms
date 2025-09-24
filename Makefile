@@ -88,6 +88,8 @@ coverage:
 	DRLMS_SHM_KEY=0x4c4f4754 LD_LIBRARY_PATH=. ./tests/test_ipc_suite
 	@echo "--> Running C protocol integration tests (test_server_protocol.sh)..."
 	chmod +x tests/test_server_protocol.sh && HOST=127.0.0.1 PORT=8080 bash -lc 'LD_LIBRARY_PATH=. ./tests/test_server_protocol.sh $${HOST} $${PORT} README.md /tmp/README.md'
+	@echo "--> Running room policy integration tests (integration_space.sh, FAST mode by default)..."
+	chmod +x tests/integration_space.sh && FAST=$${FAST:-1} SKIP_TEARDOWN=$${SKIP_TEARDOWN:-$${FAST}} IDLE_SECONDS=$${IDLE_SECONDS:-15} HOST=127.0.0.1 PORT=8080 bash -lc 'LD_LIBRARY_PATH=. ./tests/integration_space.sh $${HOST} $${PORT} demo_cov'
 	@echo "--> Running C tools smoke tests (src/tools) ..."
 	# proc_launcher: expect usage error (no args) and quick exit
 	-./proc_launcher 2>/dev/null || true

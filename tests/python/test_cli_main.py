@@ -120,6 +120,18 @@ def test_teaching_help_show_user(runner):
     assert result.exit_code == 0
 
 
+def test_dev_group_registered_and_help(runner):
+    # dev group should be present and show help without error
+    result = runner.invoke(app, ["dev", "--help"])
+    assert result.exit_code == 0
+    assert "developer utilities" in result.output.lower()
+
+
+def test_help_topics_include_dev(runner):
+    result = runner.invoke(app, ["help", "show", "dev"])
+    assert result.exit_code == 0
+
+
 def test_update_check_throttled_and_nonblocking(monkeypatch, runner):
     # Force throttle by setting env to disable update check
     monkeypatch.setenv("DRLMS_UPDATE_CHECK", "0")
