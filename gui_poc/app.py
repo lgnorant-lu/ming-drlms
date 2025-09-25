@@ -45,7 +45,7 @@ def main(page: ft.Page):
         return ft.Text(txt, size=size, color="#424242", font_family="PressStart2P")
 
     # Build two tabs: Home (visual PoC) and Self-check
-    home = home_page.view(i18n)
+    home = home_page.view(i18n, page)
     selfcheck = selfcheck_page.view(i18n, base)
     tabs = ft.Tabs(
         selected_index=0,

@@ -49,7 +49,7 @@ jobs:
           name: coverage-html
           path: coverage/html
       - name: Build GUI PoC bins
-        run: make gui_poc_bins
+        run: make gui_poc
       - name: Pack GUI via Flet
         run: |
           pip install flet

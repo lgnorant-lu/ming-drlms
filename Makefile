@@ -142,6 +142,14 @@ coverage:
 	@echo "Python Report:  file://$(shell pwd)/coverage/html/python/index.html"
 	@echo "---"
 
+# ------------------------------------------------------------
+# GUI PoC helpers
+# ------------------------------------------------------------
+.PHONY: gui_poc
+gui_poc: all
+	@echo "--- Building GUI PoC dependencies ---"
+	$(MAKE) -C gui_poc all
+
 # install/uninstall
 install: all
 	install -d $(DESTDIR)$(BINDIR) $(DESTDIR)$(LIBDIR) $(DESTDIR)$(INCLUDEDIR) $(DESTDIR)$(PKGCONFIGDIR)

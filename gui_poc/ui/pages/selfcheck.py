@@ -58,14 +58,26 @@ def view(i18n: dict, base: Path) -> ft.Container:
             )
         )
 
-        # try ldd log_consumer
-        rc2, head2 = run_cmd(["ldd", str(bdir / "log_consumer")])
+        # try ldd log_consumer (show full resolution state for libipc.so)
+        rc2, out2_head = run_cmd(["ldd", str(bdir / "log_consumer")])
+        # Run again to get full stdout if needed
+        try:
+            full = subprocess.run(
+                ["ldd", str(bdir / "log_consumer")], stdout=subprocess.PIPE, text=True
+            )
+            out_full = full.stdout or out2_head
+        except Exception:
+            out_full = out2_head
+        resolved = ("libipc.so" in (out_full or "")) or (
+            "libipc.so" in (out2_head or "")
+        )
+        note = "resolved libipc.so" if resolved else (out2_head or "")[:80]
         rows.append(
             ft.DataRow(
                 cells=[
                     ft.DataCell(ft.Text("ldd log_consumer")),
                     ft.DataCell(ft.Text(str(rc2))),
-                    ft.DataCell(ft.Text(head2[:60])),
+                    ft.DataCell(ft.Text(note)),
                 ]
             )
         )
