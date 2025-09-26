@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-HOST=${1:-127.0.0.1}
-PORT=${2:-8080}
+# 支持测试环境变量，提供向后兼容性
+HOST=${1:-${TEST_HOST:-127.0.0.1}}
+PORT=${2:-${TEST_PORT:-8080}}
 ROOM=${3:-demo}
 U1=${U1:-owner1}
 U2=${U2:-sub1}
 PWD1=${PWD1:-password}
 PWD2=${PWD2:-password}
+
+# 测试数据目录
+TEST_DATA_DIR=${TEST_DATA_DIR:-server_files}
 
 ## (helper functions defined below)
 
@@ -85,7 +89,7 @@ trap 'rm -rf "$TMPHOME"; if [[ -f /tmp/drlms_space_srv.pid ]]; then kill -TERM "
 # 启动 server（非严格）若未监听
 if ! nc -z "$HOST" "$PORT" >/dev/null 2>&1; then
   echo "[info] starting server at $HOST:$PORT"
-  DRLMS_AUTH_STRICT=0 DRLMS_DATA_DIR=server_files LD_LIBRARY_PATH=. ./log_collector_server >/tmp/drlms_server.log 2>&1 &
+  DRLMS_AUTH_STRICT=0 DRLMS_DATA_DIR="$TEST_DATA_DIR" LD_LIBRARY_PATH=. ./log_collector_server >/tmp/drlms_server.log 2>&1 &
   echo $! > /tmp/drlms_space_srv.pid
   sleep 0.8
 fi

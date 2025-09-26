@@ -396,7 +396,23 @@ static int is_safe_path(const char *path) {
     if (strstr(path, "..") || strstr(path, "/../") || strstr(path, "\\..\\"))
         return 0;
 
-    // 检查是否以/开头（绝对路径）
+    // 检查是否为绝对路径（从根目录开始，如 /etc/passwd）
+    if (*path == '/' && strstr(path, "/etc/") == path)
+        return 0;
+    if (*path == '/' && strstr(path, "/proc/") == path)
+        return 0;
+    if (*path == '/' && strstr(path, "/sys/") == path)
+        return 0;
+
+    // 允许正常的服务器文件路径（server_files/ 开头）
+    if (strncmp(path, "server_files/", 13) == 0)
+        return 1;
+
+    // 允许临时目录路径（/tmp/ 开头）
+    if (strncmp(path, "/tmp/", 5) == 0)
+        return 1;
+
+    // 拒绝其他所有绝对路径
     if (*path == '/')
         return 0;
 

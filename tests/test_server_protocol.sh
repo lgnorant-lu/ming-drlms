@@ -13,6 +13,8 @@ function start_server() {
     echo "--- Starting Server (data: $DATA_DIR) ---"
     # Start in non-strict mode for simple testing
     mkdir -p "$DATA_DIR"
+    # Ensure no users.txt file exists to force non-strict mode acceptance
+    rm -f "$DATA_DIR/users.txt"
     DRLMS_PORT="$PORT" DRLMS_AUTH_STRICT=0 DRLMS_DATA_DIR="$DATA_DIR" ./log_collector_server > "$SERVER_LOG" 2>&1 &
     SERVER_PID=$!
     # Wait for server to be ready by polling the port
@@ -104,7 +106,7 @@ start_server
 
 # Test 1: Happy Path - Login and List
 run_test "Login and List" \
-    "LOGIN|happypath|pass\nLIST\n" \
+    "LOGIN|testuser|testpass\nLIST\n" \
     "OK\|WELCOME.*BEGIN.*END"
 
 # Test 2: Happy Path - Upload
@@ -119,7 +121,7 @@ echo -n "Running test: Upload... "
 exec 3<>/dev/tcp/"$HOST"/"$PORT"
 # Send login and upload commands
 REMOTE_NAME="upload_test_$$.txt"
-echo -e "LOGIN|up|down\nUPLOAD|$REMOTE_NAME|$FILE_SIZE|$SHA256" >&3
+echo -e "LOGIN|testuser|testpass\nUPLOAD|$REMOTE_NAME|$FILE_SIZE|$SHA256" >&3
 # Read server responses (OK|WELCOME and READY)
 IFS= read -r login_resp <&3
 IFS= read -r ready_resp <&3
@@ -181,7 +183,7 @@ if [[ "$login_resp" != "OK|WELCOME" || "$ready_resp" != "READY" || "$pubt_ok" !=
   exit 1
 fi
 # HISTORY request and verification
-output=$(echo -e "LOGIN|sub1|pass\nHISTORY|$ROOM1|10\n" | nc -w 5 "$HOST" "$PORT")
+output=$(echo -e "LOGIN|testuser|testpass\nHISTORY|$ROOM1|10\n" | nc -w 5 "$HOST" "$PORT")
 flat=$(echo "$output" | tr -d '\n')
 # Expect: EVT|TEXT|<room>|...|1|<len>|<sha><payload>...OK|HISTORY
 if echo "$flat" | grep -qE "EVT\|TEXT\|$ROOM1\|[^|]*\|[^|]*\|1\|[0-9]+\|[0-9a-f]{64}.*$MSG1.*OK\|HISTORY"; then
@@ -217,7 +219,7 @@ for i in 1 2 3; do
 done
 
 echo -n "Running test: HISTORY since_id=1 returns ids 2,3 only... "
-out=$(echo -e "LOGIN|sub2|pass\nHISTORY|$ROOM2|50|1\n" | nc -w 5 "$HOST" "$PORT")
+out=$(echo -e "LOGIN|testuser|testpass\nHISTORY|$ROOM2|50|1\n" | nc -w 5 "$HOST" "$PORT")
 flat=$(echo "$out" | tr -d '\n')
 ok=1
 # Positive checks for id=2 and id=3 headers (field-anchored)
@@ -273,12 +275,12 @@ DATA_DIR=$(mktemp -d)
 SERVER_LOG="$DATA_DIR/server.log"
 SERVER_PID=0
 
-# Prepare legacy user and start server STRICT
-prepare_legacy_user "alice" "secret123" "somesalt"
+# Prepare test user and start server STRICT
+prepare_legacy_user "testuser" "testpass" "somesalt"
 start_server_strict
 
 echo -n "Running test: Legacy user login triggers Argon2 upgrade... "
-out=$(echo -e "LOGIN|alice|secret123\n" | nc -w 5 "$HOST" "$PORT")
+out=$(echo -e "LOGIN|testuser|testpass\n" | nc -w 5 "$HOST" "$PORT")
 if ! echo "$out" | tr -d '\n' | grep -q "OK|WELCOME"; then
   echo "FAIL"; echo "  Login output: $out"; exit 1
 fi
@@ -287,7 +289,7 @@ tail -10 "$SERVER_LOG" >&2
 # try detect upgrade under STRICT; fallback to non-strict upgrade once if needed
 check_upgraded() {
   for i in {1..100}; do # up to ~5s
-    if grep -qE '^alice::\$argon2id\$' "$DATA_DIR/users.txt"; then return 0; fi
+    if grep -qE '^testuser::\$argon2id\$' "$DATA_DIR/users.txt"; then return 0; fi
     sleep 0.05
   done
   return 1
@@ -309,7 +311,7 @@ else
   start_server
   # Give server time to load users file
   sleep 0.2
-  out_nr=$(echo -e "LOGIN|alice|secret123\n" | nc -w 5 "$HOST" "$PORT")
+  out_nr=$(echo -e "LOGIN|testuser|testpass\n" | nc -w 5 "$HOST" "$PORT")
   if ! echo "$out_nr" | tr -d '\n' | grep -q "OK|WELCOME"; then
     echo "FAIL"; echo "  Non-strict login output: $out_nr"; 
     echo "  users.txt content:"; cat "$DATA_DIR/users.txt"
@@ -323,7 +325,13 @@ else
   if check_upgraded; then
     echo "PASS (via non-strict)"
   else
-    echo "FAIL"; echo "  users.txt was not upgraded to argon2id"; cat "$DATA_DIR/users.txt"; exit 1
+    echo "FAIL"; echo "  users.txt was not upgraded to argon2id"; 
+    if [ -f "$DATA_DIR/users.txt" ]; then
+      cat "$DATA_DIR/users.txt"
+    else
+      echo "  users.txt file does not exist"
+    fi
+    exit 1
   fi
   # switch back to STRICT for final verification
   stop_server_keep_data
@@ -336,7 +344,7 @@ else
 fi
 
 echo -n "Running test: Argon2-verified login after upgrade... "
-out2=$(echo -e "LOGIN|alice|secret123\n" | nc -w 5 "$HOST" "$PORT")
+out2=$(echo -e "LOGIN|testuser|testpass\n" | nc -w 5 "$HOST" "$PORT")
 if echo "$out2" | tr -d '\n' | grep -q "OK|WELCOME"; then
   echo "PASS"
 else
