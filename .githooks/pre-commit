@@ -40,7 +40,11 @@ if [ -n "$PY_FILES" ]; then
 fi
 
 # Re-stage any changes done by formatters
-git add -A
+# git add -A  # nm
+
+# Re-stage only previously staged files (safe)
+git add $STAGED
+
 
 if [ "$have_failed" -ne 0 ]; then
   echo "[pre-commit] Formatting failed or tools missing. Aborting commit." >&2

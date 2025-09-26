@@ -375,10 +375,36 @@ static int is_safe_filename(const char *name) {
         return 0;
     for (const char *p = name; *p; ++p) {
         unsigned char c = (unsigned char)*p;
+        // 严格禁止路径分隔符，防止路径遍历攻击
+        if (c == '/' || c == '\\' || c == '\0' || c == '\n' || c == '\r')
+            return 0;
         if (!(c == '.' || c == '_' || c == '-' || (c >= '0' && c <= '9') ||
               (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')))
             return 0;
     }
+    return 1;
+}
+
+// 增强的文件安全检查函数
+static int is_safe_path(const char *path) {
+    if (!path || !*path)
+        return 0;
+    if (strlen(path) > PATH_MAX - 100) // 留出足够的安全余量
+        return 0;
+
+    // 检查是否包含路径遍历序列
+    if (strstr(path, "..") || strstr(path, "/../") || strstr(path, "\\..\\"))
+        return 0;
+
+    // 检查是否以/开头（绝对路径）
+    if (*path == '/')
+        return 0;
+
+    // 检查是否包含可疑的路径模式
+    if (strstr(path, "/etc/") || strstr(path, "/proc/") ||
+        strstr(path, "/sys/"))
+        return 0;
+
     return 1;
 }
 
@@ -587,6 +613,12 @@ static int handle_upload(int fd, const char *ip, const char *username,
         return -1;
     }
 
+    // 额外的路径安全检查
+    if (!is_safe_path(final_path) || !is_safe_path(tmp_path)) {
+        send_err(fd, "FORMAT", "unsafe path");
+        return -1;
+    }
+
     // 不允许覆盖已存在文件
     struct stat stf;
     if (stat(final_path, &stf) == 0) {
@@ -604,9 +636,16 @@ static int handle_upload(int fd, const char *ip, const char *username,
     SHA256_Init(&ctx);
     const size_t BUF = 8192;
     unsigned char *buf = (unsigned char *)malloc(BUF);
+    if (!buf) {
+        fclose(f);
+        send_err(fd, "INTERNAL", "malloc failed");
+        return -1;
+    }
     long long remain = size;
     while (remain > 0) {
         size_t chunk = (remain > (long long)BUF) ? BUF : (size_t)remain;
+        // 清空缓冲区，防止残留数据污染
+        memset(buf, 0, BUF);
         if (recv_exact(fd, buf, chunk) != 0) {
             fclose(f);
             remove(tmp_path);
@@ -614,7 +653,14 @@ static int handle_upload(int fd, const char *ip, const char *username,
             send_err(fd, "SIZE", "short read");
             return -1;
         }
-        fwrite(buf, 1, chunk, f);
+        size_t written = fwrite(buf, 1, chunk, f);
+        if (written != chunk) {
+            fclose(f);
+            remove(tmp_path);
+            free(buf);
+            send_err(fd, "INTERNAL", "write failed");
+            return -1;
+        }
         SHA256_Update(&ctx, buf, chunk);
         remain -= chunk;
     }
@@ -659,6 +705,13 @@ static int handle_download(int fd, const char *ip, const char *username,
         send_err(fd, "FORMAT", "name too long");
         return -1;
     }
+
+    // 额外的路径安全检查
+    if (!is_safe_path(path)) {
+        send_err(fd, "FORMAT", "unsafe path");
+        return -1;
+    }
+
     FILE *f = fopen(path, "rb");
     if (!f) {
         send_err(fd, "NOTFOUND", "file");
@@ -671,6 +724,11 @@ static int handle_download(int fd, const char *ip, const char *username,
     fseek(f, 0, SEEK_SET);
     const size_t BUF = 8192;
     unsigned char *buf = (unsigned char *)malloc(BUF);
+    if (!buf) {
+        fclose(f);
+        send_err(fd, "INTERNAL", "malloc failed");
+        return -1;
+    }
     for (;;) {
         size_t n = fread(buf, 1, BUF, f);
         if (n == 0)

@@ -91,6 +91,10 @@ jobs:
       - name: Run All Tests and Generate Coverage
         run: make coverage # 这个命令现在测试的是一个已安装的、完整的包
 
+      # 补充：安全测试
+      - name: Run Security & Corruption Tests
+        run: python3 tests/test_file_corruption_fix.py
+
       # ================================================================
       # ===== 【关键顺序调整】 END ======================================
       # ================================================================
