@@ -2,10 +2,10 @@ name: CI, Build and Release - GUI
 
 on:
   push:
-    branches: [ "main" ]
-    tags: [ "v*" ]
+    branches: [ "feature/gui" ]
+    tags: [ "v*gui*" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "feature/gui" ]
   workflow_dispatch: {}
 
 jobs:
@@ -64,7 +64,7 @@ jobs:
           path: dist/*
 
   publish-to-testpypi:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/feature/gui'
     needs: build-and-test
     permissions:
       id-token: write
