@@ -4,7 +4,18 @@ set -e
 # --- Test Configuration ---
 HOST=${1:-127.0.0.1}
 PORT=${2:-8080}
-DATA_DIR=$(mktemp -d)
+mktemp_server_dir() {
+  local sysname
+  sysname=$(uname -s 2>/dev/null || echo "")
+  local base="${TMPDIR:-/tmp}"
+  if [[ "$sysname" == "Darwin" ]]; then
+    base="/tmp"
+  fi
+  local template="${base%/}/drlms_proto.XXXXXX"
+  mktemp -d "$template"
+}
+
+DATA_DIR=$(mktemp_server_dir)
 SERVER_LOG="$DATA_DIR/server.log"
 SERVER_PID=0
 
@@ -66,8 +77,12 @@ function start_server_strict() {
 }
 
 function sha256_hex_concat() {
-    local a="$1"; local b="$2"
-    printf "%s%s" "$a" "$b" | sha256sum | cut -d' ' -f1
+  local a="$1"; local b="$2"
+  if command -v sha256sum >/dev/null 2>&1; then
+    printf "%s%s" "$a" "$b" | sha256sum | awk '{print $1}'
+  else
+    printf "%s%s" "$a" "$b" | shasum -a 256 | awk '{print $1}'
+  fi
 }
 
 # Prepare users.txt with legacy SHA256 format: user:salt:shahex
@@ -75,6 +90,24 @@ function prepare_legacy_user() {
     local user="$1"; local pass="$2"; local salt="$3"
     local hex=$(sha256_hex_concat "$pass" "$salt")
     echo "${user}:${salt}:${hex}" > "$DATA_DIR/users.txt"
+}
+
+function portable_file_size() {
+  local target="$1"
+  if stat -c%s "$target" >/dev/null 2>&1; then
+    stat -c%s "$target"
+  else
+    stat -f%z "$target"
+  fi
+}
+
+function portable_sha256() {
+  local target="$1"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$target" | awk '{print $1}'
+  else
+    shasum -a 256 "$target" | awk '{print $1}'
+  fi
 }
 
 # Cleanup on exit
@@ -113,8 +146,8 @@ run_test "Login and List" \
 # Create the test file in /tmp to ensure it's not in the server's data dir
 TEST_FILE="/tmp/upload_test_$$.txt"
 echo "hello world" > "$TEST_FILE"
-FILE_SIZE=$(stat -c%s "$TEST_FILE")
-SHA256=$(sha256sum "$TEST_FILE" | cut -d' ' -f1)
+FILE_SIZE=$(portable_file_size "$TEST_FILE")
+SHA256=$(portable_sha256 "$TEST_FILE")
 
 echo -n "Running test: Upload... "
 # This test is more complex and requires an interactive session, so it doesn't use run_test
@@ -271,7 +304,7 @@ PORT="$NEW_PORT"
 echo "[debug] Using dedicated port $PORT for strict upgrade test" >&2
 
 # New data dir
-DATA_DIR=$(mktemp -d)
+DATA_DIR=$(mktemp_server_dir)
 SERVER_LOG="$DATA_DIR/server.log"
 SERVER_PID=0
 

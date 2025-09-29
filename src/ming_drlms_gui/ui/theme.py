@@ -18,8 +18,8 @@ BORDER = "#94c3bf"
 BASE = 8
 
 
-def spacing(n: int) -> int:
-    return BASE * int(n)
+def spacing(n: float | int) -> float:
+    return BASE * float(n)
 
 
 def pixel_text(text: str, size: int = 12, color: str = TEXT) -> ft.Text:
@@ -30,7 +30,9 @@ def panel(content: ft.Control, title: str | None = None) -> ft.Container:
     body = content
     if title:
         body = ft.Column(
-            [pixel_text(title, 14), ft.Divider(), content], spacing=spacing(1)
+            [pixel_text(title, 14), ft.Divider(), content],
+            spacing=spacing(1),
+            expand=True,  # 确保Column可扩展
         )
     return ft.Container(
         content=body,
@@ -38,6 +40,7 @@ def panel(content: ft.Control, title: str | None = None) -> ft.Container:
         border=ft.border.all(2, BORDER),
         border_radius=8,
         padding=spacing(2),
+        expand=True,  # 确保Container可扩展
     )
 
 

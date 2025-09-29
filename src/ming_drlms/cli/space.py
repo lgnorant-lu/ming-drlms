@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import sys
 from pathlib import Path
-from typing import Optional
+from typing import Optional, cast
 
 import typer
 from rich import print
@@ -20,6 +21,14 @@ from ..i18n import t
 
 
 space_app = typer.Typer(help="shared rooms: subscribe/publish/history")
+
+
+def _emit_payload(txt: str) -> None:
+    if txt.endswith("\n"):
+        sys.stdout.write(txt)
+    else:
+        sys.stdout.write(txt + "\n")
+    sys.stdout.flush()
 
 
 @space_app.command("join", help=t("HELP.SPACE.JOIN"))
@@ -88,18 +97,17 @@ def space_join(
                             print(line)
                         continue
                     payload = recv_exact(s, payload_len)
+                    try:
+                        txt = payload.decode(errors="ignore")
+                    except Exception:
+                        txt = ""
                     if json_out:
                         print(line)
-                        try:
-                            txt = payload.decode(errors="ignore")
-                            print(txt, end="" if txt.endswith("\n") else "\n")
-                        except Exception:
-                            pass
+                        if txt:
+                            _emit_payload(txt)
                     else:
-                        try:
-                            print(payload.decode(errors="ignore"), end="")
-                        except Exception:
-                            pass
+                        if txt:
+                            _emit_payload(txt)
                     if eid > since_id:
                         since_id = eid
                         set_last_event_id(state, room_key, eid)
@@ -309,9 +317,10 @@ def space_history(
                 print(line)
                 try:
                     txt = payload.decode(errors="ignore") + tail
-                    print(txt, end="" if txt.endswith("\n") else "\n")
                 except Exception:
-                    pass
+                    txt = tail
+                if txt:
+                    _emit_payload(txt)
         else:
             if "OK|HISTORY" in line:
                 idx = line.find("OK|HISTORY")
@@ -374,7 +383,7 @@ def space_send(
             set_last_event_id(state, key, eid)
             save_state(state)
     else:
-        p = file
+        p = cast(Path, file)
         size = p.stat().st_size
         h = hashlib.sha256()
         with p.open("rb") as f:

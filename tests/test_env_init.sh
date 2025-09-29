@@ -4,26 +4,62 @@
 
 set -euo pipefail
 
+CLI_BIN="${CLI_BIN:-ming-drlms}"
+
 # 测试环境配置
 TEST_DATA_DIR="${TEST_DATA_DIR:-/tmp/drlms_test_env_$$}"
 TEST_PORT="${TEST_PORT:-8080}"
 TEST_HOST="${TEST_HOST:-127.0.0.1}"
+START_SERVER=1
 
-# 测试用户配置
-declare -A TEST_USERS=(
-    ["owner1"]="password"
-    ["sub1"]="password"
-    ["testuser"]="testpass"
-    ["alice"]="password"
-    ["bob"]="password"
+# 测试用户配置（使用兼容 Bash 3.2 的键值串）
+TEST_USERS=(
+    "owner1:password"
+    "sub1:password"
+    "testuser:testpass"
+    "alice:password"
+    "bob:password"
 )
 
 # 测试房间配置
-declare -A TEST_ROOMS=(
-    ["demo"]="owner1"
-    ["test_room"]="testuser"
-    ["integration_room"]="owner1"
+TEST_ROOMS=(
+    "demo:owner1"
+    "test_room:testuser"
+    "integration_room:owner1"
 )
+
+user_names() {
+    local names=()
+    local entry name
+    for entry in "${TEST_USERS[@]}"; do
+        IFS=':' read -r name _ <<<"$entry"
+        names+=("$name")
+    done
+    printf '%s\n' "${names[@]}"
+}
+
+user_password() {
+    local target="$1"
+    local entry name pwd
+    for entry in "${TEST_USERS[@]}"; do
+        IFS=':' read -r name pwd <<<"$entry"
+        if [[ "$name" == "$target" ]]; then
+            printf '%s' "$pwd"
+            return 0
+        fi
+    done
+    return 1
+}
+
+room_names() {
+    local rooms=()
+    local entry room _
+    for entry in "${TEST_ROOMS[@]}"; do
+        IFS=':' read -r room _ <<<"$entry"
+        rooms+=("$room")
+    done
+    printf '%s\n' "${rooms[@]}"
+}
 
 # 颜色输出
 RED='\033[0;31m'
@@ -78,8 +114,8 @@ check_dependencies() {
     
     local missing_deps=()
     
-    if ! command -v ming-drlms >/dev/null 2>&1; then
-        missing_deps+=("ming-drlms")
+    if ! command -v "$CLI_BIN" >/dev/null 2>&1 && [[ ! -x "$CLI_BIN" ]]; then
+        missing_deps+=("$CLI_BIN")
     fi
     
     if ! command -v nc >/dev/null 2>&1; then
@@ -111,12 +147,13 @@ setup_test_data_dir() {
 # 创建测试用户
 create_test_users() {
     log_info "Creating test users..."
-    
-    for user in "${!TEST_USERS[@]}"; do
-        local password="${TEST_USERS[$user]}"
+
+    local entry user password
+    for entry in "${TEST_USERS[@]}"; do
+        IFS=':' read -r user password <<<"$entry"
         log_info "Creating user: $user"
-        
-        if ! ming-drlms user add "$user" -d "$TEST_DATA_DIR" --password-from-stdin <<< "$password" >/dev/null 2>&1; then
+
+        if ! "$CLI_BIN" user add "$user" -d "$TEST_DATA_DIR" --password-from-stdin <<<"$password" >/dev/null 2>&1; then
             log_warning "Failed to create user $user (may already exist)"
         else
             log_success "User $user created"
@@ -139,6 +176,7 @@ start_test_server() {
     DRLMS_DATA_DIR="$TEST_DATA_DIR" \
     DRLMS_PORT="$TEST_PORT" \
     LD_LIBRARY_PATH=. \
+    DYLD_LIBRARY_PATH=. \
     ./log_collector_server > "$TEST_DATA_DIR/server.log" 2>&1 &
     
     local server_pid=$!
@@ -172,10 +210,11 @@ verify_test_environment() {
     fi
     
     # 测试用户登录
-    for user in "${!TEST_USERS[@]}"; do
-        local password="${TEST_USERS[$user]}"
+    local entry user password
+    for entry in "${TEST_USERS[@]}"; do
+        IFS=':' read -r user password <<<"$entry"
         log_info "Testing login for user: $user"
-        
+
         if ! echo -e "LOGIN|$user|$password\nQUIT\n" | nc -w 5 "$TEST_HOST" "$TEST_PORT" | grep -q "OK|WELCOME"; then
             log_error "Login failed for user: $user"
             return 1
@@ -189,10 +228,20 @@ verify_test_environment() {
 # 显示测试环境信息
 show_test_info() {
     log_info "Test Environment Information:"
+    local users_str=""
+    local rooms_str=""
+    local name
+    while IFS= read -r name; do
+        users_str+="$name "
+    done < <(user_names)
+    while IFS= read -r name; do
+        rooms_str+="$name "
+    done < <(room_names)
+
     echo "  Data Directory: $TEST_DATA_DIR"
     echo "  Server: $TEST_HOST:$TEST_PORT"
-    echo "  Users: ${!TEST_USERS[*]}"
-    echo "  Rooms: ${!TEST_ROOMS[*]}"
+    echo "  Users: ${users_str%% }"
+    echo "  Rooms: ${rooms_str%% }"
     echo "  Server PID: $(cat /tmp/drlms_test_srv.pid 2>/dev/null || echo 'N/A')"
     echo ""
     log_info "Environment variables for tests:"
@@ -221,12 +270,17 @@ main() {
                 TEST_DATA_DIR="$2"
                 shift 2
                 ;;
+            --no-server)
+                START_SERVER=0
+                shift
+                ;;
             --help)
                 echo "Usage: $0 [OPTIONS]"
                 echo "Options:"
                 echo "  --keep-data     Keep test data directory after exit"
                 echo "  --port PORT     Use specific port (default: 8080)"
                 echo "  --data-dir DIR  Use specific data directory"
+                echo "  --no-server     Prepare data only (do not start server)"
                 echo "  --help          Show this help message"
                 exit 0
                 ;;
@@ -241,15 +295,20 @@ main() {
     check_dependencies
     setup_test_data_dir
     create_test_users
-    start_test_server
-    verify_test_environment
-    show_test_info
+    if [[ "$START_SERVER" == "1" ]]; then
+        start_test_server
+        verify_test_environment
+        show_test_info
+    else
+        log_info "Skipping server startup (--no-server)"
+        show_test_info
+    fi
     
     log_success "Test environment initialization completed!"
     log_info "Use 'export TEST_DATA_DIR=\"$TEST_DATA_DIR\"' in your test scripts"
     
     # 如果设置了保持数据，则等待用户输入
-    if [[ "${KEEP_TEST_DATA:-0}" == "1" ]]; then
+    if [[ "$START_SERVER" == "1" && "${KEEP_TEST_DATA:-0}" == "1" ]]; then
         log_info "Press Enter to stop the test server and exit..."
         read -r
     fi

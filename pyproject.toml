@@ -1,7 +1,7 @@
 # tools/cli/pyproject.toml
 
 [build-system]
-requires = ["setuptools>=61.0", "setuptools-scm>=7.1"]
+requires = ["setuptools>=61.0", "setuptools-scm>=7.1", "wheel>=0.38"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -24,7 +24,12 @@ dependencies = [
     "psutil",
     "argon2-cffi",
     "requests",
-    "packaging",
+    "packaging>=24.2",
+]
+
+[project.optional-dependencies]
+gui = [
+    "flet>=0.28.3,<0.29.0",
 ]
 
 [project.urls]
@@ -33,9 +38,13 @@ dependencies = [
 [project.scripts]
 ming-drlms = "ming_drlms.main:app"
 
+[project.gui-scripts]
+ming-drlms-gui = "ming_drlms_gui.app:main"
+
 [tool.setuptools]
 package-dir = {"" = "src"}
 include-package-data = true
+# license-files = ["LICENSE"]
 
 [tool.setuptools.package-data]
 "ming_drlms" = ["cli_help/*.md"]

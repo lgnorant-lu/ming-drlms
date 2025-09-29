@@ -1,0 +1,405 @@
+"""
+---------------------------------------------------------------
+File name:                  room_list.py
+Author:                     Ignorant-lu
+Date created:               2025/09/28
+Description:                房间列表管理组件 - F-M3-01实现
+----------------------------------------------------------------
+
+Changed history:
+                            2025/09/28: 初始创建;
+----
+"""
+
+from __future__ import annotations
+
+import flet as ft
+from ..ui.theme import pixel_text, spacing, panel, pixel_button
+from ..state import Session
+from ming_drlms.core.types import RoomInfo
+from typing import Optional, Callable, List
+from ming_drlms.core.room_protocol import get_available_rooms
+
+
+class RoomList:
+    """房间列表管理组件 - F-M3-01"""
+
+    def __init__(self, i18n: dict, sess: Session, page: ft.Page = None):
+        self.i18n = i18n
+        self.sess = sess
+        self.page = page
+        self.room_selected_callback: Optional[Callable[[str, str], None]] = None
+        self.current_room_id: Optional[str] = None
+
+        # 房间数据（从服务器加载）
+        self.rooms: List[RoomInfo] = []
+
+        # 延迟创建UI组件
+        self._components_created = False
+
+    def load_rooms(self):
+        """从服务器加载房间列表"""
+        if not self.sess.sock or not self.sess.authed:
+            print(
+                "DEBUG: Cannot load rooms - not connected or authenticated", flush=True
+            )
+            return
+
+        try:
+            print("DEBUG: Loading rooms from server...", flush=True)
+            rooms = get_available_rooms(self.sess.sock)
+            print(f"DEBUG: Loaded {len(rooms)} rooms from server", flush=True)
+
+            # 更新房间列表
+            self.rooms = rooms
+
+            # 更新Session中的房间信息
+            for room in rooms:
+                self.sess.add_room(room)
+
+            # 刷新UI显示
+            if self._components_created:
+                self._update_room_display()
+                if self.page:
+                    self.page.update()
+
+        except Exception as e:
+            print(f"DEBUG: Error loading rooms: {e}", flush=True)
+            # 如果加载失败，使用默认房间
+            try:
+                self._load_default_rooms()
+            except Exception as e2:
+                print(f"DEBUG: Error loading default rooms: {e2}", flush=True)
+                # 如果连默认房间都加载失败，显示错误信息
+                self.room_items.controls.clear()
+                self.room_items.controls.append(
+                    pixel_text("Failed to load rooms", 10, "error")
+                )
+
+    def _load_default_rooms(self):
+        """加载默认房间（当服务器加载失败时使用）"""
+        print("DEBUG: Loading default rooms", flush=True)
+        self.rooms = [
+            RoomInfo(
+                name="general",
+                owner="system",
+                policy=0,
+                subscriber_count=0,
+                last_event_id=0,
+                created_at=0,
+            ),
+            RoomInfo(
+                name="dev",
+                owner="system",
+                policy=0,
+                subscriber_count=0,
+                last_event_id=0,
+                created_at=0,
+            ),
+            RoomInfo(
+                name="design",
+                owner="system",
+                policy=0,
+                subscriber_count=0,
+                last_event_id=0,
+                created_at=0,
+            ),
+        ]
+
+        # 更新Session中的房间信息
+        for room in self.rooms:
+            self.sess.add_room(room)
+
+        # 刷新UI显示
+        if self._components_created:
+            self._update_room_display()
+            if self.page:
+                self.page.update()
+
+    def _create_components(self):
+        """创建UI组件"""
+        # 搜索框
+        self.search_field = ft.TextField(
+            label=self.i18n.get("rooms.search", "Search rooms..."),
+            on_change=self._on_search_change,
+        )
+
+        # 创建房间按钮
+        self.create_btn = pixel_button(
+            self.i18n.get("rooms.create", "Create Room"), "primary"
+        )
+        self.create_btn.on_click = self._on_create_room
+
+        # 房间列表
+        self.room_items = ft.Column(spacing=spacing(1))
+
+        # 刷新按钮
+        self.refresh_btn = pixel_button(
+            self.i18n.get("refresh.btn", "Refresh"), "accent"
+        )
+        self.refresh_btn.on_click = lambda _: self.load_rooms()
+
+    def _on_search_change(self, e):
+        """搜索框变化回调"""
+        search_term = e.control.value.lower()
+        self._filter_rooms(search_term)
+
+    def _filter_rooms(self, search_term: str):
+        """过滤房间列表"""
+        self.room_items.controls.clear()
+
+        filtered_rooms = [
+            room for room in self.rooms if search_term in room.name.lower()
+        ]
+
+        if not filtered_rooms:
+            self.room_items.controls.append(
+                pixel_text(self.i18n.get("rooms.empty", "No rooms found"), 10)
+            )
+        else:
+            for room in filtered_rooms:
+                self.room_items.controls.append(self._make_room_item(room))
+
+        # 更新页面
+        if self.page:
+            self.page.update()
+
+    def _update_room_display(self):
+        """更新房间显示"""
+        try:
+            self.room_items.controls.clear()
+
+            if not self.rooms:
+                self.room_items.controls.append(
+                    pixel_text(self.i18n.get("rooms.empty", "No rooms available"), 10)
+                )
+            else:
+                for room in self.rooms:
+                    try:
+                        self.room_items.controls.append(self._make_room_item(room))
+                    except Exception as e:
+                        print(
+                            f"DEBUG: Error creating room item for {room.name}: {e}",
+                            flush=True,
+                        )
+                        # 即使单个房间项创建失败，也继续处理其他房间
+                        continue
+
+        except Exception as e:
+            print(f"DEBUG: Error updating room display: {e}", flush=True)
+            # 如果更新失败，尝试恢复显示
+            try:
+                self.room_items.controls.clear()
+                self.room_items.controls.append(
+                    pixel_text("Error loading rooms", 10, "error")
+                )
+            except Exception:
+                pass  # 连错误显示都失败时，静默处理
+
+    def _make_room_item(self, room: RoomInfo):
+        """创建房间项"""
+        is_selected = room.name == self.current_room_id
+
+        def on_room_click(_):
+            self.current_room_id = room.name
+            if self.room_selected_callback:
+                self.room_selected_callback(room.name, room.name)
+            self._update_selection_styles()
+            if self.page:
+                self.page.update()
+
+        # 获取房间中的实际用户数量
+        user_count = self.sess.get_room_user_count(room.name)
+        if user_count == 0:
+            user_count = 1  # 至少显示当前用户
+
+        # 房间信息显示
+        room_info = ft.Column(
+            [
+                pixel_text(room.name, 12, "primary"),
+                pixel_text(f"👥 {user_count} users", 10, "muted"),
+                pixel_text(f"Owner: {room.owner}", 9, "muted"),
+            ],
+            spacing=2,
+            tight=True,
+        )
+
+        return ft.Container(
+            content=room_info,
+            padding=spacing(1),
+            bgcolor="#d4edda" if is_selected else "#f0f8f0",
+            border_radius=6,
+            border=ft.border.all(1, "#4CAF50" if is_selected else "transparent"),
+            on_click=on_room_click,
+        )
+
+    def _update_selection_styles(self):
+        """更新选择样式"""
+        for item in self.room_items.controls:
+            if hasattr(item, "content") and hasattr(item.content, "controls"):
+                # 获取房间ID（从第一个文本控件获取房间名）
+                room_name = item.content.controls[0].value
+                room_id = next(
+                    (r.name for r in self.rooms if r.name == room_name), None
+                )
+                is_selected = room_id == self.current_room_id
+
+                item.bgcolor = "#d4edda" if is_selected else "#f0f8f0"
+                item.border = ft.border.all(
+                    1, "#4CAF50" if is_selected else "transparent"
+                )
+
+    def _on_create_room(self, _):
+        """创建房间按钮点击"""
+        # 创建房间对话框
+        room_name_field = ft.TextField(
+            label=self.i18n.get("rooms.name", "Room Name"),
+            value="",
+        )
+        room_desc_field = ft.TextField(
+            label=self.i18n.get("rooms.description", "Description"),
+            value="",
+            multiline=True,
+            max_lines=3,
+        )
+
+        def on_create(_):
+            name = room_name_field.value.strip()
+
+            if not name:
+                return
+
+            # 创建新房间
+            room_id = name.lower().replace(" ", "_")
+            new_room = RoomInfo(
+                name=room_id,
+                owner=self.sess.user,
+                policy=0,
+                subscriber_count=1,
+                last_event_id=0,
+                created_at=0,
+            )
+
+            self.rooms.append(new_room)
+            self.sess.add_room(new_room)
+            self._update_room_display()
+            if self.page:
+                self.page.update()
+
+            # 显示成功提示
+            try:
+                # 创建成功提示对话框
+                success_dialog = ft.AlertDialog(
+                    title=pixel_text("✅ 房间创建成功", 14),
+                    content=pixel_text(f"房间 '{room_id}' 已成功创建！", 12),
+                    actions=[
+                        ft.TextButton(
+                            "确定",
+                            on_click=lambda _: setattr(success_dialog, "open", False)
+                            or self.page.update(),
+                        ),
+                    ],
+                )
+
+                self.page.dialog = success_dialog
+                success_dialog.open = True
+                self.page.update()
+            except Exception as e:
+                print(f"DEBUG: Failed to show success dialog: {e}", flush=True)
+
+            # 关闭创建对话框
+            create_dialog.open = False
+            if hasattr(self, "page"):
+                self.page.update()
+
+        create_dialog = ft.AlertDialog(
+            title=pixel_text(self.i18n.get("rooms.create", "Create Room"), 14),
+            content=ft.Column(
+                [
+                    room_name_field,
+                    room_desc_field,
+                ],
+                spacing=spacing(1),
+            ),
+            actions=[
+                ft.TextButton(
+                    self.i18n.get("cancel", "Cancel"),
+                    on_click=lambda _: setattr(create_dialog, "open", False)
+                    or self.page.update(),
+                ),
+                ft.TextButton(
+                    self.i18n.get("create", "Create"),
+                    on_click=on_create,
+                ),
+            ],
+        )
+
+        if hasattr(self, "page"):
+            self.page.dialog = create_dialog
+            create_dialog.open = True
+            self.page.update()
+
+    def set_room_selected_callback(self, callback: Callable[[str, str], None]):
+        """设置房间选择回调"""
+        self.room_selected_callback = callback
+
+    def set_page(self, page: ft.Page):
+        """设置页面引用（用于对话框更新）"""
+        self.page = page
+
+    def build(self) -> ft.Control:
+        """构建组件UI"""
+        # 延迟创建UI组件
+        if not self._components_created:
+            try:
+                self._create_components()
+                self._components_created = True
+                print("DEBUG: RoomList components created", flush=True)
+            except Exception as e:
+                print(f"DEBUG: Failed to create RoomList components: {e}", flush=True)
+                # 创建简单的错误显示
+                return ft.Container(
+                    content=ft.Text(f"Room List Error: {e}", color="red"), padding=10
+                )
+
+        # 设置页面引用
+        if hasattr(self, "page"):
+            self.set_page(self.page)
+
+        # 初始加载房间
+        self.load_rooms()
+
+        # 房间列表滚动容器
+        rooms_scrollable = ft.Container(
+            content=self.room_items,
+            expand=True,
+            bgcolor="#ffffff,0.1",
+            border_radius=8,
+            padding=spacing(1),
+            alignment=ft.alignment.top_left,
+        )
+
+        return panel(
+            ft.Column(
+                [
+                    # 搜索和操作栏
+                    ft.Row(
+                        [
+                            self.search_field,
+                        ],
+                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                    ),
+                    ft.Row(
+                        [
+                            self.create_btn,
+                            self.refresh_btn,
+                        ],
+                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                    ),
+                    # 房间列表
+                    rooms_scrollable,
+                ],
+                spacing=spacing(1),
+            ),
+            self.i18n.get("panel.rooms.title", "Rooms"),
+        )

@@ -133,8 +133,15 @@ def view(i18n: dict, page: ft.Page, sess: Session, on_disconnect) -> ft.Containe
                 page.update()
 
     file_picker = ft.FilePicker(on_result=on_file_picked)
-    page.overlay.extend([file_picker, upload_snackbar, progress_overlay])
+
+    # 延迟添加overlay，避免页面初始化冲突
+    def add_overlays():
+        if hasattr(page, "overlay"):
+            page.overlay.extend([file_picker, upload_snackbar, progress_overlay])
+
+    # 在页面更新后添加overlay
     page.update()
+    add_overlays()
 
     def on_upload(_):
         try:
@@ -248,7 +255,8 @@ def view(i18n: dict, page: ft.Page, sess: Session, on_disconnect) -> ft.Containe
                     page.update()
 
         save_picker = ft.FilePicker(on_result=on_save_path_picked)
-        page.overlay.append(save_picker)
+        if hasattr(page, "overlay"):
+            page.overlay.append(save_picker)
         page.update()
         save_picker.save_file(file_name=selected_file)
 

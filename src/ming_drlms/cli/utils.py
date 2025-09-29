@@ -9,9 +9,23 @@ from typing import Optional
 
 from rich import print  # noqa: F401
 
-from .._version import __version__
+try:
+    from .._version import __version__
+except ModuleNotFoundError:
+    try:
+        from importlib.metadata import version as _pkg_version
+
+        __version__ = _pkg_version("ming-drlms")
+    except Exception:
+        __version__ = "0.0.0"
 from ..config import load_config
 from ..update_check import maybe_notify_new_version
+from ming_drlms.core.protocol import (
+    tcp_connect,  # re-exported for CLI usage
+    recv_line,
+    recv_exact,
+    login,
+)
 
 
 def detect_root() -> Path:
@@ -78,8 +92,11 @@ def maybe_banner():
 def env_with(**kwargs) -> dict:
     env = os.environ.copy()
     env.setdefault("LD_LIBRARY_PATH", str(ROOT))
+    env.setdefault("DYLD_LIBRARY_PATH", env.get("LD_LIBRARY_PATH", ""))
     for k, v in kwargs.items():
         env[k] = str(v)
+        if k == "LD_LIBRARY_PATH" and "DYLD_LIBRARY_PATH" not in kwargs:
+            env["DYLD_LIBRARY_PATH"] = str(v)
     return env
 
 
@@ -100,46 +117,7 @@ def is_listening(port: int, host: str = "127.0.0.1") -> bool:
             return False
 
 
-def tcp_connect(host: str, port: int, timeout: float = 5.0):
-    s = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
-    s.settimeout(timeout)
-    s.connect((host, port))
-    return s
-
-
-def recv_line(sock: _socket.socket) -> str:
-    buf = bytearray()
-    while True:
-        ch = sock.recv(1)
-        if not ch or ch == b"\n":
-            break
-        buf.extend(ch)
-    # 修剪 CRLF 文件可能遗存的尾随回车符
-    try:
-        s = buf.decode(errors="ignore")
-        if s.endswith("\r"):
-            return s[:-1]
-        return s
-    except Exception:
-        return buf.decode(errors="ignore")
-
-
-def recv_exact(sock: _socket.socket, nbytes: int) -> bytes:
-    view = bytearray()
-    need = nbytes
-    while need > 0:
-        chunk = sock.recv(need)
-        if not chunk:
-            break
-        view.extend(chunk)
-        need -= len(chunk)
-    return bytes(view)
-
-
-def login(sock: _socket.socket, user: str, password: str) -> bool:
-    sock.sendall(f"LOGIN|{user}|{password}\n".encode())
-    resp = recv_line(sock)
-    return resp.startswith("OK|") or resp == "OK"
+# tcp_connect/recv_line/recv_exact/login are imported from ming_drlms.core.protocol
 
 
 def gather_metadata() -> str:

@@ -4,7 +4,17 @@ import atexit
 from typing_extensions import Annotated
 import typer
 
-from .._version import __version__
+try:  # pragma: no cover - defensive fallback for packaging glitches
+    from .._version import __version__
+except (
+    ModuleNotFoundError
+):  # setuptools-scm write_to missing (e.g. editable install failure)
+    try:
+        from importlib.metadata import version as _pkg_version
+
+        __version__ = _pkg_version("ming-drlms")
+    except Exception:  # pragma: no cover
+        __version__ = "0.0.0"
 
 app = typer.Typer(help="ming-drlms: Pretty CLI for DRLMS server and client")
 

@@ -25,11 +25,64 @@ NC_FLAGS=${NC_FLAGS:--w 2}
 # allow skipping teardown case in FAST mode unless explicitly disabled
 SKIP_TEARDOWN=${SKIP_TEARDOWN:-$FAST}
 
+timeout_cmd() {
+  local duration="$1"; shift || true
+  local bin=""
+  if command -v timeout >/dev/null 2>&1; then
+    bin="timeout"
+  elif command -v gtimeout >/dev/null 2>&1; then
+    bin="gtimeout"
+  fi
+  if [[ -n "$bin" ]]; then
+    set +e
+    "$bin" "$duration" "$@"
+    local rc=$?
+    set -e
+    return $rc
+  fi
+  local py=${PYTHON_BIN:-python3}
+  set +e
+  "$py" - "$duration" "$@" <<'PY'
+import os
+import sys
+import subprocess
+
+def parse_duration(raw: str) -> float:
+    raw = raw.strip().lower()
+    if raw.endswith('s'):
+        raw = raw[:-1]
+    if not raw:
+        return 0.0
+    return float(raw)
+
+duration = parse_duration(sys.argv[1])
+cmd = sys.argv[2:]
+try:
+    completed = subprocess.run(cmd, timeout=duration)
+    sys.exit(completed.returncode)
+except subprocess.TimeoutExpired as exc:
+    if exc.stdout:
+        if isinstance(exc.stdout, bytes):
+            sys.stdout.buffer.write(exc.stdout)
+        else:
+            sys.stdout.write(exc.stdout)
+    if exc.stderr:
+        if isinstance(exc.stderr, bytes):
+            sys.stderr.buffer.write(exc.stderr)
+        else:
+            sys.stderr.write(exc.stderr)
+    sys.exit(124)
+PY
+  local rc=$?
+  set -e
+  return $rc
+}
+
 # helpers: robust join + pid + readiness
 start_join_user() {
   # $1 user, $2 pass, $3 outfile, $4 pidfile
   (
-    HOME="$ORIG_HOME" timeout 20s ming-drlms space join --room "$ROOM" -H "$HOST" -p "$PORT" -u "$1" -P "$2" > "$3" 2>&1 &
+    PYTHONUNBUFFERED=1 HOME="$ORIG_HOME" timeout_cmd 20s "$CLI" space join --room "$ROOM" -H "$HOST" -p "$PORT" -u "$1" -P "$2" > "$3" 2>&1 &
     echo $! > "$4"
   )
 }
@@ -89,7 +142,7 @@ trap 'rm -rf "$TMPHOME"; if [[ -f /tmp/drlms_space_srv.pid ]]; then kill -TERM "
 # 启动 server（非严格）若未监听
 if ! nc -z "$HOST" "$PORT" >/dev/null 2>&1; then
   echo "[info] starting server at $HOST:$PORT"
-  DRLMS_AUTH_STRICT=0 DRLMS_DATA_DIR="$TEST_DATA_DIR" LD_LIBRARY_PATH=. ./log_collector_server >/tmp/drlms_server.log 2>&1 &
+  DRLMS_AUTH_STRICT=0 DRLMS_DATA_DIR="$TEST_DATA_DIR" DRLMS_PORT="$PORT" LD_LIBRARY_PATH=. DYLD_LIBRARY_PATH=. ./log_collector_server >/tmp/drlms_server.log 2>&1 &
   echo $! > /tmp/drlms_space_srv.pid
   sleep 0.8
 fi
@@ -97,7 +150,9 @@ fi
 # 需要 CLI（优先使用 pipx 安装的 ming-drlms），可通过环境变量 CLI 覆盖
 CLI=${CLI:-"$HOME/.local/bin/ming-drlms"}
 if [[ ! -x "$CLI" ]]; then
-  if command -v ming-drlms >/dev/null 2>&1; then
+  if command -v "$CLI" >/dev/null 2>&1; then
+    CLI=$(command -v "$CLI")
+  elif command -v ming-drlms >/dev/null 2>&1; then
     CLI=$(command -v ming-drlms)
   else
     echo "[skip] ming-drlms not found (pipx/system). Set CLI env or install and retry"; exit 0
@@ -110,20 +165,29 @@ fi
 
 echo "[CASE] 去重：同用户多次重连仅收到一次"
 # 首次订阅：后台 + 限时
-(HOME="$ORIG_HOME" timeout 8s "$CLI" space join --room "$ROOM" -H "$HOST" -p "$PORT" -u "$U1" -P "$PWD1" --since-id 0 > /tmp/join1.log 2>&1 || true) &
-sleep 0.5
+(HOME="$ORIG_HOME" timeout_cmd 8s "$CLI" space join --room "$ROOM" -H "$HOST" -p "$PORT" -u "$U1" -P "$PWD1" --since-id 0 > /tmp/join1.log 2>&1 || true) &
+echo $! > /tmp/join1.pid
+wait_pid_alive /tmp/join1.pid 100 || true
+sleep 1.2
 # 发布一条文本事件
 HOME="$ORIG_HOME" "$CLI" space send --room "$ROOM" -H "$HOST" -p "$PORT" -u "$U1" -P "$PWD1" -t "once-event-123"
+wait_log_has /tmp/join1.log 'once-event-123' 120 || true
 sleep 0.6
 # 二次订阅（使用保存的 since-id）
-( HOME="$ORIG_HOME" timeout 5s "$CLI" space join --room "$ROOM" -H "$HOST" -p "$PORT" -u "$U1" -P "$PWD1" --since-id -1 > /tmp/join2.log 2>&1 || true )
+( PYTHONUNBUFFERED=1 HOME="$ORIG_HOME" timeout_cmd 5s "$CLI" space join --room "$ROOM" -H "$HOST" -p "$PORT" -u "$U1" -P "$PWD1" --since-id -1 > /tmp/join2.log 2>&1 || true )
 # CLI 在非 --json 模式下仅打印 TEXT 载荷本身，因此以载荷匹配
 CNT1=$(grep -c 'once-event-123' /tmp/join1.log || true)
 CNT2=$(grep -c 'once-event-123' /tmp/join2.log || true)
 TOTAL=$(( (CNT1>0?1:0) + (CNT2>0?1:0) ))
 if [[ "${TOTAL:-0}" -ne 1 ]]; then
+  echo "[debug] join1.log (first 40 lines):"
+  sed -n '1,40p' /tmp/join1.log || true
+  echo "[debug] join2.log (first 40 lines):"
+  sed -n '1,40p' /tmp/join2.log || true
+  echo "[debug] PIDs: join1=$(cat /tmp/join1.pid 2>/dev/null || echo '<missing>')"
   echo "[error] 去重失败：期望收到 1 次，实际 CNT1=$CNT1 CNT2=$CNT2"; exit 1
 fi
+rm -f /tmp/join1.pid
 echo "[OK] 去重通过（收到次数==1）"
 
 # 保持两个订阅用于策略测试：先仅启动 U1，确保其成为 owner，再按策略分别引入 U2
@@ -145,14 +209,14 @@ wait_pid_alive /tmp/j_owner.pid 100 || true
 # retain 策略：U1 下线，U2 仍可接收发布
 echo "[CASE] 策略 retain 行为"
 # 设置策略前尚无 U2 连接，避免 owner 判定竞态
-timeout 5s env HOME="$ORIG_HOME" "$CLI" space room set-policy --room "$ROOM" --policy retain -H "$HOST" -p "$PORT" -u "$U1" -P "$PWD1" | sed -n '1,2p' || true
+timeout_cmd 5s env PYTHONUNBUFFERED=1 HOME="$ORIG_HOME" "$CLI" space room set-policy --room "$ROOM" --policy retain -H "$HOST" -p "$PORT" -u "$U1" -P "$PWD1" | sed -n '1,2p' || true
 # 现在引入 U2 订阅者
 start_join_user "$U2" "$PWD2" /tmp/j_sub.log /tmp/j_sub.pid
 wait_pid_alive /tmp/j_sub.pid 100 || true
 # owner 下线后，retain 下 U2 仍可接收
 if [[ -f /tmp/j_owner.pid ]]; then kill -TERM "$(cat /tmp/j_owner.pid)" 2>/dev/null || true; fi
 sleep 0.4
-timeout 8s env HOME="$ORIG_HOME" "$CLI" space send --room "$ROOM" -H "$HOST" -p "$PORT" -u "$U2" -P "$PWD2" -t "retain-msg-xyz" || true
+timeout_cmd 8s env PYTHONUNBUFFERED=1 HOME="$ORIG_HOME" "$CLI" space send --room "$ROOM" -H "$HOST" -p "$PORT" -u "$U2" -P "$PWD2" -t "retain-msg-xyz" || true
 if ! wait_log_has /tmp/j_sub.log 'retain-msg-xyz' "$RETAIN_LOG_WAIT_LOOPS"; then
   echo "[error] retain: U2 未收到消息"; exit 1
 fi
@@ -168,7 +232,7 @@ echo "[CASE] 策略 delegate 行为"
 # 重新建立 U1 连接以便设置策略
 start_join_user "$U1" "$PWD1" /tmp/j_owner2.log /tmp/j_owner2.pid
 wait_pid_alive /tmp/j_owner2.pid 100 || true
-timeout 5s env HOME="$ORIG_HOME" "$CLI" space room set-policy --room "$ROOM" --policy delegate -H "$HOST" -p "$PORT" -u "$U1" -P "$PWD1" | sed -n '1,2p' || true
+timeout_cmd 5s env PYTHONUNBUFFERED=1 HOME="$ORIG_HOME" "$CLI" space room set-policy --room "$ROOM" --policy delegate -H "$HOST" -p "$PORT" -u "$U1" -P "$PWD1" | sed -n '1,2p' || true
 if [[ -f /tmp/j_owner2.pid ]]; then kill -TERM "$(cat /tmp/j_owner2.pid)" 2>/dev/null || true; fi
 {
   ok=0
@@ -179,7 +243,7 @@ if [[ -f /tmp/j_owner2.pid ]]; then kill -TERM "$(cat /tmp/j_owner2.pid)" 2>/dev
   done
   if [[ $ok -ne 1 ]]; then
     # 兜底：由 U2 尝试自转移（若已是 owner 应返回 OK|TRANSFER|U2；否则 ERR|PERM）
-    x=$(timeout 5s env HOME="$ORIG_HOME" "$CLI" space room transfer --room "$ROOM" --new-owner "$U2" -H "$HOST" -p "$PORT" -u "$U2" -P "$PWD2" | sed -n '1p') || true
+  x=$(timeout_cmd 5s env PYTHONUNBUFFERED=1 HOME="$ORIG_HOME" "$CLI" space room transfer --room "$ROOM" --new-owner "$U2" -H "$HOST" -p "$PORT" -u "$U2" -P "$PWD2" | sed -n '1p') || true
     if echo "$x" | grep -q "^OK|TRANSFER|$U2"; then
       ok=1
     else
@@ -220,7 +284,7 @@ else
   wait_pid_alive /tmp/j_owner3.pid 100 || true
 fi
 
-timeout 5s env HOME="$ORIG_HOME" "$CLI" space room set-policy --room "$ROOM" --policy teardown -H "$HOST" -p "$PORT" -u "$owner_user" -P "$owner_pwd" | sed -n '1,2p' || true
+timeout_cmd 5s env PYTHONUNBUFFERED=1 HOME="$ORIG_HOME" "$CLI" space room set-policy --room "$ROOM" --policy teardown -H "$HOST" -p "$PORT" -u "$owner_user" -P "$owner_pwd" | sed -n '1,2p' || true
 
 # 主动关闭 owner 连接（触发 server 广播并清理）
 if [[ -f "$owner_pf" ]]; then kill -TERM "$(cat "$owner_pf")" 2>/dev/null || true; fi
@@ -241,7 +305,7 @@ fi
 
 # 319 秒超时：>60s 空闲不应断（快跑模式可缩短）
 echo "[CASE] SUB 空闲 >${IDLE_SECONDS}s 保持连接（无需等满 319s）"
-if HOME="$ORIG_HOME" timeout "$IDLE_SECONDS"s "$CLI" space join --room "$ROOM" -H "$HOST" -p "$PORT" -u "$U2" -P "$PWD2" > /tmp/j_idle.log 2>&1; then
+if PYTHONUNBUFFERED=1 HOME="$ORIG_HOME" timeout_cmd "$IDLE_SECONDS"s "$CLI" space join --room "$ROOM" -H "$HOST" -p "$PORT" -u "$U2" -P "$PWD2" > /tmp/j_idle.log 2>&1; then
   echo "[error] 连接在 65s 内主动退出（期望超时 124）"; exit 1
 else
   rc=$?; if [[ $rc -ne 124 ]]; then echo "[error] timeout 返回码=$rc（期望 124）"; exit 1; fi

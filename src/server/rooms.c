@@ -1,11 +1,13 @@
 #include "rooms.h"
+#include "sqlite_storage.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <pthread.h>
+#include "platform/platform.h"
 #include <ctype.h>
+#include <errno.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <time.h>
@@ -16,7 +18,7 @@ typedef struct Subscriber {
 } Subscriber;
 
 struct Room {
-    pthread_mutex_t mu;
+    platform_mutex_t mu;
     Subscriber *subs;
     size_t subs_len;
     size_t subs_cap;
@@ -34,7 +36,20 @@ typedef struct RoomNode {
 
 static RoomNode *g_rooms = NULL;
 static char g_rooms_dir[1024] = {0};
-static pthread_mutex_t g_rooms_mu = PTHREAD_MUTEX_INITIALIZER;
+static platform_mutex_t g_rooms_mu;
+
+// SQLite存储
+static SQLiteStorage g_sqlite_storage = {0};
+static int g_use_sqlite = 0; // 0=使用文件存储，1=使用SQLite存储
+
+typedef struct {
+    int fd;
+    long long rate_bps;
+} HistorySendContext;
+
+static int send_all(int fd, const void *buf, size_t len);
+static int send_history_callback(void *user_data, const unsigned char *data,
+                                 size_t len);
 
 static int ensure_dir(const char *path, mode_t mode) {
     struct stat st;
@@ -49,6 +64,8 @@ static int ensure_dir(const char *path, mode_t mode) {
 int rooms_init(const char *base_dir) {
     if (!base_dir || !*base_dir)
         return -1;
+    if (platform_mutex_init(&g_rooms_mu) != 0)
+        return -1;
     size_t n = snprintf(g_rooms_dir, sizeof g_rooms_dir, "%s/rooms", base_dir);
     if (n >= sizeof g_rooms_dir)
         return -1;
@@ -56,6 +73,19 @@ int rooms_init(const char *base_dir) {
         return -1;
     if (ensure_dir(g_rooms_dir, 0700) != 0)
         return -1;
+
+    // 初始化SQLite存储
+    char db_path[1024];
+    snprintf(db_path, sizeof db_path, "%s/drlms.db", base_dir);
+    if (sqlite_storage_init(&g_sqlite_storage, db_path) == 0) {
+        g_use_sqlite = 1;
+        fprintf(stderr, "SQLite storage initialized: %s\n", db_path);
+    } else {
+        g_use_sqlite = 0;
+        fprintf(stderr, "Failed to initialize SQLite storage, falling back to "
+                        "file storage\n");
+    }
+
     return 0;
 }
 
@@ -77,18 +107,35 @@ int rooms_valid_name(const char *name) {
 Room *rooms_get_or_create(const char *name) {
     if (!rooms_valid_name(name))
         return NULL;
-    pthread_mutex_lock(&g_rooms_mu);
+    platform_mutex_lock(&g_rooms_mu);
     RoomNode *cur = g_rooms;
     while (cur) {
         if (strcmp(cur->name, name) == 0) {
-            pthread_mutex_unlock(&g_rooms_mu);
+            platform_mutex_unlock(&g_rooms_mu);
             return &cur->room;
         }
         cur = cur->next;
     }
     RoomNode *node = (RoomNode *)calloc(1, sizeof(RoomNode));
+    if (!node) {
+        platform_mutex_unlock(&g_rooms_mu);
+        return NULL;
+    }
+
     node->name = strdup(name);
-    pthread_mutex_init(&node->room.mu, NULL);
+    if (!node->name) {
+        free(node);
+        platform_mutex_unlock(&g_rooms_mu);
+        return NULL;
+    }
+
+    if (platform_mutex_init(&node->room.mu) != 0) {
+        free(node->name);
+        free(node);
+        platform_mutex_unlock(&g_rooms_mu);
+        return NULL;
+    }
+
     node->room.subs = NULL;
     node->room.subs_len = 0;
     node->room.subs_cap = 0;
@@ -96,30 +143,33 @@ Room *rooms_get_or_create(const char *name) {
     node->room.owner[0] = '\0';
     node->room.policy = 0; // retain by default
     node->room.created_at = time(NULL);
+
     node->next = g_rooms;
     g_rooms = node;
-    // ensure room dir exists
+
+    Room *room = &node->room;
+    platform_mutex_unlock(&g_rooms_mu);
+
+    // ensure room dir exists (best effort)
     char path[1024];
     int m = snprintf(path, sizeof path, "%s/%s", g_rooms_dir, name);
-    if (m < 0 || (size_t)m >= sizeof path) {
-        pthread_mutex_unlock(&g_rooms_mu);
-        return &node->room; // 跳过创建，避免截断导致未定义行为
+    if (m >= 0 && (size_t)m < sizeof path) {
+        (void)ensure_dir(path, 0700);
     }
-    (void)ensure_dir(path, 0700);
-    pthread_mutex_unlock(&g_rooms_mu);
-    return &node->room;
+
+    return room;
 }
 
 int rooms_add_subscriber_ex(Room *room, int fd, const char *username) {
     if (!room)
         return -1;
-    pthread_mutex_lock(&room->mu);
+    platform_mutex_lock(&room->mu);
     if (room->subs_len == room->subs_cap) {
         size_t nc = room->subs_cap ? room->subs_cap * 2 : 8;
         Subscriber *ns =
             (Subscriber *)realloc(room->subs, nc * sizeof(Subscriber));
         if (!ns) {
-            pthread_mutex_unlock(&room->mu);
+            platform_mutex_unlock(&room->mu);
             return -1;
         }
         room->subs = ns;
@@ -133,14 +183,14 @@ int rooms_add_subscriber_ex(Room *room, int fd, const char *username) {
         room->subs[room->subs_len].user[0] = '\0';
     }
     room->subs_len++;
-    pthread_mutex_unlock(&room->mu);
+    platform_mutex_unlock(&room->mu);
     return 0;
 }
 
 int rooms_remove_subscriber(Room *room, int fd) {
     if (!room)
         return -1;
-    pthread_mutex_lock(&room->mu);
+    platform_mutex_lock(&room->mu);
     for (size_t i = 0; i < room->subs_len; ++i) {
         if (room->subs[i].fd == fd) {
             room->subs[i] = room->subs[room->subs_len - 1];
@@ -148,15 +198,15 @@ int rooms_remove_subscriber(Room *room, int fd) {
             break;
         }
     }
-    pthread_mutex_unlock(&room->mu);
+    platform_mutex_unlock(&room->mu);
     return 0;
 }
 
 int rooms_remove_fd_from_all(int fd) {
-    pthread_mutex_lock(&g_rooms_mu);
+    platform_mutex_lock(&g_rooms_mu);
     RoomNode *cur = g_rooms;
     while (cur) {
-        pthread_mutex_lock(&cur->room.mu);
+        platform_mutex_lock(&cur->room.mu);
         for (size_t i = 0; i < cur->room.subs_len;) {
             if (cur->room.subs[i].fd == fd) {
                 cur->room.subs[i] = cur->room.subs[cur->room.subs_len - 1];
@@ -166,37 +216,37 @@ int rooms_remove_fd_from_all(int fd) {
             }
             ++i;
         }
-        pthread_mutex_unlock(&cur->room.mu);
+        platform_mutex_unlock(&cur->room.mu);
         cur = cur->next;
     }
-    pthread_mutex_unlock(&g_rooms_mu);
+    platform_mutex_unlock(&g_rooms_mu);
     return 0;
 }
 
 void rooms_assign_owner_if_empty(Room *room, const char *user) {
     if (!room || !user || !*user)
         return;
-    pthread_mutex_lock(&room->mu);
+    platform_mutex_lock(&room->mu);
     if (room->owner[0] == '\0') {
         snprintf(room->owner, sizeof room->owner, "%s", user);
     }
-    pthread_mutex_unlock(&room->mu);
+    platform_mutex_unlock(&room->mu);
 }
 
 void rooms_set_policy(Room *room, int policy) {
     if (!room)
         return;
-    pthread_mutex_lock(&room->mu);
+    platform_mutex_lock(&room->mu);
     room->policy = policy;
-    pthread_mutex_unlock(&room->mu);
+    platform_mutex_unlock(&room->mu);
 }
 
 void rooms_set_owner(Room *room, const char *user) {
     if (!room || !user)
         return;
-    pthread_mutex_lock(&room->mu);
+    platform_mutex_lock(&room->mu);
     snprintf(room->owner, sizeof room->owner, "%s", user);
-    pthread_mutex_unlock(&room->mu);
+    platform_mutex_unlock(&room->mu);
 }
 
 void rooms_get_info(Room *room, char *owner_out, size_t owner_cap,
@@ -205,7 +255,7 @@ void rooms_get_info(Room *room, char *owner_out, size_t owner_cap,
                     time_t *created_at_out) {
     if (!room)
         return;
-    pthread_mutex_lock(&room->mu);
+    platform_mutex_lock(&room->mu);
     if (owner_out && owner_cap > 0) {
         snprintf(owner_out, owner_cap, "%s", room->owner);
     }
@@ -217,7 +267,7 @@ void rooms_get_info(Room *room, char *owner_out, size_t owner_cap,
         *last_event_id_out = room->last_event_id;
     if (created_at_out)
         *created_at_out = room->created_at;
-    pthread_mutex_unlock(&room->mu);
+    platform_mutex_unlock(&room->mu);
 }
 
 static void rfc3339_time_local(char *buf, size_t sz) {
@@ -242,7 +292,7 @@ static void dummy_sha256_hex(char *out_hex, size_t out_sz) {
 static void rooms_clear_all_subscribers(Room *room, int close_fds) {
     if (!room)
         return;
-    pthread_mutex_lock(&room->mu);
+    platform_mutex_lock(&room->mu);
     if (close_fds) {
         for (size_t i = 0; i < room->subs_len; ++i) {
             if (room->subs[i].fd >= 0)
@@ -250,15 +300,15 @@ static void rooms_clear_all_subscribers(Room *room, int close_fds) {
         }
     }
     room->subs_len = 0;
-    pthread_mutex_unlock(&room->mu);
+    platform_mutex_unlock(&room->mu);
 }
 
 void rooms_handle_owner_disconnect(const char *owner, long long rate_bps) {
     if (!owner || !*owner)
         return;
-    pthread_mutex_lock(&g_rooms_mu);
+    platform_mutex_lock(&g_rooms_mu);
     RoomNode *cur = g_rooms;
-    pthread_mutex_unlock(&g_rooms_mu);
+    platform_mutex_unlock(&g_rooms_mu);
 
     // We iterate without holding the global list lock to avoid long-held locks
     // during fanout.
@@ -279,7 +329,7 @@ void rooms_handle_owner_disconnect(const char *owner, long long rate_bps) {
             // delegate: pick the first non-empty subscriber username not equal
             // to owner
             char new_owner[64] = {0};
-            pthread_mutex_lock(&node->room.mu);
+            platform_mutex_lock(&node->room.mu);
             for (size_t i = 0; i < node->room.subs_len; ++i) {
                 if (node->room.subs[i].user[0] != '\0' &&
                     strcmp(node->room.subs[i].user, owner) != 0) {
@@ -288,7 +338,7 @@ void rooms_handle_owner_disconnect(const char *owner, long long rate_bps) {
                     break;
                 }
             }
-            pthread_mutex_unlock(&node->room.mu);
+            platform_mutex_unlock(&node->room.mu);
             if (new_owner[0] != '\0') {
                 rooms_set_owner(&node->room, new_owner);
                 // broadcast owner changed notification
@@ -326,6 +376,34 @@ static void throttle_down(size_t bytes, long long rate_bps) {
         usleep(us);
 }
 
+static int send_all(int fd, const void *buf, size_t len) {
+    const unsigned char *p = (const unsigned char *)buf;
+    size_t remaining = len;
+
+    while (remaining > 0) {
+        ssize_t written = send(fd, p, remaining, 0);
+        if (written < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+#ifdef EAGAIN
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                usleep(1000);
+                continue;
+            }
+#endif
+            return -1;
+        }
+        if (written == 0) {
+            return -1;
+        }
+        p += (size_t)written;
+        remaining -= (size_t)written;
+    }
+
+    return 0;
+}
+
 int rooms_fanout_text(Room *room, const char *room_name, const char *ts,
                       const char *user, uint64_t event_id,
                       const unsigned char *payload, size_t len,
@@ -338,11 +416,10 @@ int rooms_fanout_text(Room *room, const char *room_name, const char *ts,
                  ts, user, (unsigned long long)event_id, len, sha_hex);
     if (hl <= 0)
         return -1;
-    pthread_mutex_lock(&room->mu);
+    platform_mutex_lock(&room->mu);
     for (size_t i = 0; i < room->subs_len; ++i) {
         int fd = room->subs[i].fd;
-        ssize_t x = send(fd, hdr, (size_t)hl, 0);
-        if (x <= 0) {
+        if (send_all(fd, hdr, (size_t)hl) != 0) {
             // prune dead subscriber
             room->subs[i] = room->subs[room->subs_len - 1];
             room->subs_len--;
@@ -350,8 +427,7 @@ int rooms_fanout_text(Room *room, const char *room_name, const char *ts,
             continue;
         }
         if (len > 0) {
-            x = send(fd, payload, len, 0);
-            if (x <= 0) {
+            if (send_all(fd, payload, len) != 0) {
                 room->subs[i] = room->subs[room->subs_len - 1];
                 room->subs_len--;
                 --i;
@@ -360,7 +436,7 @@ int rooms_fanout_text(Room *room, const char *room_name, const char *ts,
             throttle_down(len, rate_bps);
         }
     }
-    pthread_mutex_unlock(&room->mu);
+    platform_mutex_unlock(&room->mu);
     return 0;
 }
 
@@ -408,13 +484,40 @@ int rooms_store_text(Room *room, const char *room_name, const char *ts,
                      const char *sha_hex, uint64_t *out_event_id) {
     if (!room || !room_name || !ts || !user || !payload || !sha_hex)
         return -1;
+
+    // 优先使用SQLite存储
+    if (g_use_sqlite) {
+        uint64_t event_id;
+        int result = sqlite_store_text(&g_sqlite_storage, room_name, user, ts,
+                                       payload, len, sha_hex, &event_id);
+
+        if (result == 0) {
+            // 更新房间的last_event_id
+            platform_mutex_lock(&room->mu);
+            if (event_id > room->last_event_id) {
+                room->last_event_id = event_id;
+            }
+            platform_mutex_unlock(&room->mu);
+
+            if (out_event_id)
+                *out_event_id = event_id;
+            return 0;
+        } else {
+            fprintf(stderr,
+                    "SQLite storage failed, falling back to file storage\n");
+            // 回退到文件存储
+        }
+    }
+
+    // 文件存储（原有逻辑）
     char dir[1024], files[1024], logp[1024];
     if (ensure_room_paths(room_name, dir, sizeof dir, files, sizeof files, logp,
                           sizeof logp) != 0)
         return -1;
-    pthread_mutex_lock(&room->mu);
+
+    platform_mutex_lock(&room->mu);
     unsigned long long eid = ++room->last_event_id;
-    pthread_mutex_unlock(&room->mu);
+    platform_mutex_unlock(&room->mu);
     // 写事件日志
     FILE *f = fopen(logp, "a");
     if (!f)
@@ -453,20 +556,80 @@ int rooms_store_file(Room *room, const char *room_name, const char *ts,
     if (!room || !room_name || !ts || !user || !filename || !sha_hex ||
         !tmp_path)
         return -1;
+
+    int stored_as_blob = 0;
+
+    if (g_use_sqlite) {
+        uint64_t event_id = 0;
+        int rc = sqlite_store_file(&g_sqlite_storage, room_name, user, ts,
+                                   filename, size, sha_hex, tmp_path,
+                                   &stored_as_blob, &event_id);
+        if (rc == 0) {
+            platform_mutex_lock(&room->mu);
+            if (event_id > room->last_event_id) {
+                room->last_event_id = event_id;
+            }
+            platform_mutex_unlock(&room->mu);
+
+            if (!stored_as_blob) {
+                char dir[1024], files[1024], logp[1024];
+                if (ensure_room_paths(room_name, dir, sizeof dir, files,
+                                      sizeof files, logp, sizeof logp) != 0) {
+                    sqlite_delete_latest_event_for_room(&g_sqlite_storage,
+                                                        room_name);
+                    remove(tmp_path);
+                    return -1;
+                }
+
+                char final_path[1024];
+                if (snprintf(final_path, sizeof final_path, "%s/%llu_%s", files,
+                             (unsigned long long)event_id,
+                             filename) >= (int)sizeof final_path) {
+                    sqlite_delete_latest_event_for_room(&g_sqlite_storage,
+                                                        room_name);
+                    remove(tmp_path);
+                    return -1;
+                }
+                if (rename(tmp_path, final_path) != 0) {
+                    sqlite_delete_latest_event_for_room(&g_sqlite_storage,
+                                                        room_name);
+                    remove(tmp_path);
+                    return -1;
+                }
+            } else {
+                remove(tmp_path);
+            }
+
+            if (out_event_id)
+                *out_event_id = event_id;
+            return 0;
+        }
+        fprintf(stderr, "SQLite storage failed for file event, falling back to "
+                        "file storage\n");
+    }
+
     char dir[1024], files[1024], logp[1024];
     if (ensure_room_paths(room_name, dir, sizeof dir, files, sizeof files, logp,
-                          sizeof logp) != 0)
+                          sizeof logp) != 0) {
+        remove(tmp_path);
         return -1;
-    // 目标文件名: files/<eid>_<filename>
-    pthread_mutex_lock(&room->mu);
+    }
+
+    platform_mutex_lock(&room->mu);
     unsigned long long eid = ++room->last_event_id;
-    pthread_mutex_unlock(&room->mu);
+    platform_mutex_unlock(&room->mu);
+
     char final_path[1024];
     if (snprintf(final_path, sizeof final_path, "%s/%llu_%s", files, eid,
-                 filename) >= (int)sizeof final_path)
+                 filename) >= (int)sizeof final_path) {
+        remove(tmp_path);
         return -1;
-    if (rename(tmp_path, final_path) != 0)
+    }
+    if (rename(tmp_path, final_path) != 0) {
+        remove(tmp_path);
         return -1;
+    }
+
     FILE *f = fopen(logp, "a");
     if (!f)
         return -1;
@@ -491,11 +654,10 @@ int rooms_fanout_file(Room *room, const char *room_name, const char *ts,
                       filename, size, sha_hex);
     if (hl <= 0)
         return -1;
-    pthread_mutex_lock(&room->mu);
+    platform_mutex_lock(&room->mu);
     for (size_t i = 0; i < room->subs_len; ++i) {
         int fd = room->subs[i].fd;
-        ssize_t x = send(fd, hdr, (size_t)hl, 0);
-        if (x <= 0) {
+        if (send_all(fd, hdr, (size_t)hl) != 0) {
             // prune dead subscriber
             room->subs[i] = room->subs[room->subs_len - 1];
             room->subs_len--;
@@ -504,14 +666,25 @@ int rooms_fanout_file(Room *room, const char *room_name, const char *ts,
         }
         throttle_down(hl, rate_bps);
     }
-    pthread_mutex_unlock(&room->mu);
+    platform_mutex_unlock(&room->mu);
     return 0;
 }
 
 int rooms_history_send(Room *room, const char *room_name, int fd,
                        uint64_t since_id, size_t limit, long long rate_bps) {
     (void)room;
-    (void)rate_bps;
+
+    // 优先使用SQLite存储
+    if (g_use_sqlite) {
+        HistorySendContext ctx = {
+            .fd = fd,
+            .rate_bps = rate_bps,
+        };
+        return sqlite_get_history(&g_sqlite_storage, room_name, since_id, limit,
+                                  send_history_callback, &ctx);
+    }
+
+    // 文件存储（原有逻辑）
     // 简化实现：顺序扫描 events.log 并筛选 event_id>since_id，最多 limit 条
     char dir[1024], files[1024], logp[1024];
     if (ensure_room_paths(room_name, dir, sizeof dir, files, sizeof files, logp,
@@ -573,7 +746,10 @@ int rooms_history_send(Room *room, const char *room_name, int fd,
             int hl =
                 snprintf(hdr, sizeof hdr, "EVT|TEXT|%s|%s|%s|%llu|%zu|%s\n",
                          room_name, ts, user, eid, hdr_len, sha);
-            (void)send(fd, hdr, (size_t)hl, 0);
+            if (hl < 0 || send_all(fd, hdr, (size_t)hl) != 0) {
+                fclose(f);
+                return -1;
+            }
             // 回放正文（使用文件内容）
             if (actual_len && text_path[0] != '\0') {
                 FILE *tf = fopen(text_path, "rb");
@@ -581,7 +757,11 @@ int rooms_history_send(Room *room, const char *room_name, int fd,
                     char buf[1024];
                     size_t n;
                     while ((n = fread(buf, 1, sizeof buf, tf)) > 0) {
-                        (void)send(fd, buf, n, 0);
+                        if (send_all(fd, buf, n) != 0) {
+                            fclose(tf);
+                            fclose(f);
+                            return -1;
+                        }
                         throttle_down(n, rate_bps);
                     }
                     fclose(tf);
@@ -599,11 +779,31 @@ int rooms_history_send(Room *room, const char *room_name, int fd,
             int hl =
                 snprintf(hdr, sizeof hdr, "EVT|FILE|%s|%s|%s|%llu|%s|%zu|%s\n",
                          room_name, ts, user, eid, filename, sizev, sha);
-            (void)send(fd, hdr, (size_t)hl, 0);
+            if (hl < 0 || send_all(fd, hdr, (size_t)hl) != 0) {
+                fclose(f);
+                return -1;
+            }
         }
         if (++sent >= limit)
             break;
     }
     fclose(f);
+    return 0;
+}
+
+// SQLite历史回调函数
+static int send_history_callback(void *user_data, const unsigned char *data,
+                                 size_t len) {
+    HistorySendContext *ctx = (HistorySendContext *)user_data;
+    if (!ctx || ctx->fd < 0 || !data) {
+        return -1;
+    }
+    if (len == 0) {
+        return 0;
+    }
+    if (send_all(ctx->fd, data, len) != 0) {
+        return -1;
+    }
+    throttle_down(len, ctx->rate_bps);
     return 0;
 }

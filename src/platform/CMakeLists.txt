@@ -1,0 +1,15 @@
+add_library(platform_headers INTERFACE)
+target_include_directories(platform_headers INTERFACE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_subdirectory(linux)
+    target_link_libraries(platform_linux PUBLIC platform_headers)
+    add_library(platform ALIAS platform_linux)
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    add_subdirectory(macos)
+    target_link_libraries(platform_macos PUBLIC platform_headers)
+    add_library(platform ALIAS platform_macos)
+else()
+    message(FATAL_ERROR "No platform backend implemented for ${CMAKE_SYSTEM_NAME}")
+endif()

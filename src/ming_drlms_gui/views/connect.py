@@ -29,17 +29,35 @@ def view(i18n: dict, on_connect, on_exit) -> ft.Container:
     spinner = ft.ProgressRing(visible=False)
 
     def do_connect(_):
+        print("DEBUG: Connect button clicked", flush=True)
         if not validate():
+            print("DEBUG: Validation failed", flush=True)
             hint.value = i18n.get("connect.err", "Invalid inputs")
             hint.color = "red"
             hint.update()
             return
+
+        print("DEBUG: Validation passed, starting connection", flush=True)
         spinner.visible = True
         hint.value = i18n.get("connect.try", "Connecting...")
         hint.color = "amber"
         hint.update()
         spinner.update()
-        on_connect(host.value, int(port.value), user.value, pwd.value, spinner, hint)
+
+        print(
+            f"DEBUG: Calling on_connect with {user.value}@{host.value}:{port.value}",
+            flush=True,
+        )
+        try:
+            on_connect(
+                host.value, int(port.value), user.value, pwd.value, spinner, hint
+            )
+            print("DEBUG: on_connect completed", flush=True)
+        except Exception as e:
+            print(f"DEBUG: ERROR in on_connect: {e}", flush=True)
+            import traceback
+
+            traceback.print_exc()
 
     row_buttons = ft.Row(
         [

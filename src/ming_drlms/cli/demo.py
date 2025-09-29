@@ -106,7 +106,7 @@ def demo_quickstart():
                 ],
                 check=False,
             )
-        elif readme.exists() and not BIN_AGENT.exists():
+        elif not BIN_AGENT.exists():
             typer.echo(
                 "[demo] 'log_agent' missing — skipping upload/download segment",
                 err=True,

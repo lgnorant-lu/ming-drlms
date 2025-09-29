@@ -7,6 +7,7 @@
 #include <sys/ipc.h>
 #include <sys/shm.h>
 #include <assert.h>
+#include <time.h>
 
 // This test program combines several test cases for libipc.
 // It tests:
@@ -119,8 +120,21 @@ void run_ipc_tests() {
 }
 
 int main() {
-    // Set a specific key for testing to avoid interfering with a running server
-    setenv("DRLMS_SHM_KEY", "0x54455354", 1); // "TEST"
+    // 生成唯一的共享内存 key，避免复用残留段导致测试卡住
+    unsigned int pid_component = (unsigned int)getpid();
+    unsigned int time_component = (unsigned int)time(NULL);
+    unsigned int key = 0x54455300u ^ pid_component ^ time_component;
+    char key_buf[32];
+    snprintf(key_buf, sizeof key_buf, "0x%08x", key);
+    setenv("DRLMS_SHM_KEY", key_buf, 1);
+
+    // 如果存在同 key 的陈旧共享内存段，先尝试移除
+    key_t sysv_key = (key_t)key;
+    int stale_id = shmget(sysv_key, 0, 0600);
+    if (stale_id >= 0) {
+        shmctl(stale_id, IPC_RMID, NULL);
+    }
+
     run_ipc_tests();
     return 0;
 }

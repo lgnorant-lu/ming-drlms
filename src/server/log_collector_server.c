@@ -11,7 +11,7 @@
 #include <dirent.h>
 #include <time.h>
 #include <limits.h>
-#include <pthread.h>
+#include "platform/platform.h"
 #include <sys/time.h>
 #include <ctype.h>
 #include <signal.h>
@@ -33,13 +33,12 @@ static int g_listen_fd = -1;
 static long long g_rate_up_bps = 0;   // upload throttle (client->server)
 static long long g_rate_down_bps = 0; // download throttle (server->client)
 static int g_max_conn = 128;
-static pthread_mutex_t g_conn_mu = PTHREAD_MUTEX_INITIALIZER;
+static platform_mutex_t g_conn_mu;
 static int g_active_conn = 0;
 static long long g_max_upload = 100LL * 1024 * 1024; // default 100MB
 static int g_auth_strict = 0; // 0: accept any if users empty; 1: require file
-static int g_rcv_timeout_sec = 319; // default recv/send timeout seconds
-static pthread_mutex_t g_users_file_mu =
-    PTHREAD_MUTEX_INITIALIZER; // protect users.txt writes
+static int g_rcv_timeout_sec = 319;      // default recv/send timeout seconds
+static platform_mutex_t g_users_file_mu; // protect users.txt writes
 // TCP keepalive tuning (env-overridable)
 static int g_tcp_keepalive_enabled = 1;
 #ifdef TCP_KEEPIDLE
@@ -66,6 +65,8 @@ static int g_users_count = 0;
 static int g_argon2_t_cost = 2;     // iterations
 static int g_argon2_m_cost = 65536; // KiB (64 MiB)
 static int g_argon2_parallel = 1;   // lanes
+
+static int send_all(int fd, const void *data, size_t len);
 
 static void argon2_load_params_from_env(void) {
     const char *t = getenv("DRLMS_ARGON2_T_COST");
@@ -155,7 +156,7 @@ static int upgrade_user_password_to_argon2(const char *username,
         return -1;
     }
 
-    pthread_mutex_lock(&g_users_file_mu);
+    platform_mutex_lock(&g_users_file_mu);
     FILE *fin = fopen(path, "r");
     int created_new = 0;
     if (!fin) {
@@ -166,7 +167,7 @@ static int upgrade_user_password_to_argon2(const char *username,
     if (fd < 0) {
         if (fin)
             fclose(fin);
-        pthread_mutex_unlock(&g_users_file_mu);
+        platform_mutex_unlock(&g_users_file_mu);
         fprintf(stderr,
                 "[DEBUG] FAILED to upgrade password for user: %s. Error: open "
                 "tmp failed\n",
@@ -178,7 +179,7 @@ static int upgrade_user_password_to_argon2(const char *username,
         close(fd);
         if (fin)
             fclose(fin);
-        pthread_mutex_unlock(&g_users_file_mu);
+        platform_mutex_unlock(&g_users_file_mu);
         fprintf(stderr,
                 "[DEBUG] FAILED to upgrade password for user: %s. Error: "
                 "fdopen failed\n",
@@ -227,7 +228,7 @@ static int upgrade_user_password_to_argon2(const char *username,
     // Atomic replace
     if (rename(tmp_path, path) != 0) {
         remove(tmp_path);
-        pthread_mutex_unlock(&g_users_file_mu);
+        platform_mutex_unlock(&g_users_file_mu);
         fprintf(stderr,
                 "[DEBUG] FAILED to upgrade password for user: %s. Error: "
                 "rename failed\n",
@@ -242,7 +243,7 @@ static int upgrade_user_password_to_argon2(const char *username,
     }
     // Reload users cache
     (void)load_users_file();
-    pthread_mutex_unlock(&g_users_file_mu);
+    platform_mutex_unlock(&g_users_file_mu);
     fprintf(stderr,
             "[DEBUG] Successfully wrote upgraded password for user: %s\n",
             username);
@@ -329,10 +330,10 @@ static int list_visible_files(int fd) {
     DIR *d = opendir(g_data_dir);
     if (!d) {
         const char *msg = "ERR|INTERNAL|open data dir failed\n";
-        send(fd, msg, strlen(msg), 0);
+        (void)send_all(fd, msg, strlen(msg));
         return -1;
     }
-    send(fd, "BEGIN\n", 6, 0);
+    (void)send_all(fd, "BEGIN\n", 6);
     const struct dirent *ent;
     while ((ent = readdir(d)) != NULL) {
         if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0)
@@ -345,26 +346,51 @@ static int list_visible_files(int fd) {
             continue;
         char line[PATH_MAX + 8];
         snprintf(line, sizeof line, "%s\n", ent->d_name);
-        send(fd, line, strlen(line), 0);
+        (void)send_all(fd, line, strlen(line));
     }
     closedir(d);
-    send(fd, "END\n", 4, 0);
+    (void)send_all(fd, "END\n", 4);
+    return 0;
+}
+
+static int send_all(int fd, const void *data, size_t len) {
+    const unsigned char *buf = (const unsigned char *)data;
+    size_t remaining = len;
+
+    while (remaining > 0) {
+        ssize_t written = send(fd, buf, remaining, 0);
+        if (written < 0) {
+            if (errno == EINTR)
+                continue;
+#ifdef EAGAIN
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                usleep(1000);
+                continue;
+            }
+#endif
+            return -1;
+        }
+        if (written == 0)
+            return -1;
+        buf += (size_t)written;
+        remaining -= (size_t)written;
+    }
     return 0;
 }
 
 static void send_err(int fd, const char *code, const char *message) {
     char buf[512];
     snprintf(buf, sizeof buf, "ERR|%s|%s\n", code, message ? message : "");
-    send(fd, buf, strlen(buf), 0);
+    (void)send_all(fd, buf, strlen(buf));
 }
 
 static void send_ok(int fd, const char *msg) {
     if (msg && *msg) {
         char buf[512];
         snprintf(buf, sizeof buf, "OK|%s\n", msg);
-        send(fd, buf, strlen(buf), 0);
+        (void)send_all(fd, buf, strlen(buf));
     } else {
-        send(fd, "OK\n", 3, 0);
+        (void)send_all(fd, "OK\n", 3);
     }
 }
 
@@ -642,7 +668,7 @@ static int handle_upload(int fd, const char *ip, const char *username,
         return -1;
     }
 
-    send(fd, "READY\n", 6, 0);
+    (void)send_all(fd, "READY\n", 6);
     FILE *f = fopen(tmp_path, "wb");
     if (!f) {
         send_err(fd, "INTERNAL", "open tmp");
@@ -758,12 +784,20 @@ static int handle_download(int fd, const char *ip, const char *username,
     fseek(f, 0, SEEK_SET);
     char hdr[256];
     snprintf(hdr, sizeof hdr, "SIZE|%lld|%s\nREADY\n", size, dg_hex);
-    send(fd, hdr, strlen(hdr), 0);
+    if (send_all(fd, hdr, strlen(hdr)) != 0) {
+        free(buf);
+        fclose(f);
+        return -1;
+    }
     for (;;) {
         size_t n = fread(buf, 1, BUF, f);
         if (n == 0)
             break;
-        send(fd, buf, n, 0);
+        if (send_all(fd, buf, n) != 0) {
+            free(buf);
+            fclose(f);
+            return -1;
+        }
         if (g_rate_down_bps > 0) {
             useconds_t us =
                 (useconds_t)(((double)n / (double)g_rate_down_bps) * 1000000.0);
@@ -780,19 +814,34 @@ static int handle_download(int fd, const char *ip, const char *username,
 
 static int create_server_socket(int port) {
     int fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (fd < 0)
+    if (fd < 0) {
+        perror("socket");
         return -1;
+    }
+    fprintf(stderr, "DEBUG: Created socket %d for port %d\n", fd, port);
     int opt = 1;
-    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
+        perror("setsockopt");
+        close(fd);
+        return -1;
+    }
     struct sockaddr_in srv;
     memset(&srv, 0, sizeof(srv));
     srv.sin_family = AF_INET;
     srv.sin_addr.s_addr = INADDR_ANY;
     srv.sin_port = htons((uint16_t)port);
-    if (bind(fd, (struct sockaddr *)&srv, sizeof(srv)) < 0)
+    if (bind(fd, (struct sockaddr *)&srv, sizeof(srv)) < 0) {
+        perror("bind");
+        close(fd);
         return -1;
-    if (listen(fd, 128) < 0)
+    }
+    fprintf(stderr, "DEBUG: Bound socket %d to port %d\n", fd, port);
+    if (listen(fd, 128) < 0) {
+        perror("listen");
+        close(fd);
         return -1;
+    }
+    fprintf(stderr, "DEBUG: Listening on socket %d for port %d\n", fd, port);
     return fd;
 }
 
@@ -1008,7 +1057,8 @@ static void *handle_client(void *arg) {
                                              "room");
                                 } else {
                                     rooms_assign_owner_if_empty(r, username);
-                                    send(ctx->client_fd, "READY\n", 6, 0);
+                                    (void)send_all(ctx->client_fd, "READY\n",
+                                                   6);
                                     unsigned char *buf =
                                         (unsigned char *)malloc((size_t)len);
                                     if (!buf) {
@@ -1120,8 +1170,8 @@ static void *handle_client(void *arg) {
                                             send_err(ctx->client_fd, "FORMAT",
                                                      "name too long");
                                         } else {
-                                            send(ctx->client_fd, "READY\n", 6,
-                                                 0);
+                                            (void)send_all(ctx->client_fd,
+                                                           "READY\n", 6);
                                             FILE *f = fopen(tmp_path, "wb");
                                             if (!f) {
                                                 send_err(ctx->client_fd,
@@ -1386,10 +1436,10 @@ done:
     }
     close(ctx->client_fd);
     // decrement active connection counter
-    pthread_mutex_lock(&g_conn_mu);
+    platform_mutex_lock(&g_conn_mu);
     if (g_active_conn > 0)
         g_active_conn--;
-    pthread_mutex_unlock(&g_conn_mu);
+    platform_mutex_unlock(&g_conn_mu);
     free(ctx);
     return NULL;
 }
@@ -1418,6 +1468,11 @@ static long long getenv_ll(const char *name, long long defval) {
 
 int main(void) {
     argon2_load_params_from_env();
+    if (platform_mutex_init(&g_conn_mu) != 0 ||
+        platform_mutex_init(&g_users_file_mu) != 0) {
+        fprintf(stderr, "failed to initialize server mutexes\n");
+        return 1;
+    }
     int port = getenv_int("DRLMS_PORT", 8080);
     const char *dd = getenv("DRLMS_DATA_DIR");
     if (dd && *dd) {
@@ -1485,21 +1540,28 @@ int main(void) {
         socklen_t len = sizeof(cli);
         int cfd = accept(sfd, (struct sockaddr *)&cli, &len);
         if (cfd < 0) {
-            if (errno == EINTR && !g_stop)
+            if (errno == EINTR) {
+                if (g_stop)
+                    break;
                 continue;
+            }
+            if (g_stop && (errno == EBADF || errno == EINVAL))
+                break;
             perror("accept");
+            fprintf(stderr, "accept failed with errno %d on socket %d\n", errno,
+                    sfd);
             break;
         }
         // 并发上限控制
         int reject = 0;
-        pthread_mutex_lock(&g_conn_mu);
+        platform_mutex_lock(&g_conn_mu);
         if (g_active_conn >= g_max_conn)
             reject = 1;
         else
             g_active_conn++;
-        pthread_mutex_unlock(&g_conn_mu);
+        platform_mutex_unlock(&g_conn_mu);
         if (reject) {
-            send(cfd, "ERR|BUSY|too many connections\n", 31, 0);
+            (void)send_all(cfd, "ERR|BUSY|too many connections\n", 31);
             close(cfd);
             continue;
         }
@@ -1507,30 +1569,32 @@ int main(void) {
         if (!ctx) {
             // 内存分配失败：关闭连接并回滚连接计数
             close(cfd);
-            pthread_mutex_lock(&g_conn_mu);
+            platform_mutex_lock(&g_conn_mu);
             if (g_active_conn > 0)
                 g_active_conn--;
-            pthread_mutex_unlock(&g_conn_mu);
+            platform_mutex_unlock(&g_conn_mu);
             continue;
         }
         ctx->client_fd = cfd;
         ctx->addr = cli;
         enable_tcp_keepalive(cfd);
-        pthread_t tid;
-        int rc = pthread_create(&tid, NULL, handle_client, ctx);
+        platform_thread_t tid;
+        int rc = platform_thread_create(&tid, handle_client, ctx);
         if (rc != 0) {
             // 线程创建失败：关闭连接、释放资源并回滚连接计数，避免假性 BUSY
             close(cfd);
             free(ctx);
-            pthread_mutex_lock(&g_conn_mu);
+            platform_mutex_lock(&g_conn_mu);
             if (g_active_conn > 0)
                 g_active_conn--;
-            pthread_mutex_unlock(&g_conn_mu);
+            platform_mutex_unlock(&g_conn_mu);
             continue;
         }
-        pthread_detach(tid);
+        platform_thread_detach(tid);
     }
     close(sfd);
     shm_cleanup();
+    platform_mutex_destroy(&g_conn_mu);
+    platform_mutex_destroy(&g_users_file_mu);
     return 0;
 }
