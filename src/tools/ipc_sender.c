@@ -2,8 +2,60 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#if !defined(_WIN32)
 #include <unistd.h>
+#endif
+#include "platform/compat.h"
 #include "../libipc/shared_buffer.h"
+
+#if defined(_WIN32)
+static int setenv_compat(const char *name, const char *value, int overwrite) {
+    if (!overwrite) {
+        const char *existing = getenv(name);
+        if (existing && *existing)
+            return 0;
+    }
+    if (!value)
+        value = "";
+    return _putenv_s(name, value);
+}
+
+#define setenv(name, value, overwrite) setenv_compat(name, value, overwrite)
+#endif
+
+static ssize_t drlms_getline(char **lineptr, size_t *n, FILE *stream) {
+    if (!lineptr || !n || !stream) {
+        errno = EINVAL;
+        return -1;
+    }
+#if defined(_WIN32)
+    if (*lineptr == NULL || *n == 0) {
+        size_t initial = 128;
+        char *buf = (char *)malloc(initial);
+        if (!buf)
+            return -1;
+        *lineptr = buf;
+        *n = initial;
+    }
+    size_t pos = 0;
+    for (;;) {
+        if (fgets(*lineptr + pos, (int)(*n - pos), stream) == NULL) {
+            return (pos == 0) ? -1 : (ssize_t)pos;
+        }
+        pos += strlen(*lineptr + pos);
+        if (pos > 0 && (*lineptr)[pos - 1] == '\n')
+            return (ssize_t)pos;
+        size_t new_cap = (*n > 0) ? (*n * 2) : 256;
+        char *new_buf = (char *)realloc(*lineptr, new_cap);
+        if (!new_buf)
+            return -1;
+        *lineptr = new_buf;
+        *n = new_cap;
+    }
+#else
+    return getline(lineptr, n, stream);
+#endif
+}
 
 static void print_usage(const char *prog) {
     fprintf(stderr,
@@ -110,7 +162,7 @@ int main(int argc, char **argv) {
             char *line = NULL;
             size_t n = 0;
             ssize_t r;
-            while ((r = getline(&line, &n, stdin)) != -1) {
+            while ((r = drlms_getline(&line, &n, stdin)) != -1) {
                 if (r > 0 && (line[r - 1] == '\n' || line[r - 1] == '\r')) {
                     // keep newline for UI friendliness; shm stores raw bytes
                 }

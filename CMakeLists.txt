@@ -5,6 +5,10 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+if(WIN32)
+    add_compile_definitions(_WIN32_WINNT=0x0601 WIN32_LEAN_AND_MEAN NOMINMAX)
+endif()
+
 include(CTest)
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
@@ -18,19 +22,27 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 set(COVERAGE_LIBS "")
 if(ENABLE_COVERAGE)
-    add_compile_options(--coverage)
-    add_link_options(--coverage)
+    if(MSVC)
+        message(STATUS "Coverage instrumentation is not supported with MSVC; skipping coverage flags.")
+    else()
+        add_compile_options(--coverage)
+        add_link_options(--coverage)
 
-    if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
-        list(APPEND COVERAGE_LIBS gcov)
-    elseif(CMAKE_C_COMPILER_ID STREQUAL "Clang" AND NOT APPLE)
-        # Some non-Apple Clang toolchains still provide libgcov compatibility.
-        list(APPEND COVERAGE_LIBS gcov)
+        if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
+            list(APPEND COVERAGE_LIBS gcov)
+        elseif(CMAKE_C_COMPILER_ID STREQUAL "Clang" AND NOT APPLE)
+            # Some non-Apple Clang toolchains still provide libgcov compatibility.
+            list(APPEND COVERAGE_LIBS gcov)
+        endif()
     endif()
 endif()
 set(COVERAGE_LIBS "${COVERAGE_LIBS}" CACHE INTERNAL "Coverage runtime libraries" FORCE)
 
-add_compile_options(-Wall -Wextra -Werror -Wno-deprecated-declarations)
+if(MSVC)
+    add_compile_options(/W4 /WX /wd4996)
+else()
+    add_compile_options(-Wall -Wextra -Werror -Wno-deprecated-declarations)
+endif()
 
 find_package(Threads REQUIRED)
 find_package(OpenSSL REQUIRED)

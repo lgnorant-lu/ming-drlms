@@ -1,12 +1,30 @@
 #include "shared_buffer.h"
+#include "platform/compat.h"
 #include <string.h>
 #include <errno.h>
 #include <stdlib.h>
+
+#if defined(_WIN32)
+#include <windows.h>
+static void platform_thread_yield(void) {
+    SwitchToThread();
+}
+#else
 #include <sched.h>
+static void platform_thread_yield(void) {
+    sched_yield();
+}
+#endif
 
 #define LAST_FLAG 0x1
 
-static int shm_id = -1;
+#if defined(_WIN32)
+#define SHM_INVALID_HANDLE NULL
+#else
+#define SHM_INVALID_HANDLE ((platform_shm_handle_t)-1)
+#endif
+
+static platform_shm_handle_t shm_handle = SHM_INVALID_HANDLE;
 static SharedLogBuffer *shared = NULL;
 static int shm_segment_owner = 0;
 static int shm_segment_release = 0;
@@ -14,15 +32,25 @@ static int shm_segment_release = 0;
 static void shared_lock(void) {
     if (!shared)
         return;
-    while (__atomic_exchange_n(&shared->lock, 1, __ATOMIC_ACQUIRE)) {
-        sched_yield();
+#if defined(_WIN32)
+    while (InterlockedExchange((volatile LONG *)&shared->lock, 1) != 0) {
+        platform_thread_yield();
     }
+#else
+    while (__atomic_exchange_n(&shared->lock, 1, __ATOMIC_ACQUIRE)) {
+        platform_thread_yield();
+    }
+#endif
 }
 
 static void shared_unlock(void) {
     if (!shared)
         return;
+#if defined(_WIN32)
+    InterlockedExchange((volatile LONG *)&shared->lock, 0);
+#else
     __atomic_store_n(&shared->lock, 0, __ATOMIC_RELEASE);
+#endif
 }
 
 static platform_ipc_key_t derive_key(void) {
@@ -43,16 +71,16 @@ int shm_init(void) {
         return 0;
     platform_ipc_key_t key = derive_key();
     int created = 0;
-    if (platform_shm_acquire(key, sizeof(SharedLogBuffer), 0600, &shm_id,
+    if (platform_shm_acquire(key, sizeof(SharedLogBuffer), 0600, &shm_handle,
                              &created) != 0) {
         return -1;
     }
 
-    void *addr = platform_shm_map(shm_id);
+    void *addr = platform_shm_map(shm_handle);
     if (addr == (void *)-1) {
         if (created)
-            (void)platform_shm_release(shm_id);
-        shm_id = -1;
+            (void)platform_shm_release(shm_handle);
+        shm_handle = SHM_INVALID_HANDLE;
         return -1;
     }
     shared = (SharedLogBuffer *)addr;
@@ -99,8 +127,8 @@ attach_fail:
     platform_shm_unmap(shared);
     shared = NULL;
     if (shm_segment_release)
-        (void)platform_shm_release(shm_id);
-    shm_id = -1;
+        (void)platform_shm_release(shm_handle);
+    shm_handle = SHM_INVALID_HANDLE;
     shm_segment_owner = 0;
     shm_segment_release = 0;
     return -1;
@@ -112,8 +140,8 @@ init_fail:
     platform_shm_unmap(shared);
     shared = NULL;
     if (created || need_init)
-        (void)platform_shm_release(shm_id);
-    shm_id = -1;
+        (void)platform_shm_release(shm_handle);
+    shm_handle = SHM_INVALID_HANDLE;
     shm_segment_owner = 0;
     shm_segment_release = 0;
     return -1;
@@ -211,9 +239,9 @@ int shm_cleanup(void) {
     platform_shm_unmap(shared);
     shared = NULL;
     if (shm_segment_release) {
-        (void)platform_shm_release(shm_id);
+        (void)platform_shm_release(shm_handle);
     }
-    shm_id = -1;
+    shm_handle = SHM_INVALID_HANDLE;
     shm_segment_owner = 0;
     shm_segment_release = 0;
     return 0;

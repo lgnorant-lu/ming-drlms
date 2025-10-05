@@ -1,19 +1,31 @@
 #include "rooms.h"
 #include "sqlite_storage.h"
-#include <stdlib.h>
-#include <string.h>
-#include <stdio.h>
-#include <sys/stat.h>
-#include <unistd.h>
+
 #include "platform/platform.h"
+#include "platform/compat.h"
+
 #include <ctype.h>
 #include <errno.h>
-#include <arpa/inet.h>
-#include <sys/socket.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <time.h>
 
+#if defined(_WIN32)
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <windows.h>
+#include <direct.h>
+#include <sys/stat.h>
+#else
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
+
 typedef struct Subscriber {
-    int fd;
+    platform_socket_t fd;
     char user[64];
 } Subscriber;
 
@@ -43,11 +55,28 @@ static SQLiteStorage g_sqlite_storage = {0};
 static int g_use_sqlite = 0; // 0=使用文件存储，1=使用SQLite存储
 
 typedef struct {
-    int fd;
+    platform_socket_t fd;
     long long rate_bps;
 } HistorySendContext;
 
-static int send_all(int fd, const void *buf, size_t len);
+#if defined(_WIN32)
+static void sleep_microseconds(unsigned long long usec) {
+    if (usec == 0)
+        return;
+    DWORD millis = (DWORD)((usec + 999ULL) / 1000ULL);
+    Sleep(millis);
+}
+#else
+static void sleep_microseconds(unsigned long long usec) {
+    if (usec == 0)
+        return;
+    if (usec > 1000000ULL * 1000ULL)
+        usec = 1000000ULL * 1000ULL;
+    usleep((useconds_t)usec);
+}
+#endif
+
+static int send_all(platform_socket_t fd, const void *buf, size_t len);
 static int send_history_callback(void *user_data, const unsigned char *data,
                                  size_t len);
 
@@ -58,7 +87,12 @@ static int ensure_dir(const char *path, mode_t mode) {
             return 0;
         return -1;
     }
+#if defined(_WIN32)
+    (void)mode;
+    return (_mkdir(path) == 0) ? 0 : -1;
+#else
     return mkdir(path, mode);
+#endif
 }
 
 int rooms_init(const char *base_dir) {
@@ -160,7 +194,8 @@ Room *rooms_get_or_create(const char *name) {
     return room;
 }
 
-int rooms_add_subscriber_ex(Room *room, int fd, const char *username) {
+int rooms_add_subscriber_ex(Room *room, platform_socket_t fd,
+                            const char *username) {
     if (!room)
         return -1;
     platform_mutex_lock(&room->mu);
@@ -187,7 +222,7 @@ int rooms_add_subscriber_ex(Room *room, int fd, const char *username) {
     return 0;
 }
 
-int rooms_remove_subscriber(Room *room, int fd) {
+int rooms_remove_subscriber(Room *room, platform_socket_t fd) {
     if (!room)
         return -1;
     platform_mutex_lock(&room->mu);
@@ -202,7 +237,7 @@ int rooms_remove_subscriber(Room *room, int fd) {
     return 0;
 }
 
-int rooms_remove_fd_from_all(int fd) {
+int rooms_remove_fd_from_all(platform_socket_t fd) {
     platform_mutex_lock(&g_rooms_mu);
     RoomNode *cur = g_rooms;
     while (cur) {
@@ -273,7 +308,16 @@ void rooms_get_info(Room *room, char *owner_out, size_t owner_cap,
 static void rfc3339_time_local(char *buf, size_t sz) {
     time_t t = time(NULL);
     struct tm tmv;
-    gmtime_r(&t, &tmv);
+    if (
+#if defined(_WIN32)
+        gmtime_s(&tmv, &t)
+#else
+        gmtime_r(&t, &tmv) == NULL
+#endif
+    ) {
+        snprintf(buf, sz, "1970-01-01T00:00:00Z");
+        return;
+    }
     strftime(buf, sz, "%Y-%m-%dT%H:%M:%SZ", &tmv);
 }
 
@@ -295,8 +339,8 @@ static void rooms_clear_all_subscribers(Room *room, int close_fds) {
     platform_mutex_lock(&room->mu);
     if (close_fds) {
         for (size_t i = 0; i < room->subs_len; ++i) {
-            if (room->subs[i].fd >= 0)
-                close(room->subs[i].fd);
+            if (room->subs[i].fd != PLATFORM_INVALID_SOCKET)
+                (void)platform_socket_close(room->subs[i].fd);
         }
     }
     room->subs_len = 0;
@@ -370,27 +414,39 @@ void rooms_handle_owner_disconnect(const char *owner, long long rate_bps) {
 static void throttle_down(size_t bytes, long long rate_bps) {
     if (rate_bps <= 0)
         return;
-    useconds_t us =
-        (useconds_t)(((double)bytes / (double)rate_bps) * 1000000.0);
-    if (us > 0)
-        usleep(us);
+    double seconds = ((double)bytes / (double)rate_bps);
+    if (seconds > 0) {
+        unsigned long long usec = (unsigned long long)(seconds * 1000000.0);
+        if (usec > 0)
+            sleep_microseconds(usec);
+    }
 }
 
-static int send_all(int fd, const void *buf, size_t len) {
+static int send_all(platform_socket_t fd, const void *buf, size_t len) {
     const unsigned char *p = (const unsigned char *)buf;
     size_t remaining = len;
 
     while (remaining > 0) {
-        ssize_t written = send(fd, p, remaining, 0);
+        int written = send(fd, (const char *)p, (int)remaining, 0);
         if (written < 0) {
-            if (errno == EINTR) {
+#if defined(_WIN32)
+            int err = WSAGetLastError();
+            if (err == WSAEINTR)
+                continue;
+            if (err == WSAEWOULDBLOCK) {
+                sleep_microseconds(1000);
                 continue;
             }
+            platform_net_set_last_error(err);
+#else
+            if (errno == EINTR)
+                continue;
 #ifdef EAGAIN
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                usleep(1000);
+                sleep_microseconds(1000);
                 continue;
             }
+#endif
 #endif
             return -1;
         }
@@ -418,7 +474,7 @@ int rooms_fanout_text(Room *room, const char *room_name, const char *ts,
         return -1;
     platform_mutex_lock(&room->mu);
     for (size_t i = 0; i < room->subs_len; ++i) {
-        int fd = room->subs[i].fd;
+        platform_socket_t fd = room->subs[i].fd;
         if (send_all(fd, hdr, (size_t)hl) != 0) {
             // prune dead subscriber
             room->subs[i] = room->subs[room->subs_len - 1];
@@ -656,7 +712,7 @@ int rooms_fanout_file(Room *room, const char *room_name, const char *ts,
         return -1;
     platform_mutex_lock(&room->mu);
     for (size_t i = 0; i < room->subs_len; ++i) {
-        int fd = room->subs[i].fd;
+        platform_socket_t fd = room->subs[i].fd;
         if (send_all(fd, hdr, (size_t)hl) != 0) {
             // prune dead subscriber
             room->subs[i] = room->subs[room->subs_len - 1];
@@ -670,7 +726,7 @@ int rooms_fanout_file(Room *room, const char *room_name, const char *ts,
     return 0;
 }
 
-int rooms_history_send(Room *room, const char *room_name, int fd,
+int rooms_history_send(Room *room, const char *room_name, platform_socket_t fd,
                        uint64_t since_id, size_t limit, long long rate_bps) {
     (void)room;
 
@@ -795,7 +851,7 @@ int rooms_history_send(Room *room, const char *room_name, int fd,
 static int send_history_callback(void *user_data, const unsigned char *data,
                                  size_t len) {
     HistorySendContext *ctx = (HistorySendContext *)user_data;
-    if (!ctx || ctx->fd < 0 || !data) {
+    if (!ctx || ctx->fd == PLATFORM_INVALID_SOCKET || !data) {
         return -1;
     }
     if (len == 0) {

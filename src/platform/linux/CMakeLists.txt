@@ -1,4 +1,4 @@
-add_library(platform_linux STATIC thread.c ipc.c)
+add_library(platform_linux STATIC thread.c ipc.c net.c file.c)
 
 target_link_libraries(platform_linux
     PUBLIC

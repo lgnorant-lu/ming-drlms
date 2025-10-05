@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import signal
 import subprocess
 import time
@@ -12,17 +13,114 @@ from ..i18n import t
 from ..config import load_config
 from .utils import (
     ROOT,
-    BIN_SERVER,
     DATA_DIR,
     SERVER_LOG,
     SERVER_PID,
     maybe_banner,
     env_with,
     is_listening,
+    find_binary,
 )
 
 
 server_app = typer.Typer(help="server operations (up/down/status/logs)")
+
+
+def _cmake_command() -> list[str]:
+    for candidate in ("cmake", "cmake.exe"):
+        path = shutil.which(candidate)
+        if path:
+            return [path]
+    return []
+
+
+def _default_build_dir() -> Path:
+    build_dir_env = os.environ.get("DRLMS_CMAKE_BUILD_DIR")
+    if build_dir_env:
+        build_path = Path(build_dir_env).expanduser()
+        if not build_path.is_absolute():
+            build_path = (ROOT / build_path).resolve()
+        return build_path
+    return (ROOT / "build").resolve()
+
+
+def _cmake_configure_args() -> list[str]:
+    args: list[str] = []
+    toolchain = os.environ.get("CMAKE_TOOLCHAIN_FILE")
+    if not toolchain:
+        vcpkg_root = os.environ.get("VCPKG_ROOT")
+        if vcpkg_root:
+            candidate = Path(vcpkg_root) / "scripts" / "buildsystems" / "vcpkg.cmake"
+            if candidate.exists():
+                toolchain = str(candidate)
+    if toolchain:
+        args.append(f"-DCMAKE_TOOLCHAIN_FILE={toolchain}")
+    build_type = os.environ.get("CMAKE_BUILD_TYPE")
+    if build_type:
+        args.append(f"-DCMAKE_BUILD_TYPE={build_type}")
+    extra = os.environ.get("DRLMS_CMAKE_CONFIG_ARGS")
+    if extra:
+        args.extend(extra.split())
+    return args
+
+
+def _cmake_build_config(build_dir: Path) -> str | None:
+    for key in (
+        "CMAKE_BUILD_CONFIG",
+        "CMAKE_BUILD_CONFIGURATION",
+        "CMAKE_BUILD_TYPE",
+        "DRLMS_CMAKE_BUILD_CONFIG",
+    ):
+        value = os.environ.get(key)
+        if value:
+            return value
+    cache = build_dir / "CMakeCache.txt"
+    if cache.exists():
+        try:
+            text = cache.read_text()
+        except Exception:
+            text = ""
+        if "CMAKE_CONFIGURATION_TYPES" in text:
+            return os.environ.get("DRLMS_DEFAULT_CMAKE_CONFIG", "RelWithDebInfo")
+    return None
+
+
+def _ensure_server_binary() -> Path | None:
+    global BIN_SERVER
+    server_bin = find_binary("log_collector_server")
+    if server_bin and server_bin.exists():
+        BIN_SERVER = server_bin
+        return server_bin
+    cmake_cmd = _cmake_command()
+    if not cmake_cmd:
+        return None
+    build_dir = _default_build_dir()
+    try:
+        build_dir.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+    cache = build_dir / "CMakeCache.txt"
+    if not cache.exists():
+        configure_cmd = cmake_cmd + ["-S", str(ROOT), "-B", str(build_dir)]
+        configure_cmd += _cmake_configure_args()
+        if subprocess.run(configure_cmd, check=False).returncode != 0:
+            return None
+    build_cmd = cmake_cmd + [
+        "--build",
+        str(build_dir),
+        "--target",
+        "log_collector_server",
+    ]
+    config = _cmake_build_config(build_dir)
+    if config:
+        build_cmd += ["--config", config]
+    if subprocess.run(build_cmd, check=False).returncode != 0:
+        return None
+    server_bin = find_binary("log_collector_server")
+    if server_bin and server_bin.exists():
+        BIN_SERVER = server_bin
+        return server_bin
+    return None
 
 
 @server_app.command("up", help=t("HELP.SERVER.UP"))
@@ -35,17 +133,10 @@ def server_up(
 ):
     """Start server in background with health check."""
     maybe_banner()
-    if not BIN_SERVER.exists():
-        try:
-            p = subprocess.run(["make", "log_collector_server"], cwd=ROOT)
-            if p.returncode != 0 or not BIN_SERVER.exists():
-                print(
-                    "[yellow]server binary not available; skip starting server[/yellow]"
-                )
-                raise typer.Exit(code=0)
-        except Exception:
-            print("[yellow]server binary not available; skip starting server[/yellow]")
-            raise typer.Exit(code=0)
+    server_bin = _ensure_server_binary()
+    if not server_bin:
+        print("[yellow]server binary not available; skip starting server[/yellow]")
+        raise typer.Exit(code=0)
     if SERVER_PID.exists():
         try:
             pid = int(SERVER_PID.read_text().strip())
@@ -69,11 +160,19 @@ def server_up(
         DRLMS_RATE_UP_BPS=cfg.rate_up_bps,
         DRLMS_RATE_DOWN_BPS=cfg.rate_down_bps,
         DRLMS_MAX_UPLOAD=cfg.max_upload,
+        LD_LIBRARY_PATH=str(server_bin.parent),
     )
+    if os.name == "nt":
+        env["PATH"] = (
+            f"{server_bin.parent}{os.pathsep}{env.get('PATH', '')}"
+            if env.get("PATH")
+            else str(server_bin.parent)
+        )
     cfg.data_dir.mkdir(exist_ok=True)
+    SERVER_LOG.parent.mkdir(parents=True, exist_ok=True)
     with open(SERVER_LOG, "w") as lf:
         p = subprocess.Popen(
-            [str(BIN_SERVER)],
+            [str(server_bin)],
             env=env,
             stdout=lf,
             stderr=subprocess.STDOUT,
@@ -117,26 +216,30 @@ def server_down():
             if pid == 0:
                 SERVER_PID.unlink(missing_ok=True)
 
+    def kill_by_name(force: bool = False):
+        if os.name == "nt":
+            cmd = ["taskkill", "/IM", "log_collector_server.exe", "/T"]
+            if force:
+                cmd.append("/F")
+        else:
+            cmd = ["pkill", "-f", "log_collector_server"]
+            if force:
+                cmd.insert(1, "-9")
+        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
     # Fallback for cases where PID file is missing, or process didn't die
     if pid != 0:
         # If loop finished but process still exists, force kill it
         try:
-            os.kill(pid, signal.SIGKILL)
+            kill_signal = getattr(signal, "SIGKILL", signal.SIGTERM)
+            os.kill(pid, kill_signal)
             SERVER_PID.unlink(missing_ok=True)
         except Exception:
             # Final fallback to pkill
-            subprocess.run(
-                ["pkill", "-9", "-f", "log_collector_server"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            kill_by_name(force=True)
     else:
         # PID file was missing or process terminated gracefully
-        subprocess.run(
-            ["pkill", "-f", "log_collector_server"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+        kill_by_name(force=False)
 
     print("[green]server stopped[/green]")
 

@@ -1,9 +1,46 @@
 CC = gcc
 CFLAGS = -Wall -Wextra -pthread -Werror -Wno-deprecated-declarations
 CPPFLAGS = -Isrc -Isrc/libipc -Isrc/platform/include
-LIBS_COMMON = -lrt
-LIBS_SERVER = -lrt -lcrypto -largon2 -lsqlite3
+
+UNAME_S := $(strip $(shell uname -s 2>/dev/null))
+
+LIBS_COMMON =
+LIBS_SERVER = -lcrypto -largon2 -lsqlite3
 LIBS_AGENT = -lcrypto
+PLATFORM_EXTRA_LIBS =
+
+ifeq ($(OS),Windows_NT)
+	PLATFORM = windows
+	PLATFORM_SRC = src/platform/windows/thread.c \
+				   src/platform/windows/ipc.c \
+				   src/platform/windows/net.c \
+				   src/platform/windows/file.c \
+				   src/platform/windows/win_error.c
+	PLATFORM_LIB = libplatform_windows.a
+	PLATFORM_EXTRA_LIBS += -lws2_32
+else ifeq ($(UNAME_S),Linux)
+	PLATFORM = linux
+	PLATFORM_SRC = src/platform/linux/thread.c \
+				   src/platform/linux/ipc.c \
+				   src/platform/linux/net.c \
+				   src/platform/linux/file.c
+	PLATFORM_LIB = libplatform_linux.a
+	LIBS_COMMON += -lrt
+else ifeq ($(UNAME_S),Darwin)
+	PLATFORM = macos
+	PLATFORM_SRC = src/platform/macos/thread.c \
+				   src/platform/macos/ipc.c \
+				   src/platform/macos/net.c \
+				   src/platform/macos/file.c
+	PLATFORM_LIB = libplatform_macos.a
+else
+	$(error Unsupported platform: $(UNAME_S))
+endif
+
+LIBS_AGENT += $(PLATFORM_EXTRA_LIBS)
+LIBS_SERVER += $(LIBS_COMMON) $(PLATFORM_EXTRA_LIBS)
+
+PLATFORM_OBJS = $(PLATFORM_SRC:.c=.o)
 
 # install destinations
 PREFIX ?= /usr/local
@@ -20,7 +57,7 @@ SRC_TOOLS = src/tools/proc_launcher.c src/tools/log_consumer.c src/tools/ipc_sen
 # All C source files for coverage analysis
 C_SOURCES = $(SRC_LIBIPC) $(SRC_SERVER) $(SRC_AGENT) $(SRC_TOOLS)
 
-all: libipc.a libipc.so log_collector_server log_agent proc_launcher log_consumer ipc_sender
+all: $(PLATFORM_LIB) libipc.a libipc.so log_collector_server log_agent proc_launcher log_consumer ipc_sender
 
 %.o: %.c
 	$(CC) $(CFLAGS) $(CPPFLAGS) -fPIC -c $< -o $@
@@ -28,30 +65,33 @@ all: libipc.a libipc.so log_collector_server log_agent proc_launcher log_consume
 libipc.a: $(SRC_LIBIPC:.c=.o)
 	ar rcs $@ $^
 
-libipc.so: $(SRC_LIBIPC:.c=.o)
-	$(CC) $(CFLAGS) $(CPPFLAGS) -shared -o $@ $^ $(LIBS_COMMON)
+libipc.so: $(SRC_LIBIPC:.c=.o) $(PLATFORM_LIB)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -shared -o $@ $(SRC_LIBIPC:.c=.o) $(PLATFORM_LIB) $(LIBS_COMMON) $(PLATFORM_EXTRA_LIBS)
 
-log_collector_server: $(SRC_SERVER) libipc.a
-	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $(SRC_SERVER) -L. -lipc $(LIBS_SERVER) -Wl,-rpath,'$$ORIGIN'
+$(PLATFORM_LIB): $(PLATFORM_OBJS)
+	ar rcs $@ $^
 
-log_agent: $(SRC_AGENT)
-	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $(SRC_AGENT) $(LIBS_AGENT) -Wl,-rpath,'$$ORIGIN'
+log_collector_server: $(SRC_SERVER) libipc.a $(PLATFORM_LIB)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $(SRC_SERVER) -L. -lipc $(PLATFORM_LIB) $(LIBS_SERVER) -Wl,-rpath,'$$ORIGIN'
+
+log_agent: $(SRC_AGENT) $(PLATFORM_LIB)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $(SRC_AGENT) $(PLATFORM_LIB) $(LIBS_AGENT) -Wl,-rpath,'$$ORIGIN'
 
 proc_launcher: src/tools/proc_launcher.c
 	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ src/tools/proc_launcher.c -Wl,-rpath,'$$ORIGIN'
 
-log_consumer: src/tools/log_consumer.c libipc.a
-	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $< -L. -lipc $(LIBS_COMMON) -Wl,-rpath,'$$ORIGIN'
+log_consumer: src/tools/log_consumer.c libipc.a $(PLATFORM_LIB)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $< -L. -lipc $(PLATFORM_LIB) $(LIBS_COMMON) $(PLATFORM_EXTRA_LIBS) -Wl,-rpath,'$$ORIGIN'
 
-ipc_sender: src/tools/ipc_sender.c libipc.a
-	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $< -L. -lipc $(LIBS_COMMON) -Wl,-rpath,'$$ORIGIN'
+ipc_sender: src/tools/ipc_sender.c libipc.a $(PLATFORM_LIB)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $< -L. -lipc $(PLATFORM_LIB) $(LIBS_COMMON) $(PLATFORM_EXTRA_LIBS) -Wl,-rpath,'$$ORIGIN'
 
 debug:
 	$(MAKE) CFLAGS="$(CFLAGS) -g -O0 -DDEBUG" all
 
 clean:
 	find . -type f \( -name "*.o" -o -name "*.a" -o -name "*.so" -o -name "*.gcno" -o -name "*.gcda" -o -name "*.gcov" \) -delete || true
-	rm -f log_collector_server log_agent proc_launcher log_consumer ipc_sender tests/test_ipc_suite || true
+	rm -f log_collector_server log_agent proc_launcher log_consumer ipc_sender tests/test_ipc_suite $(PLATFORM_LIB) || true
 	rm -rf coverage .coverage
 
 .PHONY: all debug clean test coverage
@@ -59,28 +99,20 @@ clean:
 # Tests & Coverage
 TESTS = tests/test_ipc_suite
 
-tests/test_ipc_suite: tests/test_ipc_suite.c libipc.a
-	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $< -L. -lipc $(LIBS_COMMON) -lcrypto -Wl,-rpath,'$$ORIGIN'
+tests/test_ipc_suite: tests/test_ipc_suite.c libipc.a $(PLATFORM_LIB)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $< -L. -lipc $(PLATFORM_LIB) $(LIBS_COMMON) $(PLATFORM_EXTRA_LIBS) -lcrypto -Wl,-rpath,'$$ORIGIN'
 
 test: $(TESTS) log_agent log_collector_server ipc_sender log_consumer
-	@echo "Starting server..."
-	-pkill -f log_collector_server >/dev/null 2>&1 || true
-	rm -rf /tmp/drlms_test_data && mkdir -p /tmp/drlms_test_data
-	LD_LIBRARY_PATH=. DYLD_LIBRARY_PATH=. DRLMS_DATA_DIR=/tmp/drlms_test_data DRLMS_AUTH_STRICT=0 ./log_collector_server >/tmp/drlms_test_server.log 2>&1 & echo $$! > /tmp/drlms_test.pid
-	@set +e; for i in 1 2 3 4 5 6 7 8; do (exec 3<>/dev/tcp/127.0.0.1/8080) >/dev/null 2>&1 && break || sleep 0.6; done; set -e
 	@echo "Running C unit tests..."
 	DRLMS_SHM_KEY=0x4c4f4754 LD_LIBRARY_PATH=. DYLD_LIBRARY_PATH=. ./tests/test_ipc_suite
 	@echo "Running C protocol integration tests..."
-	chmod +x tests/test_server_protocol.sh && HOST=127.0.0.1 PORT=8080 bash -lc 'LD_LIBRARY_PATH=. DYLD_LIBRARY_PATH=. ./tests/test_server_protocol.sh $${HOST} $${PORT} README.md /tmp/README.md'
+	chmod +x tests/test_server_protocol.sh && HOST=127.0.0.1 PORT=8080 bash -lc 'LD_LIBRARY_PATH=. DYLD_LIBRARY_PATH=. ./tests/test_server_protocol.sh $${HOST} $${PORT}'
 	@echo "Running Python E2E tests..."
 	chmod +x tests/test_cli_e2e.sh && HOST=127.0.0.1 PORT=8080 bash -lc './tests/test_cli_e2e.sh'
-	@echo "Stopping server..."
-	-kill -TERM $$(cat /tmp/drlms_test.pid) >/dev/null 2>&1 || true
-	-rm -f /tmp/drlms_test.pid
 
 coverage:
 	@echo "--- Generating comprehensive C and Python coverage report using CMake ---"
-	./scripts/run_coverage.sh
+	bash scripts/run_coverage.sh
 
 # ------------------------------------------------------------
 # GUI PoC helpers
@@ -105,7 +137,7 @@ install: all
 	@echo "Name: libipc" >> libipc.pc
 	@echo "Description: DRLMS shared memory IPC library" >> libipc.pc
 	@echo "Version: 1.0.0" >> libipc.pc
-	@echo "Libs: -L$${libdir} -lipc -lrt -lpthread" >> libipc.pc
+	@echo "Libs: -L$${libdir} -lipc $(LIBS_COMMON) -lpthread $(PLATFORM_EXTRA_LIBS)" >> libipc.pc
 	@echo "Cflags: -I$${includedir}" >> libipc.pc
 	install -m 644 libipc.pc $(DESTDIR)$(PKGCONFIGDIR)/libipc.pc
 	@rm -f libipc.pc

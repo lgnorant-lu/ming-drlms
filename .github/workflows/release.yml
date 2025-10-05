@@ -1,123 +1,92 @@
-name: CI, Build and Release
+name: Release
 
 on:
   push:
-    branches: [ main ]
-    tags: [ 'v[0-9]+.[0-9]+.[0-9]+*' ]
-  pull_request:
-    branches: [ main ]
+    branches:
+      - main
+    tags:
+      - 'v*.*.*'
   workflow_dispatch:
 
 jobs:
-  # Job 1: 唯一的构建、检查和测试任务
-  build-and-test:
+  build-packages:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # 确保 setuptools-scm 能获取所有标签
+          fetch-depth: 0
 
-      - name: Fetch all tags from remote
-        run: git fetch --all --tags --force
-
-      - name: Clean working directory
-        run: git clean -fdx
-
-      - name: Setup Python
-        uses: actions/setup-python@v6
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
-      
-      - name: Cache Pip dependencies
+          python-version: '3.11'
+
+      - name: Cache pip dependencies
         uses: actions/cache@v4
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/pyproject.toml') }}
+          key: ${{ runner.os }}-pip-${{ hashFiles('pyproject.toml', 'requirements-dev.txt') }}
           restore-keys: |
             ${{ runner.os }}-pip-
 
-      - name: Install System and Python Dependencies
+      - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            build-essential libssl-dev libargon2-dev \
-            netcat-openbsd lcov clang-format cppcheck
-          python -m pip install --upgrade pip build setuptools twine ruff pytest pytest-cov coverage argon2-cffi
-          # (可选) 如果有 requirements-dev.txt, 在这里安装
-          # pip install -r requirements-dev.txt
+          sudo apt-get install -y build-essential libssl-dev libargon2-dev netcat-openbsd lcov clang-format cppcheck zip
 
-      - name: Lint and Format Checks
+      - name: Install Python tooling
         run: |
-          echo "--- Checking C code formatting ---"
-          find src tests -name "*.c" -o -name "*.h" | xargs clang-format --dry-run --Werror
-          echo "--- Linting and Checking Python code formatting ---"
-          ruff check .
-          ruff format --check .
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+          python -m pip install ".[gui]" build twine coverage pytest pyinstaller
 
-      - name: Run Cppcheck Security Scan
-        run: cppcheck --enable=all --error-exitcode=1 --language=c -I src/libipc --suppress=missingIncludeSystem src/ tests/
-      
-      # ================================================================
-      # ===== 【关键顺序调整】 START ====================================
-      # ================================================================
-
-      # 1. 先只编译 C 代码，不运行测试
-      - name: Build C targets
-        run: make all
-
-      # 2. 然后，在干净的环境中构建 Python 包
-      - name: Build Python Package (sdist + wheel)
+      - name: Build native components
         run: |
-          # 将 C 编译产物复制到打包目录
+          make clean
+          make all
+
+      - name: Stage native binaries for packaging
+        run: |
           mkdir -p src/ming_drlms/bin
-          cp -f log_collector_server libipc.so proc_launcher log_consumer ipc_sender src/ming_drlms/bin/
-          
-          # 执行构建，因为环境干净，版本号将是正确的
-          python -m build .
+          cp -f log_collector_server log_agent log_consumer ipc_sender proc_launcher libipc.so src/ming_drlms/bin/ || true
 
-      - name: Upload Distribution Artifact
+      - name: Build Python distributions
+        run: python -m build
+
+      - name: Install build artifacts for smoke tests
+        run: python -m pip install --force-reinstall dist/*.whl
+
+      - name: Run coverage suite
+        run: make coverage
+
+      - name: Run file corruption regression test
+        run: python tests/test_file_corruption_fix.py
+
+      - name: Upload distributions
         uses: actions/upload-artifact@v4
         with:
           name: ming-drlms-dist
           path: dist/*
           if-no-files-found: error
 
-      # 3. 接着，从构建好的包中安装，为测试做准备
-      - name: Install package from built wheel for testing
-        run: python -m pip install --force-reinstall dist/*.whl
-
-      # 4. 最后，在已安装的包上运行所有测试和覆盖率
-      - name: Run All Tests and Generate Coverage
-        run: make coverage # 这个命令现在测试的是一个已安装的、完整的包
-
-      # 补充：安全测试
-      - name: Run Security & Corruption Tests
-        run: python3 tests/test_file_corruption_fix.py
-
-      # ================================================================
-      # ===== 【关键顺序调整】 END ======================================
-      # ================================================================
-
-      - name: Upload coverage report
+      - name: Upload coverage report (HTML)
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-html-reports
+          name: coverage-html
           path: coverage/html
-          if-no-files-found: warn
+          if-no-files-found: ignore
 
-  # Job 2: 负责发布到 TestPyPI (逻辑不变, 但依赖 build-and-test)
-  publish-to-testpypi:
+  publish-testpypi:
     runs-on: ubuntu-latest
-    needs: build-and-test # 依赖构建和测试任务
+    needs: build-packages
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
       id-token: write
-    environment:
-      name: test-pypi
     steps:
-      - name: Download dist from build job
-        uses: actions/download-artifact@v5
+      - name: Download distributions
+        uses: actions/download-artifact@v4
         with:
           name: ming-drlms-dist
           path: dist
@@ -127,45 +96,92 @@ jobs:
           repository-url: https://test.pypi.org/legacy/
           verbose: true
 
-  # Job 3: 负责发布到正式 PyPI (逻辑不变, 但依赖 build-and-test)
-  publish-to-pypi:
+  publish-pypi:
     runs-on: ubuntu-latest
-    needs: build-and-test # 依赖构建和测试任务
+    needs: build-packages
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     permissions:
       id-token: write
-    environment:
-      name: pypi
-      url: https://pypi.org/project/ming-drlms
     steps:
-      - name: Download dist from build job
-        uses: actions/download-artifact@v5
+      - name: Download distributions
+        uses: actions/download-artifact@v4
         with:
           name: ming-drlms-dist
           path: dist
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
 
-  # Job 4: （新增）负责创建 GitHub Release 并上传构建产物
+  package-gui:
+    runs-on: ubuntu-latest
+    needs: build-packages
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: gui-${{ runner.os }}-pip-${{ hashFiles('pyproject.toml', 'requirements-dev.txt') }}
+          restore-keys: |
+            gui-${{ runner.os }}-pip-
+
+      - name: Install GUI packaging dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libssl-dev libargon2-dev zip
+          python -m pip install --upgrade pip
+          python -m pip install ".[gui]" pyinstaller
+
+      - name: Package GUI application
+        run: python scripts/package_gui.py --clean --output dist/linux
+
+      - name: Archive GUI bundle
+        run: |
+          cd dist
+          zip -r DRLMS-GUI-linux.zip linux
+
+      - name: Upload GUI artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ming-drlms-gui
+          path: |
+            dist/linux
+            dist/DRLMS-GUI-linux.zip
+
   create-release:
     runs-on: ubuntu-latest
-    needs: build-and-test  # 必须在构建和测试成功后运行
-    if: startsWith(github.ref, 'refs/tags/v') # 只在推送标签时运行
-
+    needs:
+      - publish-pypi
+      - package-gui
+    if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
-
     steps:
-      - name: Download dist from build job
-        uses: actions/download-artifact@v5
+      - name: Download Python distributions
+        uses: actions/download-artifact@v4
         with:
           name: ming-drlms-dist
           path: dist
 
-      - name: Create GitHub Release and Upload Assets
+      - name: Download GUI bundles
+        uses: actions/download-artifact@v4
+        with:
+          name: ming-drlms-gui
+          path: gui
+
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          # 从 dist/ 目录上传所有文件 (*.whl 和 *.tar.gz)
-          files: dist/*
-          # (可选) 自动生成发行说明，它会包含从上一个 tag 到现在的 commit 列表
+          files: |
+            dist/*
+            gui/DRLMS-GUI-linux.zip
           generate_release_notes: true

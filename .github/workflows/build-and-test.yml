@@ -1,0 +1,131 @@
+name: Build and Test
+
+on:
+  push:
+    branches:
+      - main
+      - 'feature/**'
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  cross-platform:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux
+            os: ubuntu-latest
+            pip-cache: ~/.cache/pip
+          - name: macOS
+            os: macos-latest
+            pip-cache: ~/Library/Caches/pip
+          - name: Windows
+            os: windows-latest
+            pip-cache: ~\AppData\Local\pip\Cache
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ${{ matrix.pip-cache }}
+          key: ${{ runner.os }}-pip-${{ hashFiles('pyproject.toml', 'requirements-dev.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install system dependencies (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libssl-dev libargon2-dev netcat-openbsd lcov clang-format cppcheck
+
+      - name: Install Homebrew dependencies (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          brew update
+          brew install cmake argon2 openssl@3 sqlite3 lcov
+
+      - name: Configure macOS build environment
+        if: matrix.os == 'macos-latest'
+        run: |
+          OPENSSL_PREFIX=$(brew --prefix openssl@3)
+          ARGON2_PREFIX=$(brew --prefix argon2)
+          echo "OPENSSL_ROOT_DIR=${OPENSSL_PREFIX}" >> "$GITHUB_ENV"
+          echo "LDFLAGS=-L${OPENSSL_PREFIX}/lib -L${ARGON2_PREFIX}/lib" >> "$GITHUB_ENV"
+          echo "CPPFLAGS=-I${OPENSSL_PREFIX}/include -I${ARGON2_PREFIX}/include" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_PATH=${OPENSSL_PREFIX}/lib/pkgconfig:${ARGON2_PREFIX}/lib/pkgconfig:${PKG_CONFIG_PATH:-}" >> "$GITHUB_ENV"
+
+      - name: Set up MSVC developer command prompt
+        if: matrix.os == 'windows-latest'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Configure vcpkg root (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $customRoot = Join-Path $Env:RUNNER_TEMP 'vcpkg'
+          Add-Content -Path $Env:GITHUB_ENV -Value "VCPKG_ROOT=$customRoot"
+          Add-Content -Path $Env:GITHUB_ENV -Value ("CMAKE_TOOLCHAIN_FILE={0}" -f (Join-Path $customRoot 'scripts/buildsystems/vcpkg.cmake'))
+          Add-Content -Path $Env:GITHUB_ENV -Value "VCPKG_TARGET_TRIPLET=x64-windows"
+
+      - name: Bootstrap vcpkg (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (Test-Path $Env:VCPKG_ROOT) {
+            if (-not (Test-Path (Join-Path $Env:VCPKG_ROOT '.git'))) {
+              Remove-Item $Env:VCPKG_ROOT -Recurse -Force
+            }
+          }
+          if (-not (Test-Path $Env:VCPKG_ROOT)) {
+            git clone https://github.com/microsoft/vcpkg.git $Env:VCPKG_ROOT
+          } else {
+            git -C $Env:VCPKG_ROOT pull
+          }
+          & (Join-Path $Env:VCPKG_ROOT 'bootstrap-vcpkg.bat')
+
+      - name: Install vcpkg dependencies (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & "$Env:VCPKG_ROOT\vcpkg.exe" install sqlite3:x64-windows argon2:x64-windows openssl:x64-windows
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+          python -m pip install ".[gui]" build coverage
+
+      - name: Run coverage and integration suite
+        shell: bash
+        env:
+          RUNNER_OS: ${{ runner.os }}
+        run: |
+          set -euo pipefail
+          if [[ "${RUNNER_OS}" == "Windows" ]]; then
+            export PATH="/c/Program Files/CMake/bin:$PATH"
+          fi
+          bash scripts/run_coverage.sh
+
+      - name: Upload coverage artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.name }}
+          path: coverage/
+          if-no-files-found: ignore

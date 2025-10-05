@@ -1,14 +1,25 @@
 // sqlite_storage.c
 #define _GNU_SOURCE
 #include "sqlite_storage.h"
+#include "platform/compat.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 #include <sys/stat.h>
 #include <errno.h>
 #include <sqlite3.h>
 #include <sys/types.h> // off_t
+
+#if defined(_WIN32)
+#include <io.h>
+#include <direct.h>
+#define access _access
+#define mkdir(path, mode) _mkdir(path)
+#define fseeko _fseeki64
+#define ftello _ftelli64
+#else
+#include <unistd.h>
+#endif
 
 #define MAX_SQL_LENGTH 4096
 #define MAX_BLOB_SIZE (10 * 1024 * 1024) // 10MB 阈值，小于等于此存 BLOB
@@ -248,7 +259,7 @@ int sqlite_store_file(SQLiteStorage *storage, const char *room_name,
         return -1;
     }
 
-    off_t file_size_off = ftello(tmp_file);
+    long long file_size_off = (long long)ftello(tmp_file);
     if (file_size_off < 0) {
         fclose(tmp_file);
         return -1;

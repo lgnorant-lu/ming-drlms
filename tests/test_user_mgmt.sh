@@ -3,6 +3,10 @@
 # 提供可扩展的用户创建、验证和管理功能
 
 set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=tests/lib/socket_helpers.sh
+source "$SCRIPT_DIR/lib/socket_helpers.sh"
+ensure_python
 
 # 默认配置
 DEFAULT_DATA_DIR="${TEST_DATA_DIR:-server_files}"
@@ -88,13 +92,19 @@ verify_user() {
     
     log_info "Verifying user: $username"
     
-    if echo -e "LOGIN|$username|$password\nQUIT\n" | nc -w 5 "$host" "$port" | grep -q "OK|WELCOME"; then
-        log_success "User $username verification passed"
-        return 0
-    else
-        log_error "User $username verification failed"
+    local response
+    if ! response=$(printf 'LOGIN|%s|%s\nQUIT\n' "$username" "$password" | socket_request "$host" "$port" 5 2>/dev/null); then
+        log_error "User $username verification failed (connection error)"
         return 1
     fi
+
+    if [[ "$response" == *"OK|WELCOME"* ]]; then
+        log_success "User $username verification passed"
+        return 0
+    fi
+
+    log_error "User $username verification failed"
+    return 1
 }
 
 # 列出用户

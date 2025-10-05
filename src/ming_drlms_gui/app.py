@@ -3,11 +3,29 @@ from __future__ import annotations
 from pathlib import Path
 import json
 import flet as ft
-from .views import connect as connect_view
-from .views import main as main_view
-from .views import rooms as rooms_view
-from .net.client import tcp_connect, login
-from .state import Session
+
+# PyInstaller 执行 exe 时会将当前模块视为顶级脚本，导致相对导入失败。
+# 这里在运行时补充搜索路径，并在相对导入失败时回退到绝对导入。
+if __package__ in (None, ""):
+    import sys
+
+    _current_dir = Path(__file__).resolve().parent
+    _project_root = _current_dir.parent
+    if str(_project_root) not in sys.path:
+        sys.path.insert(0, str(_project_root))
+
+try:
+    from .views import connect as connect_view
+    from .views import main as main_view
+    from .views import rooms as rooms_view
+    from .net.client import tcp_connect, login
+    from .state import Session
+except ImportError:
+    from ming_drlms_gui.views import connect as connect_view  # type: ignore
+    from ming_drlms_gui.views import main as main_view  # type: ignore
+    from ming_drlms_gui.views import rooms as rooms_view  # type: ignore
+    from ming_drlms_gui.net.client import tcp_connect, login  # type: ignore
+    from ming_drlms_gui.state import Session  # type: ignore
 
 
 def load_i18n(base: Path) -> dict:

@@ -19,6 +19,7 @@ def test_demo_quickstart_skips_when_binaries_missing(monkeypatch):
 
     monkeypatch.setattr(demo_mod, "BIN_AGENT", _P(False))
     monkeypatch.setattr(demo_mod, "BIN_SERVER", _P(False))
+    monkeypatch.setattr(demo_mod, "find_binary", lambda name: None)
     res = runner.invoke(app, ["demo", "quickstart"])
     # Should not crash; should print skip messages
     assert res.exit_code in (0, None)

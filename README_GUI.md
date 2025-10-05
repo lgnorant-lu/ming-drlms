@@ -2,6 +2,8 @@
 
 一个美观的像素田园风格GUI客户端，用于ming-drlms文件传输系统。
 
+👉 想要直接下载并安装？请参考 [INSTALL.md](INSTALL.md)。
+
 ## ✨ 特色功能
 
 ### 🌱 发芽进度条 (Seed Progress Bar)
@@ -72,16 +74,20 @@ python -m ming_drlms_gui.app
 
 ## 📦 打包构建
 
-### Flet Pack（推荐）
+### CI 自动分发
+- **macOS**: GitHub Actions 会在 `main` 分支和发布标签上生成 `dist/DRLMS-GUI-macos.zip`，其中包含可直接运行的 `.app`。
+- **Windows**: 同步生成 `dist/DRLMS-GUI-windows.zip`，内含打包好的 `DRLMS GUI.exe`（单文件）。
+
+在 GitHub Pull Request / Run 页面点击 `Artifacts` 即可下载对应平台的最新构建，或在发布版本中获取带签名的产物。
+
+### 本地打包（推荐）
 ```bash
-flet pack src/ming_drlms_gui/app.py \
-  --name "DRLMS GUI" \
-  --product-name "ming-drlms" \
-  --description "A beautiful GUI client for ming-drlms" \
-  --copyright "DRLMS Team" \
-  --add-data "src/ming_drlms_gui/assets=assets" \
-  --add-data "src/ming_drlms_gui/i18n=i18n"
+python -m pip install ".[gui]" "flet>=0.28.3,<0.29.0" pyinstaller
+python scripts/package_gui.py --clean --output dist/local
 ```
+
+- macOS 会产出 `dist/local/DRLMS GUI.app`。
+- Windows 可追加 `--onefile` 生成便携式 `DRLMS GUI.exe`。
 
 ### 开发构建
 ```bash

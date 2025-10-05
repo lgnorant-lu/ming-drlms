@@ -5,6 +5,8 @@
 #include <stdint.h>
 #include <time.h>
 
+#include "platform/platform.h"
+
 typedef struct Room Room;
 
 // Initialize rooms subsystem. base_dir is the server data dir (e.g.,
@@ -20,12 +22,13 @@ Room *rooms_get_or_create(const char *name);
 
 // Add/remove subscriber fd to/from room. Returns 0 on success.
 // Extended: add with username (preferred when available)
-int rooms_add_subscriber_ex(Room *room, int fd, const char *username);
-int rooms_remove_subscriber(Room *room, int fd);
+int rooms_add_subscriber_ex(Room *room, platform_socket_t fd,
+                            const char *username);
+int rooms_remove_subscriber(Room *room, platform_socket_t fd);
 
 // Remove a subscriber fd from all rooms (used when a client disconnects
 // unexpectedly).
-int rooms_remove_fd_from_all(int fd);
+int rooms_remove_fd_from_all(platform_socket_t fd);
 
 // Owner/policy helpers
 void rooms_assign_owner_if_empty(Room *room, const char *user);
@@ -67,7 +70,7 @@ int rooms_fanout_file(Room *room, const char *room_name, const char *ts,
 
 // Send history since event_id (exclusive), up to limit entries, to a single fd.
 // For TEXT events sends header+payload; for FILE events sends header only.
-int rooms_history_send(Room *room, const char *room_name, int fd,
+int rooms_history_send(Room *room, const char *room_name, platform_socket_t fd,
                        uint64_t since_id, size_t limit, long long rate_bps);
 
 #endif // DRLMS_ROOMS_H

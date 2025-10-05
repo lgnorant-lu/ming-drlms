@@ -57,8 +57,95 @@ def detect_root() -> Path:
 
 
 ROOT = detect_root()
-BIN_SERVER = ROOT / "log_collector_server"
-BIN_AGENT = ROOT / "log_agent"
+
+
+def find_binary(name: str, root: Optional[Path] = None) -> Optional[Path]:
+    root_path = root or ROOT
+    suffixes = ("", ".exe")
+    candidates: list[Path] = []
+    seen: set[str] = set()
+
+    def add_candidate(path: Path) -> None:
+        try:
+            resolved = path.resolve()
+        except Exception:
+            resolved = path
+        key = str(resolved)
+        if key in seen:
+            return
+        seen.add(key)
+        candidates.append(resolved)
+
+    env_runtime = os.environ.get("DRLMS_RUNTIME_BIN_DIR")
+    env_build = os.environ.get("DRLMS_CMAKE_BUILD_DIR")
+    candidate_dirs: list[Path] = []
+    if env_runtime:
+        candidate_dirs.append(Path(env_runtime))
+    if env_build:
+        candidate_dirs.append(Path(env_build))
+    build_root = root_path / "build"
+    if build_root.exists():
+        candidate_dirs.append(build_root)
+
+    default_configs = ("RelWithDebInfo", "Release", "Debug", "MinSizeRel")
+    extra_dirs: list[Path] = []
+    for base in candidate_dirs:
+        try:
+            base = base.resolve()
+        except Exception:
+            base = Path(base)
+        if not base.exists() or not base.is_dir():
+            continue
+        for suffix in suffixes:
+            add_candidate(base / f"{name}{suffix}")
+        for cfg in default_configs:
+            for suffix in suffixes:
+                add_candidate(base / cfg / f"{name}{suffix}")
+        try:
+            for sub in base.iterdir():
+                if sub.is_dir():
+                    extra_dirs.append(sub)
+        except Exception:
+            continue
+
+    for sub in extra_dirs:
+        try:
+            sub = sub.resolve()
+        except Exception:
+            pass
+        if not sub.exists() or not sub.is_dir():
+            continue
+        for suffix in suffixes:
+            add_candidate(sub / f"{name}{suffix}")
+        for cfg in default_configs:
+            for suffix in suffixes:
+                add_candidate(sub / cfg / f"{name}{suffix}")
+
+    for suffix in suffixes:
+        add_candidate(root_path / f"{name}{suffix}")
+
+    for candidate in candidates:
+        try:
+            if candidate.exists():
+                if os.name == "nt" and candidate.suffix.lower() != ".exe":
+                    # Skip non-Windows binaries when running on Windows so that
+                    # a matching .exe from later candidates may be selected.
+                    continue
+                return candidate
+        except Exception:
+            continue
+    return None
+
+
+_BIN_SERVER = find_binary("log_collector_server")
+if _BIN_SERVER is None:
+    _BIN_SERVER = ROOT / "log_collector_server"
+BIN_SERVER = _BIN_SERVER
+
+_BIN_AGENT = find_binary("log_agent")
+if _BIN_AGENT is None:
+    _BIN_AGENT = ROOT / "log_agent"
+BIN_AGENT = _BIN_AGENT
 DATA_DIR = ROOT / "server_files"
 SERVER_LOG = Path("/tmp/drlms_server.log")
 SERVER_PID = Path("/tmp/drlms_server.pid")
@@ -174,6 +261,7 @@ __all__ = [
     "ROOT",
     "BIN_SERVER",
     "BIN_AGENT",
+    "find_binary",
     "DATA_DIR",
     "SERVER_LOG",
     "SERVER_PID",

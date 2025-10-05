@@ -6,11 +6,16 @@
 extern "C" {
 #endif
 
-#if defined(__linux__) || defined(__APPLE__)
+#if defined(_WIN32)
+#include <windows.h>
+
+typedef HANDLE platform_thread_t;
+#else
 #include <pthread.h>
-#endif
 
 typedef pthread_t platform_thread_t;
+#endif
+
 typedef void *(*platform_thread_start)(void *);
 
 int platform_thread_create(platform_thread_t *thread,
@@ -18,7 +23,11 @@ int platform_thread_create(platform_thread_t *thread,
 int platform_thread_detach(platform_thread_t thread);
 
 /* Mutex abstraction */
+#if defined(_WIN32)
+typedef CRITICAL_SECTION platform_mutex_t;
+#else
 typedef pthread_mutex_t platform_mutex_t;
+#endif
 
 int platform_mutex_init(platform_mutex_t *mutex);
 int platform_mutex_destroy(platform_mutex_t *mutex);
@@ -26,8 +35,21 @@ int platform_mutex_lock(platform_mutex_t *mutex);
 int platform_mutex_unlock(platform_mutex_t *mutex);
 
 /* Read/write lock abstraction */
+#if defined(_WIN32)
+struct platform_rwlock_owner;
+
+typedef struct {
+    SRWLOCK handle;
+    CRITICAL_SECTION owner_guard;
+    struct platform_rwlock_owner *owners;
+} platform_rwlock_t;
+typedef struct {
+    int shared;
+} platform_rwlock_attr_t;
+#else
 typedef pthread_rwlock_t platform_rwlock_t;
 typedef pthread_rwlockattr_t platform_rwlock_attr_t;
+#endif
 
 typedef enum {
     PLATFORM_RWLOCK_PRIVATE = 0,

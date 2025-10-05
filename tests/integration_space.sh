@@ -2,6 +2,11 @@
 set -euo pipefail
 
 # 支持测试环境变量，提供向后兼容性
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=tests/lib/socket_helpers.sh
+source "$SCRIPT_DIR/lib/socket_helpers.sh"
+ensure_python
+
 HOST=${1:-${TEST_HOST:-127.0.0.1}}
 PORT=${2:-${TEST_PORT:-8080}}
 ROOM=${3:-demo}
@@ -9,9 +14,22 @@ U1=${U1:-owner1}
 U2=${U2:-sub1}
 PWD1=${PWD1:-password}
 PWD2=${PWD2:-password}
+QUERY_USER=${QUERY_USER:-testuser}
+# 与 tests/test_env_init.sh 中 TEST_USERS 保持一致（testuser:testpass）
+QUERY_PWD=${QUERY_PWD:-testpass}
 
 # 测试数据目录
+ROOMINFO_AVAILABLE=1
+if [[ "${IS_WINDOWS}" -eq 1 ]]; then
+  ROOMINFO_AVAILABLE=0
+fi
 TEST_DATA_DIR=${TEST_DATA_DIR:-server_files}
+CURRENT_OWNER="$U1"
+
+BIN_EXT=""
+if [[ "${IS_WINDOWS}" -eq 1 ]]; then
+  BIN_EXT=".exe"
+fi
 
 ## (helper functions defined below)
 
@@ -21,7 +39,6 @@ IDLE_SECONDS=${IDLE_SECONDS:-65}
 DELEGATE_POLL_LOOPS=${DELEGATE_POLL_LOOPS:-30}
 TEARDOWN_WAIT_LOOPS=${TEARDOWN_WAIT_LOOPS:-20}
 RETAIN_LOG_WAIT_LOOPS=${RETAIN_LOG_WAIT_LOOPS:-100}
-NC_FLAGS=${NC_FLAGS:--w 2}
 # allow skipping teardown case in FAST mode unless explicitly disabled
 SKIP_TEARDOWN=${SKIP_TEARDOWN:-$FAST}
 
@@ -40,9 +57,14 @@ timeout_cmd() {
     set -e
     return $rc
   fi
-  local py=${PYTHON_BIN:-python3}
+  local -a py_cmd
+  if ((${#PYTHON_BIN[@]} > 0)); then
+    py_cmd=("${PYTHON_BIN[@]}")
+  else
+    py_cmd=(python3)
+  fi
   set +e
-  "$py" - "$duration" "$@" <<'PY'
+  "${py_cmd[@]}" - "$duration" "$@" <<'PY'
 import os
 import sys
 import subprocess
@@ -82,7 +104,7 @@ PY
 start_join_user() {
   # $1 user, $2 pass, $3 outfile, $4 pidfile
   (
-    PYTHONUNBUFFERED=1 HOME="$ORIG_HOME" timeout_cmd 20s "$CLI" space join --room "$ROOM" -H "$HOST" -p "$PORT" -u "$1" -P "$2" > "$3" 2>&1 &
+  PYTHONUNBUFFERED=1 HOME="$CLI_HOME" timeout_cmd 20s "$CLI" space join --room "$ROOM" -H "$HOST" -p "$PORT" -u "$1" -P "$2" > "$3" 2>&1 &
     echo $! > "$4"
   )
 }
@@ -117,64 +139,152 @@ wait_log_has() {
 # helper: query owner via protocol directly (compatible with OK|ROOMINFO| and ROOMINFO|)
 room_owner() {
   local host="$1" port="$2" room="$3" user="$4" pass="$5"
-  local out
-  if command -v nc >/dev/null 2>&1; then
-    out=$(printf "LOGIN|%s|%s\nROOMINFO|%s\nQUIT\n" "$user" "$pass" "$room" | nc $NC_FLAGS "$host" "$port" | tr -d '\r' || true)
-  else
-    out=$(bash -lc 'exec 3<>/dev/tcp/'"$host"'/'"$port"'; echo -e "LOGIN|'$user'|'$pass'\nROOMINFO|'$room'\nQUIT" >&3; cat <&3; exec 3>&- 3<&-' 2>/dev/null | tr -d '\r' || true)
+  local response
+  if ! response=$(printf "LOGIN|%s|%s\nROOMINFO|%s\nQUIT\n" "$user" "$pass" "$room" | socket_request "$host" "$port" 5 2>/dev/null | tr -d '\r'); then
+    echo ""
+    return 0
   fi
   local line
-  line=$(printf "%s\n" "$out" | grep -E '^(OK\|)?ROOMINFO\|' | tail -n 1 || true)
-  if [ -z "$line" ]; then
-    echo ""; return 0
+  line=$(printf "%s\n" "$response" | grep -E '^(OK\|)?ROOMINFO\|' | tail -n 1 || true)
+  if [[ -z "$line" ]]; then
+    echo "[debug] room_owner raw response: ${response//$'\n'/ }" >&2
+    echo ""
+    return 0
   fi
-  # strip optional OK| then cut owner field (ROOMINFO|room|owner|...)
-  echo "$line" | sed -e 's/^OK|//' | cut -d'|' -f3
+  line=${line#OK|}
+  IFS='|' read -r _ _ owner _ <<<"$line"
+  printf '%s\n' "$owner"
+  return 0
 }
 
-# 临时 HOME 以隔离 ~/.drlms/state.json（仅供 server 和 nc 使用）；
-# CLI 进程使用 ORIG_HOME 以访问系统/pipx 安装的 Python user-site 依赖
-ORIG_HOME="$HOME"
-TMPHOME=$(mktemp -d)
-export HOME="$TMPHOME"
-trap 'rm -rf "$TMPHOME"; if [[ -f /tmp/drlms_space_srv.pid ]]; then kill -TERM "$(cat /tmp/drlms_space_srv.pid)" 2>/dev/null || true; rm -f /tmp/drlms_space_srv.pid; fi' EXIT
+# 临时 HOME 以隔离 ~/.drlms/state.json（仅供 server 使用）；
+# CLI 进程使用 CLI_HOME 以访问系统/pipx 安装的 Python user-site 依赖
+ORIG_HOME_POSIX="$HOME"
+if [[ "${IS_WINDOWS}" -eq 1 ]]; then
+  ORIG_HOME_NATIVE=$(to_win_path "$ORIG_HOME_POSIX")
+else
+  ORIG_HOME_NATIVE="$ORIG_HOME_POSIX"
+fi
+if [[ "${IS_WINDOWS}" -eq 1 ]]; then
+  CLI_HOME_NATIVE="$ORIG_HOME_NATIVE"
+else
+  CLI_HOME_NATIVE="$ORIG_HOME_POSIX"
+fi
+CLI_HOME_POSIX="$ORIG_HOME_POSIX"
+CLI_HOME="$CLI_HOME_POSIX"
+
+TMPHOME_POSIX=$(mktemp -d)
+if [[ "${IS_WINDOWS}" -eq 1 ]]; then
+  TMPHOME_NATIVE=$(to_win_path "$TMPHOME_POSIX")
+else
+  TMPHOME_NATIVE="$TMPHOME_POSIX"
+fi
+export HOME="$TMPHOME_NATIVE"
+trap 'rm -rf "$TMPHOME_POSIX"; if [[ -f /tmp/drlms_space_srv.pid ]]; then terminate_pid "$(cat /tmp/drlms_space_srv.pid)" || true; rm -f /tmp/drlms_space_srv.pid; fi' EXIT
 
 # 启动 server（非严格）若未监听
-if ! nc -z "$HOST" "$PORT" >/dev/null 2>&1; then
+if ! port_is_open "$HOST" "$PORT" 0.5; then
   echo "[info] starting server at $HOST:$PORT"
-  DRLMS_AUTH_STRICT=0 DRLMS_DATA_DIR="$TEST_DATA_DIR" DRLMS_PORT="$PORT" LD_LIBRARY_PATH=. DYLD_LIBRARY_PATH=. ./log_collector_server >/tmp/drlms_server.log 2>&1 &
+  server_bin=""
+  declare -a _server_candidates=()
+  if [[ -n "${DRLMS_RUNTIME_BIN_DIR:-}" ]]; then
+    runtime_dir="${DRLMS_RUNTIME_BIN_DIR}"
+    if [[ "${IS_WINDOWS}" -eq 1 ]]; then
+      runtime_dir="$(to_posix_path "$runtime_dir")"
+    fi
+    _server_candidates+=("${runtime_dir}/log_collector_server${BIN_EXT}")
+  fi
+  _server_candidates+=("$PWD/log_collector_server${BIN_EXT}")
+  if [[ -n "${DRLMS_CMAKE_BUILD_DIR:-}" ]]; then
+    build_root="${DRLMS_CMAKE_BUILD_DIR}"
+    if [[ "${IS_WINDOWS}" -eq 1 ]]; then
+      build_root="$(to_posix_path "$build_root")"
+    fi
+    _server_candidates+=("${build_root}/log_collector_server${BIN_EXT}")
+    for cfg in RelWithDebInfo Release Debug MinSizeRel; do
+      _server_candidates+=("${build_root}/${cfg}/log_collector_server${BIN_EXT}")
+    done
+  fi
+  for cfg in "" "RelWithDebInfo" "Debug" "Release" "MinSizeRel"; do
+    if [[ -n "$cfg" ]]; then
+      _server_candidates+=("./${cfg}/log_collector_server${BIN_EXT}")
+    else
+      _server_candidates+=("./log_collector_server${BIN_EXT}")
+    fi
+  done
+  _seen_candidates=""
+  for candidate in "${_server_candidates[@]}"; do
+    if [[ -z "$candidate" ]]; then
+      continue
+    fi
+    if printf '%s\n' "$_seen_candidates" | grep -Fx -- "$candidate" >/dev/null 2>&1; then
+      continue
+    fi
+    _seen_candidates+="$candidate"$'\n'
+    if [[ -x "$candidate" ]]; then
+      server_bin="$candidate"
+      break
+    fi
+  done
+  if [[ -z "$server_bin" ]]; then
+    echo "[error] 未能定位 log_collector_server 可执行文件"; exit 1
+  fi
+  server_data_dir="$TEST_DATA_DIR"
+  if [[ "${IS_WINDOWS}" -eq 1 ]]; then
+    server_data_dir=$(to_win_path "$server_data_dir")
+  fi
+  server_env=(env DRLMS_AUTH_STRICT=0 DRLMS_DATA_DIR="$server_data_dir" DRLMS_PORT="$PORT")
+  if [[ "${IS_WINDOWS}" -ne 1 ]]; then
+    server_env+=(LD_LIBRARY_PATH=. DYLD_LIBRARY_PATH=.)
+  fi
+  "${server_env[@]}" "$server_bin" >/tmp/drlms_server.log 2>&1 &
   echo $! > /tmp/drlms_space_srv.pid
-  sleep 0.8
+  if ! wait_for_port "$HOST" "$PORT" 40 0.25 1; then
+    echo "[error] server failed to open port $PORT"
+    if [[ -f /tmp/drlms_server.log ]]; then
+      echo "[debug] server log tail:"
+      tail -n 40 /tmp/drlms_server.log || true
+    fi
+    exit 1
+  fi
 fi
 
 # 需要 CLI（优先使用 pipx 安装的 ming-drlms），可通过环境变量 CLI 覆盖
-CLI=${CLI:-"$HOME/.local/bin/ming-drlms"}
-if [[ ! -x "$CLI" ]]; then
-  if command -v "$CLI" >/dev/null 2>&1; then
-    CLI=$(command -v "$CLI")
-  elif command -v ming-drlms >/dev/null 2>&1; then
+CLI="${CLI:-}"
+if [[ -z "$CLI" ]]; then
+  if command -v ming-drlms >/dev/null 2>&1; then
     CLI=$(command -v ming-drlms)
+  elif [[ -x "$CLI_HOME_POSIX/.local/bin/ming-drlms" ]]; then
+    CLI="$CLI_HOME_POSIX/.local/bin/ming-drlms"
+  elif [[ -x "$SCRIPT_DIR/../ming-drlms" ]]; then
+    CLI="$SCRIPT_DIR/../ming-drlms"
   else
     echo "[skip] ming-drlms not found (pipx/system). Set CLI env or install and retry"; exit 0
   fi
+else
+  if command -v "$CLI" >/dev/null 2>&1; then
+    CLI=$(command -v "$CLI")
+  elif [[ ! -x "$CLI" ]]; then
+    echo "[skip] CLI executable '$CLI' 不存在或不可执行"; exit 0
+  fi
 fi
-# sanity: help should work（在 ORIG_HOME 下执行以加载 user-site 依赖）
-if ! HOME="$ORIG_HOME" "$CLI" --help >/dev/null 2>&1; then
+# sanity: help should work（在 CLI_HOME 下执行以加载 user-site 依赖）
+if ! HOME="$CLI_HOME" "$CLI" --help >/dev/null 2>&1; then
   echo "[skip] ming-drlms unusable (missing deps)"; exit 0
 fi
 
 echo "[CASE] 去重：同用户多次重连仅收到一次"
 # 首次订阅：后台 + 限时
-(HOME="$ORIG_HOME" timeout_cmd 8s "$CLI" space join --room "$ROOM" -H "$HOST" -p "$PORT" -u "$U1" -P "$PWD1" --since-id 0 > /tmp/join1.log 2>&1 || true) &
+(HOME="$CLI_HOME" timeout_cmd 8s "$CLI" space join --room "$ROOM" -H "$HOST" -p "$PORT" -u "$U1" -P "$PWD1" --since-id 0 > /tmp/join1.log 2>&1 || true) &
 echo $! > /tmp/join1.pid
 wait_pid_alive /tmp/join1.pid 100 || true
 sleep 1.2
 # 发布一条文本事件
-HOME="$ORIG_HOME" "$CLI" space send --room "$ROOM" -H "$HOST" -p "$PORT" -u "$U1" -P "$PWD1" -t "once-event-123"
+HOME="$CLI_HOME" "$CLI" space send --room "$ROOM" -H "$HOST" -p "$PORT" -u "$U1" -P "$PWD1" -t "once-event-123"
 wait_log_has /tmp/join1.log 'once-event-123' 120 || true
 sleep 0.6
 # 二次订阅（使用保存的 since-id）
-( PYTHONUNBUFFERED=1 HOME="$ORIG_HOME" timeout_cmd 5s "$CLI" space join --room "$ROOM" -H "$HOST" -p "$PORT" -u "$U1" -P "$PWD1" --since-id -1 > /tmp/join2.log 2>&1 || true )
+( PYTHONUNBUFFERED=1 HOME="$CLI_HOME" timeout_cmd 5s "$CLI" space join --room "$ROOM" -H "$HOST" -p "$PORT" -u "$U1" -P "$PWD1" --since-id -1 > /tmp/join2.log 2>&1 || true )
 # CLI 在非 --json 模式下仅打印 TEXT 载荷本身，因此以载荷匹配
 CNT1=$(grep -c 'once-event-123' /tmp/join1.log || true)
 CNT2=$(grep -c 'once-event-123' /tmp/join2.log || true)
@@ -192,38 +302,53 @@ echo "[OK] 去重通过（收到次数==1）"
 
 # 保持两个订阅用于策略测试：先仅启动 U1，确保其成为 owner，再按策略分别引入 U2
 start_join_user "$U1" "$PWD1" /tmp/j_owner.log /tmp/j_owner.pid
-wait_pid_alive /tmp/j_owner.pid 100 || true
-# 等待房间 owner 被确认为 U1，避免竞态
-{
+if ! wait_pid_alive /tmp/j_owner.pid 100; then
+  echo "[error] owner join process failed to stay alive"; exit 1
+fi
+sleep 1
+if [[ "${ROOMINFO_AVAILABLE}" -eq 1 ]]; then
+  # 等待房间 owner 被确认为 U1，避免竞态
   ok=0
   for i in $(seq 1 100); do
-    cur=$(room_owner "$HOST" "$PORT" "$ROOM" "$U1" "$PWD1")
+    cur=$(room_owner "$HOST" "$PORT" "$ROOM" "$QUERY_USER" "$QUERY_PWD")
     if [[ "$cur" == "$U1" ]]; then ok=1; break; fi
     sleep 0.1
   done
   if [[ $ok -ne 1 ]]; then
     echo "[error] 未能将 owner 设为 $U1（当前: ${cur:-<empty>}）"; exit 1
   fi
-}
+else
+  echo "[warn] ROOMINFO 查询在当前平台不可用，跳过 owner 初始化校验"
+fi
 
 # retain 策略：U1 下线，U2 仍可接收发布
 echo "[CASE] 策略 retain 行为"
 # 设置策略前尚无 U2 连接，避免 owner 判定竞态
-timeout_cmd 5s env PYTHONUNBUFFERED=1 HOME="$ORIG_HOME" "$CLI" space room set-policy --room "$ROOM" --policy retain -H "$HOST" -p "$PORT" -u "$U1" -P "$PWD1" | sed -n '1,2p' || true
+timeout_cmd 5s env PYTHONUNBUFFERED=1 HOME="$CLI_HOME" "$CLI" space room set-policy --room "$ROOM" --policy retain -H "$HOST" -p "$PORT" -u "$U1" -P "$PWD1" | sed -n '1,2p' || true
 # 现在引入 U2 订阅者
 start_join_user "$U2" "$PWD2" /tmp/j_sub.log /tmp/j_sub.pid
-wait_pid_alive /tmp/j_sub.pid 100 || true
+if ! wait_pid_alive /tmp/j_sub.pid 100; then
+  echo "[error] subscriber join process failed to stay alive"; exit 1
+fi
 # owner 下线后，retain 下 U2 仍可接收
 if [[ -f /tmp/j_owner.pid ]]; then kill -TERM "$(cat /tmp/j_owner.pid)" 2>/dev/null || true; fi
 sleep 0.4
-timeout_cmd 8s env PYTHONUNBUFFERED=1 HOME="$ORIG_HOME" "$CLI" space send --room "$ROOM" -H "$HOST" -p "$PORT" -u "$U2" -P "$PWD2" -t "retain-msg-xyz" || true
+timeout_cmd 8s env PYTHONUNBUFFERED=1 HOME="$CLI_HOME" "$CLI" space send --room "$ROOM" -H "$HOST" -p "$PORT" -u "$U2" -P "$PWD2" -t "retain-msg-xyz" || true
 if ! wait_log_has /tmp/j_sub.log 'retain-msg-xyz' "$RETAIN_LOG_WAIT_LOOPS"; then
   echo "[error] retain: U2 未收到消息"; exit 1
 fi
-# retain 下 owner 不变（通过协议直接查询，兼容 OK|ROOMINFO 与 ROOMINFO 回包）
-owner=$(room_owner "$HOST" "$PORT" "$ROOM" "$U2" "$PWD2")
-if [[ "$owner" != "$U1" ]]; then
-  echo "[error] retain: owner 发生变化（$owner != $U1）"; exit 1
+if [[ "${ROOMINFO_AVAILABLE}" -eq 1 ]]; then
+  # retain 下 owner 不变（通过协议直接查询，兼容 OK|ROOMINFO 与 ROOMINFO 回包）
+  owner=$(room_owner "$HOST" "$PORT" "$ROOM" "$U2" "$PWD2")
+  if [[ -z "$owner" ]]; then
+    owner=$(room_owner "$HOST" "$PORT" "$ROOM" "$QUERY_USER" "$QUERY_PWD")
+  fi
+  if [[ "$owner" != "$U1" ]]; then
+    echo "[error] retain: owner 发生变化（$owner != $U1）"; exit 1
+  fi
+  CURRENT_OWNER="$owner"
+else
+  echo "[warn] ROOMINFO 查询不可用，跳过 retain owner 校验"
 fi
 echo "[OK] retain 通过"
 
@@ -231,26 +356,36 @@ echo "[OK] retain 通过"
 echo "[CASE] 策略 delegate 行为"
 # 重新建立 U1 连接以便设置策略
 start_join_user "$U1" "$PWD1" /tmp/j_owner2.log /tmp/j_owner2.pid
-wait_pid_alive /tmp/j_owner2.pid 100 || true
-timeout_cmd 5s env PYTHONUNBUFFERED=1 HOME="$ORIG_HOME" "$CLI" space room set-policy --room "$ROOM" --policy delegate -H "$HOST" -p "$PORT" -u "$U1" -P "$PWD1" | sed -n '1,2p' || true
+if ! wait_pid_alive /tmp/j_owner2.pid 100; then
+  echo "[error] reconnect join process failed to stay alive"; exit 1
+fi
+timeout_cmd 5s env PYTHONUNBUFFERED=1 HOME="$CLI_HOME" "$CLI" space room set-policy --room "$ROOM" --policy delegate -H "$HOST" -p "$PORT" -u "$U1" -P "$PWD1" | sed -n '1,2p' || true
 if [[ -f /tmp/j_owner2.pid ]]; then kill -TERM "$(cat /tmp/j_owner2.pid)" 2>/dev/null || true; fi
-{
+if [[ "${ROOMINFO_AVAILABLE}" -eq 1 ]]; then
+  owner=""
   ok=0
   for i in $(seq 1 "$DELEGATE_POLL_LOOPS"); do
-    owner=$(room_owner "$HOST" "$PORT" "$ROOM" "$U2" "$PWD2")
+    owner=$(room_owner "$HOST" "$PORT" "$ROOM" "$QUERY_USER" "$QUERY_PWD")
     if [[ "$owner" == "$U2" ]]; then ok=1; break; fi
     sleep 0.1
   done
   if [[ $ok -ne 1 ]]; then
     # 兜底：由 U2 尝试自转移（若已是 owner 应返回 OK|TRANSFER|U2；否则 ERR|PERM）
-  x=$(timeout_cmd 5s env PYTHONUNBUFFERED=1 HOME="$ORIG_HOME" "$CLI" space room transfer --room "$ROOM" --new-owner "$U2" -H "$HOST" -p "$PORT" -u "$U2" -P "$PWD2" | sed -n '1p') || true
+    x=$(timeout_cmd 5s env PYTHONUNBUFFERED=1 HOME="$CLI_HOME" "$CLI" space room transfer --room "$ROOM" --new-owner "$U2" -H "$HOST" -p "$PORT" -u "$U2" -P "$PWD2" | sed -n '1p') || true
     if echo "$x" | grep -q "^OK|TRANSFER|$U2"; then
       ok=1
     else
-      echo "[error] delegate: owner 未转移（$owner != $U2），且自检返回: $x"; exit 1
+      echo "[error] delegate: owner 未转移（${owner:-<empty>} != $U2），且自检返回: $x"; exit 1
     fi
   fi
-}
+  if [[ $ok -ne 1 ]]; then
+    echo "[error] delegate: owner 未转移至 $U2"; exit 1
+  fi
+  CURRENT_OWNER="$owner"
+else
+  echo "[warn] ROOMINFO 查询不可用，跳过 delegate owner 校验"
+  CURRENT_OWNER="$U2"
+fi
 echo "[OK] delegate 通过"
 
 # teardown 策略：owner 下线时 另一方被动断开
@@ -260,8 +395,16 @@ if [[ "${SKIP_TEARDOWN}" == "1" ]]; then
   echo "[skip] teardown case skipped (SKIP_TEARDOWN=1)" 
 else
 # 动态检测当前 owner
-cur_owner=$(room_owner "$HOST" "$PORT" "$ROOM" "$U2" "$PWD2")
-if [[ -z "$cur_owner" ]]; then cur_owner="$U1"; fi
+cur_owner=""
+if [[ "${ROOMINFO_AVAILABLE}" -eq 1 ]]; then
+  cur_owner=$(room_owner "$HOST" "$PORT" "$ROOM" "$QUERY_USER" "$QUERY_PWD")
+fi
+if [[ -z "$cur_owner" ]]; then
+  cur_owner="$CURRENT_OWNER"
+  if [[ "${ROOMINFO_AVAILABLE}" -ne 1 ]]; then
+    echo "[warn] ROOMINFO 查询不可用，teardown 用默认 owner=$cur_owner"
+  fi
+fi
 echo "[info] current owner: $cur_owner"
 
 owner_user="$cur_owner"
@@ -277,14 +420,18 @@ fi
 # 确保两侧均有活跃连接（owner 与另一方）
 if [[ "$cur_owner" == "$U1" ]]; then
   start_join_user "$U1" "$PWD1" /tmp/j_owner3.log /tmp/j_owner3.pid
-  wait_pid_alive /tmp/j_owner3.pid 100 || true
+  if ! wait_pid_alive /tmp/j_owner3.pid 100; then
+    echo "[error] auxiliary join process failed to stay alive"; exit 1
+  fi
 else
   # owner 为 U2，确保另一方 U1 也在线，以便观察被动断开
   start_join_user "$U1" "$PWD1" /tmp/j_owner3.log /tmp/j_owner3.pid
-  wait_pid_alive /tmp/j_owner3.pid 100 || true
+  if ! wait_pid_alive /tmp/j_owner3.pid 100; then
+    echo "[error] auxiliary join process failed to stay alive"; exit 1
+  fi
 fi
 
-timeout_cmd 5s env PYTHONUNBUFFERED=1 HOME="$ORIG_HOME" "$CLI" space room set-policy --room "$ROOM" --policy teardown -H "$HOST" -p "$PORT" -u "$owner_user" -P "$owner_pwd" | sed -n '1,2p' || true
+timeout_cmd 5s env PYTHONUNBUFFERED=1 HOME="$CLI_HOME" "$CLI" space room set-policy --room "$ROOM" --policy teardown -H "$HOST" -p "$PORT" -u "$owner_user" -P "$owner_pwd" | sed -n '1,2p' || true
 
 # 主动关闭 owner 连接（触发 server 广播并清理）
 if [[ -f "$owner_pf" ]]; then kill -TERM "$(cat "$owner_pf")" 2>/dev/null || true; fi
@@ -305,7 +452,7 @@ fi
 
 # 319 秒超时：>60s 空闲不应断（快跑模式可缩短）
 echo "[CASE] SUB 空闲 >${IDLE_SECONDS}s 保持连接（无需等满 319s）"
-if PYTHONUNBUFFERED=1 HOME="$ORIG_HOME" timeout_cmd "$IDLE_SECONDS"s "$CLI" space join --room "$ROOM" -H "$HOST" -p "$PORT" -u "$U2" -P "$PWD2" > /tmp/j_idle.log 2>&1; then
+if PYTHONUNBUFFERED=1 HOME="$CLI_HOME" timeout_cmd "$IDLE_SECONDS"s "$CLI" space join --room "$ROOM" -H "$HOST" -p "$PORT" -u "$U2" -P "$PWD2" > /tmp/j_idle.log 2>&1; then
   echo "[error] 连接在 65s 内主动退出（期望超时 124）"; exit 1
 else
   rc=$?; if [[ $rc -ne 124 ]]; then echo "[error] timeout 返回码=$rc（期望 124）"; exit 1; fi

@@ -165,14 +165,16 @@ declare -A TEST_ROOMS=(
 # 启用详细输出
 set -x
 
-# 检查服务器状态
-nc -z 127.0.0.1 8080
+# 检查服务器状态（使用共享 helper）
+source tests/lib/socket_helpers.sh
+ensure_python
+if port_is_open 127.0.0.1 8080; then echo "server listening"; else echo "server offline"; fi
 
 # 查看服务器日志
 tail -f /tmp/drlms_server.log
 
 # 手动测试登录
-echo -e "LOGIN|testuser|testpass\nQUIT\n" | nc 127.0.0.1 8080
+printf 'LOGIN|testuser|testpass\nQUIT\n' | socket_request 127.0.0.1 8080
 ```
 
 ## 最佳实践

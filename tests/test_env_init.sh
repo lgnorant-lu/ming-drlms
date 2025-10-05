@@ -3,11 +3,34 @@
 # 提供可扩展、可持久化的测试环境管理
 
 set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=tests/lib/socket_helpers.sh
+source "$SCRIPT_DIR/lib/socket_helpers.sh"
+
+ensure_python
+
+BIN_EXT=""
+if [[ "${IS_WINDOWS}" -eq 1 ]]; then
+    BIN_EXT=".exe"
+fi
 
 CLI_BIN="${CLI_BIN:-ming-drlms}"
+CLI_CMD="$CLI_BIN"
 
-# 测试环境配置
-TEST_DATA_DIR="${TEST_DATA_DIR:-/tmp/drlms_test_env_$$}"
+set_test_data_dir() {
+    local raw="$1"
+    if [[ "${IS_WINDOWS}" -eq 1 ]]; then
+        TEST_DATA_DIR_POSIX="$(to_posix_path "$raw")"
+        TEST_DATA_DIR_NATIVE="$(to_win_path "$raw")"
+    else
+        TEST_DATA_DIR_POSIX="$raw"
+        TEST_DATA_DIR_NATIVE="$raw"
+    fi
+    TEST_DATA_DIR="$TEST_DATA_DIR_POSIX"
+}
+
+TEST_DATA_DIR_DEFAULT="${TEST_DATA_DIR:-/tmp/drlms_test_env_$$}"
+set_test_data_dir "$TEST_DATA_DIR_DEFAULT"
 TEST_PORT="${TEST_PORT:-8080}"
 TEST_HOST="${TEST_HOST:-127.0.0.1}"
 START_SERVER=1
@@ -89,17 +112,23 @@ cleanup() {
     log_info "Cleaning up test environment..."
     if [[ -f "/tmp/drlms_test_srv.pid" ]]; then
         local pid=$(cat /tmp/drlms_test_srv.pid)
-        if kill -0 "$pid" 2>/dev/null; then
-            log_info "Stopping test server (PID: $pid)"
-            kill -TERM "$pid" 2>/dev/null || true
-            wait "$pid" 2>/dev/null || true
-        fi
+        log_info "Stopping test server (PID: $pid)"
+        terminate_pid "$pid"
         rm -f /tmp/drlms_test_srv.pid
     fi
     
     if [[ "${KEEP_TEST_DATA:-0}" != "1" ]]; then
-        rm -rf "$TEST_DATA_DIR"
-        log_info "Test data directory removed: $TEST_DATA_DIR"
+        if ! rm -rf "$TEST_DATA_DIR" 2>/dev/null; then
+            log_warning "Failed to remove test data directory on first attempt; retrying shortly"
+            sleep 1
+            if ! rm -rf "$TEST_DATA_DIR" 2>/dev/null; then
+                log_warning "Test data directory preserved due to removal failure: $TEST_DATA_DIR"
+            else
+                log_info "Test data directory removed after retry: $TEST_DATA_DIR"
+            fi
+        else
+            log_info "Test data directory removed: $TEST_DATA_DIR"
+        fi
     else
         log_info "Test data directory preserved: $TEST_DATA_DIR"
     fi
@@ -111,23 +140,30 @@ trap cleanup EXIT
 # 检查依赖
 check_dependencies() {
     log_info "Checking dependencies..."
-    
+
     local missing_deps=()
-    
-    if ! command -v "$CLI_BIN" >/dev/null 2>&1 && [[ ! -x "$CLI_BIN" ]]; then
+
+    if command -v "$CLI_BIN" >/dev/null 2>&1; then
+        CLI_CMD="$(command -v "$CLI_BIN")"
+    elif [[ -x "$CLI_BIN" ]]; then
+        CLI_CMD="$CLI_BIN"
+    else
         missing_deps+=("$CLI_BIN")
     fi
-    
-    if ! command -v nc >/dev/null 2>&1; then
-        missing_deps+=("netcat")
+
+    if ! command -v jq >/dev/null 2>&1; then
+        log_warning "jq 未找到，跳过部分 JSON 诊断输出"
     fi
-    
-    if [[ ${#missing_deps[@]} -gt 0 ]]; then
+    if ! command -v sqlite3 >/dev/null 2>&1; then
+        log_warning "sqlite3 未找到，将跳过数据库内部检查"
+    fi
+
+    if ((${#missing_deps[@]} > 0)); then
         log_error "Missing dependencies: ${missing_deps[*]}"
         log_info "Please install missing dependencies and retry"
         exit 1
     fi
-    
+
     log_success "All dependencies available"
 }
 
@@ -153,7 +189,7 @@ create_test_users() {
         IFS=':' read -r user password <<<"$entry"
         log_info "Creating user: $user"
 
-        if ! "$CLI_BIN" user add "$user" -d "$TEST_DATA_DIR" --password-from-stdin <<<"$password" >/dev/null 2>&1; then
+        if ! "$CLI_CMD" user add "$user" -d "$TEST_DATA_DIR" --password-from-stdin <<<"$password" >/dev/null 2>&1; then
             log_warning "Failed to create user $user (may already exist)"
         else
             log_success "User $user created"
@@ -166,61 +202,119 @@ start_test_server() {
     log_info "Starting test server on $TEST_HOST:$TEST_PORT"
     
     # 确保端口可用
-    if nc -z "$TEST_HOST" "$TEST_PORT" 2>/dev/null; then
+    if port_is_open "$TEST_HOST" "$TEST_PORT"; then
         log_warning "Port $TEST_PORT is already in use"
         return 1
     fi
-    
-    # 启动服务器
-    DRLMS_AUTH_STRICT=0 \
-    DRLMS_DATA_DIR="$TEST_DATA_DIR" \
-    DRLMS_PORT="$TEST_PORT" \
-    LD_LIBRARY_PATH=. \
-    DYLD_LIBRARY_PATH=. \
-    ./log_collector_server > "$TEST_DATA_DIR/server.log" 2>&1 &
-    
-    local server_pid=$!
-    echo "$server_pid" > /tmp/drlms_test_srv.pid
+
+    local server_bin=""
+    local -a candidates=()
+    if [[ -n "${DRLMS_RUNTIME_BIN_DIR:-}" ]]; then
+        local runtime_dir
+        runtime_dir="${DRLMS_RUNTIME_BIN_DIR}"
+        if [[ "${IS_WINDOWS}" -eq 1 ]]; then
+            runtime_dir="$(to_posix_path "$runtime_dir")"
+        fi
+        candidates+=("${runtime_dir}/log_collector_server${BIN_EXT}")
+    fi
+    candidates+=("$PWD/log_collector_server${BIN_EXT}")
+    if [[ -n "${DRLMS_CMAKE_BUILD_DIR:-}" ]]; then
+        local build_root
+        build_root="${DRLMS_CMAKE_BUILD_DIR}"
+        if [[ "${IS_WINDOWS}" -eq 1 ]]; then
+            build_root="$(to_posix_path "$build_root")"
+        fi
+        candidates+=("${build_root}/log_collector_server${BIN_EXT}")
+        for cfg in RelWithDebInfo Release Debug MinSizeRel; do
+            candidates+=("${build_root}/${cfg}/log_collector_server${BIN_EXT}")
+        done
+    fi
+    for candidate in "${candidates[@]}"; do
+        if [[ -n "$candidate" && -x "$candidate" ]]; then
+            server_bin="$candidate"
+            break
+        fi
+    done
+    if [[ -z "$server_bin" ]]; then
+        log_error "Unable to locate log_collector_server${BIN_EXT} (checked: ${candidates[*]})"
+        return 1
+    fi
+
+    local server_dir
+    server_dir="$(dirname "$server_bin")"
+
+    local data_dir_env="$TEST_DATA_DIR"
+    if [[ "${IS_WINDOWS}" -eq 1 ]]; then
+        data_dir_env="$(to_win_path "$data_dir_env")"
+    fi
+
+    local -a env_vars=(
+        "DRLMS_AUTH_STRICT=0"
+        "DRLMS_DATA_DIR=$data_dir_env"
+        "DRLMS_PORT=$TEST_PORT"
+    )
+    if [[ "${IS_WINDOWS}" -ne 1 ]]; then
+        env_vars+=(
+            "LD_LIBRARY_PATH=$server_dir"
+            "DYLD_LIBRARY_PATH=$server_dir"
+        )
+    fi
+
+    (
+        cd "$server_dir"
+        env "${env_vars[@]}" "./$(basename "$server_bin")" > "$TEST_DATA_DIR/server.log" 2>&1 &
+        echo $! > /tmp/drlms_test_srv.pid
+    )
+
+    local server_pid
+    server_pid=$(cat /tmp/drlms_test_srv.pid 2>/dev/null || true)
+    if [[ -z "$server_pid" ]]; then
+        log_error "Failed to capture server PID"
+        return 1
+    fi
     
     # 等待服务器启动
-    local max_attempts=20
-    local attempt=0
-    
-    while [[ $attempt -lt $max_attempts ]]; do
-        if nc -z "$TEST_HOST" "$TEST_PORT" 2>/dev/null; then
-            log_success "Test server started (PID: $server_pid)"
-            return 0
-        fi
-        sleep 0.2
-        ((attempt++))
-    done
-    
+    if wait_for_port "$TEST_HOST" "$TEST_PORT" 40 0.25; then
+        log_success "Test server started (PID: $server_pid)"
+        return 0
+    fi
+
     log_error "Test server failed to start"
+    if [[ -f "$TEST_DATA_DIR/server.log" ]]; then
+        log_error "Tail of server log:"
+        tail -n 20 "$TEST_DATA_DIR/server.log" || true
+    fi
     return 1
 }
 
 # 验证测试环境
 verify_test_environment() {
     log_info "Verifying test environment..."
-    
+
     # 测试基本连接
-    if ! nc -z "$TEST_HOST" "$TEST_PORT" 2>/dev/null; then
+    if ! port_is_open "$TEST_HOST" "$TEST_PORT"; then
         log_error "Server is not responding"
         return 1
     fi
-    
+
     # 测试用户登录
-    local entry user password
+    local entry user password response
     for entry in "${TEST_USERS[@]}"; do
         IFS=':' read -r user password <<<"$entry"
         log_info "Testing login for user: $user"
 
-        if ! echo -e "LOGIN|$user|$password\nQUIT\n" | nc -w 5 "$TEST_HOST" "$TEST_PORT" | grep -q "OK|WELCOME"; then
+        if ! response=$(printf 'LOGIN|%s|%s\nQUIT\n' "$user" "$password" | socket_request "$TEST_HOST" "$TEST_PORT"); then
+            log_error "Login request failed for user: $user"
+            return 1
+        fi
+
+        if [[ "$response" != *"OK|WELCOME"* ]]; then
             log_error "Login failed for user: $user"
+            log_error "Response: $response"
             return 1
         fi
     done
-    
+
     log_success "Test environment verification passed"
     return 0
 }
@@ -295,9 +389,18 @@ main() {
     check_dependencies
     setup_test_data_dir
     create_test_users
+
     if [[ "$START_SERVER" == "1" ]]; then
-        start_test_server
-        verify_test_environment
+        if ! start_test_server; then
+            log_error "Failed to start server"
+            exit 1
+        fi
+
+        if ! verify_test_environment; then
+            log_error "Test environment verification failed"
+            exit 1
+        fi
+
         show_test_info
     else
         log_info "Skipping server startup (--no-server)"

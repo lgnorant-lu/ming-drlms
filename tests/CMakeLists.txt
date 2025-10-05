@@ -23,6 +23,10 @@ if(ENABLE_COVERAGE AND COVERAGE_LIBS)
     list(APPEND TEST_LIBS ${COVERAGE_LIBS})
 endif()
 
+if(WIN32)
+    list(APPEND TEST_LIBS ws2_32 bcrypt)
+endif()
+
 target_link_libraries(test_ipc_suite PRIVATE ${TEST_LIBS})
 
 add_test(NAME ipc_suite COMMAND test_ipc_suite)

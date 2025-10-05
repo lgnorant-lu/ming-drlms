@@ -2,6 +2,7 @@
 #define SHARED_BUFFER_H
 
 #include "platform/platform.h"
+#include "platform/compat.h"
 #include <stdint.h>
 #include <stddef.h>
 

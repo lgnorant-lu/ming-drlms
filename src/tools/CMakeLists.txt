@@ -1,9 +1,11 @@
-add_executable(proc_launcher proc_launcher.c)
+if(NOT WIN32)
+    add_executable(proc_launcher proc_launcher.c)
 
-target_include_directories(proc_launcher PRIVATE
-    ${PROJECT_SOURCE_DIR}/src/platform/include)
+    target_include_directories(proc_launcher PRIVATE
+        ${PROJECT_SOURCE_DIR}/src/platform/include)
 
-target_link_libraries(proc_launcher PRIVATE platform Threads::Threads)
+    target_link_libraries(proc_launcher PRIVATE platform Threads::Threads)
+endif()
 
 add_executable(log_consumer log_consumer.c)
 

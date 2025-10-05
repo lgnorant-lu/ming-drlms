@@ -2,8 +2,27 @@
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
+#include "platform/compat.h"
+
+#if !defined(_WIN32)
 #include <unistd.h>
+#endif
 #include "../libipc/shared_buffer.h"
+
+#if defined(_WIN32)
+static int setenv_compat(const char *name, const char *value, int overwrite) {
+    if (!overwrite) {
+        const char *existing = getenv(name);
+        if (existing && *existing)
+            return 0;
+    }
+    if (!value)
+        value = "";
+    return _putenv_s(name, value);
+}
+
+#define setenv(name, value, overwrite) setenv_compat(name, value, overwrite)
+#endif
 
 static volatile int running = 1;
 static void on_sigint(int sig) {

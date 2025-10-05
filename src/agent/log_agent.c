@@ -8,51 +8,142 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <limits.h>
+
+#include "platform/platform.h"
+#include "platform/compat.h"
+
+#if defined(_WIN32)
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <windows.h>
+#else
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#endif
+
 #include <sys/stat.h>
 #include <openssl/sha.h>
 
-static int connect_server(const char *host, int port) {
-    int fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (fd < 0)
-        return -1;
+#if defined(_WIN32)
+#define SOCKET_INVALID(s) ((s) == INVALID_SOCKET)
+#else
+#define SOCKET_INVALID(s) ((s) < 0)
+#endif
+
+static platform_socket_t connect_server(const char *host, int port) {
+    platform_socket_t fd = socket(AF_INET, SOCK_STREAM, 0);
+#if defined(_WIN32)
+    if (SOCKET_INVALID(fd)) {
+        platform_net_set_last_error((int)WSAGetLastError());
+        return PLATFORM_INVALID_SOCKET;
+    }
+#else
+    if (SOCKET_INVALID(fd))
+        return PLATFORM_INVALID_SOCKET;
+#endif
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_port = htons((uint16_t)port);
     if (inet_pton(AF_INET, host, &addr.sin_addr) != 1) {
-        close(fd);
-        return -1;
+        platform_socket_close(fd);
+        return PLATFORM_INVALID_SOCKET;
     }
     if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        close(fd);
-        return -1;
+#if defined(_WIN32)
+        platform_net_set_last_error((int)WSAGetLastError());
+#else
+        platform_net_set_last_error(errno);
+#endif
+        platform_socket_close(fd);
+        return PLATFORM_INVALID_SOCKET;
     }
     return fd;
 }
 
-static int send_all(int fd, const void *buf, size_t len) {
+static int send_all(platform_socket_t fd, const void *buf, size_t len) {
     const char *p = (const char *)buf;
     size_t off = 0;
     while (off < len) {
-        ssize_t n = send(fd, p + off, len - off, 0);
-        if (n <= 0)
+        size_t to_send = len - off;
+#if defined(_WIN32)
+        int chunk = (to_send > INT_MAX) ? INT_MAX : (int)to_send;
+        int n = send(fd, p + off, chunk, 0);
+        if (n == SOCKET_ERROR) {
+            int err = WSAGetLastError();
+            if (err == WSAEINTR)
+                continue;
+            if (err == WSAEWOULDBLOCK) {
+                Sleep(1);
+                continue;
+            }
+            platform_net_set_last_error(err);
+            return -1;
+        }
+        if (n == 0)
             return -1;
         off += (size_t)n;
+#else
+        ssize_t n = send(fd, p + off, to_send, 0);
+        if (n < 0) {
+            if (errno == EINTR)
+                continue;
+#ifdef EAGAIN
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                usleep(1000);
+                continue;
+            }
+#endif
+            platform_net_set_last_error(errno);
+            return -1;
+        }
+        if (n == 0)
+            return -1;
+        off += (size_t)n;
+#endif
     }
     return 0;
 }
 
-static int recv_line(int fd, char *out, size_t out_sz) {
+static int recv_line(platform_socket_t fd, char *out, size_t out_sz) {
     size_t n = 0;
     while (n + 1 < out_sz) {
         char c;
-        ssize_t r = recv(fd, &c, 1, 0);
-        if (r <= 0)
+#if defined(_WIN32)
+        int r = recv(fd, &c, 1, 0);
+        if (r == 0)
             return -1;
+        if (r == SOCKET_ERROR) {
+            int err = WSAGetLastError();
+            if (err == WSAEINTR)
+                continue;
+            if (err == WSAEWOULDBLOCK) {
+                Sleep(1);
+                continue;
+            }
+            platform_net_set_last_error(err);
+            return -1;
+        }
+#else
+        ssize_t r = recv(fd, &c, 1, 0);
+        if (r < 0) {
+            if (errno == EINTR)
+                continue;
+#ifdef EAGAIN
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                usleep(1000);
+                continue;
+            }
+#endif
+            platform_net_set_last_error(errno);
+            return -1;
+        }
+        if (r == 0)
+            return -1;
+#endif
         if (c == '\n') {
             out[n] = '\0';
             return 0;
@@ -75,7 +166,8 @@ static void to_hex(const unsigned char *in, size_t len, char *out_hex,
         out_hex[j] = '\0';
 }
 
-static int action_login(int fd, const char *user, const char *pass) {
+static int action_login(platform_socket_t fd, const char *user,
+                        const char *pass) {
     char line[512];
     snprintf(line, sizeof line, "LOGIN|%s|%s\n", user, pass);
     if (send_all(fd, line, strlen(line)) != 0)
@@ -87,7 +179,7 @@ static int action_login(int fd, const char *user, const char *pass) {
     return (strncmp(resp, "OK|", 3) == 0 || strcmp(resp, "OK") == 0) ? 0 : -1;
 }
 
-static int action_list(int fd) {
+static int action_list(platform_socket_t fd) {
     if (send_all(fd, "LIST\n", 5) != 0)
         return -1;
     char line[1024];
@@ -133,7 +225,7 @@ static int file_sha256(const char *path,
     return 0;
 }
 
-static int action_upload(int fd, const char *filepath) {
+static int action_upload(platform_socket_t fd, const char *filepath) {
     // 计算sha与大小
     unsigned char dg[SHA256_DIGEST_LENGTH];
     long long fsz = 0;
@@ -145,6 +237,12 @@ static int action_upload(int fd, const char *filepath) {
     to_hex(dg, sizeof dg, shahex, sizeof shahex);
     // 文件名取basename（简单截取最后/后部分）
     const char *base = strrchr(filepath, '/');
+#if defined(_WIN32)
+    const char *base_win = strrchr(filepath, '\\');
+    if (!base || (base_win && base_win > base)) {
+        base = base_win;
+    }
+#endif
     base = base ? base + 1 : filepath;
     char cmd[1024];
     snprintf(cmd, sizeof cmd, "UPLOAD|%s|%lld|%s\n", base, fsz, shahex);
@@ -184,7 +282,8 @@ static int action_upload(int fd, const char *filepath) {
     return (strncmp(line, "OK|", 3) == 0) ? 0 : -1;
 }
 
-static int action_download(int fd, const char *filename, const char *outpath) {
+static int action_download(platform_socket_t fd, const char *filename,
+                           const char *outpath) {
     char cmd[1024];
     snprintf(cmd, sizeof cmd, "DOWNLOAD|%s\n", filename);
     if (send_all(fd, cmd, strlen(cmd)) != 0)
@@ -213,15 +312,55 @@ static int action_download(int fd, const char *filename, const char *outpath) {
     SHA256_Init(&ctx);
     while (remain > 0) {
         size_t chunk = (remain > (long long)BUF) ? BUF : (size_t)remain;
-        ssize_t r = recv(fd, buf, chunk, 0);
-        if (r <= 0) {
+        size_t got = 0;
+#if defined(_WIN32)
+        int to_read = (chunk > INT_MAX) ? INT_MAX : (int)chunk;
+        int r = recv(fd, (char *)buf, to_read, 0);
+        if (r == 0) {
             fclose(f);
             free(buf);
             return -1;
         }
-        fwrite(buf, 1, (size_t)r, f);
-        SHA256_Update(&ctx, buf, (size_t)r);
-        remain -= (long long)r;
+        if (r == SOCKET_ERROR) {
+            int err = WSAGetLastError();
+            if (err == WSAEINTR)
+                continue;
+            if (err == WSAEWOULDBLOCK) {
+                Sleep(1);
+                continue;
+            }
+            platform_net_set_last_error(err);
+            fclose(f);
+            free(buf);
+            return -1;
+        }
+        got = (size_t)r;
+#else
+        ssize_t r = recv(fd, buf, chunk, 0);
+        if (r == 0) {
+            fclose(f);
+            free(buf);
+            return -1;
+        }
+        if (r < 0) {
+            if (errno == EINTR)
+                continue;
+#ifdef EAGAIN
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                usleep(1000);
+                continue;
+            }
+#endif
+            platform_net_set_last_error(errno);
+            fclose(f);
+            free(buf);
+            return -1;
+        }
+        got = (size_t)r;
+#endif
+        fwrite(buf, 1, got, f);
+        SHA256_Update(&ctx, buf, got);
+        remain -= (long long)got;
     }
     unsigned char dg[SHA256_DIGEST_LENGTH];
     SHA256_Final(dg, &ctx);
@@ -255,16 +394,23 @@ int main(int argc, char **argv) {
     const char *pass = argv[5];
     const char *action = argv[6];
 
-    int fd = connect_server(host, port);
-    if (fd < 0) {
+    if (platform_net_initialize() != 0) {
+        perror("net init");
+        return 1;
+    }
+
+    platform_socket_t fd = connect_server(host, port);
+    if (SOCKET_INVALID(fd)) {
         perror("connect");
+        platform_net_cleanup();
         return 1;
     }
     fprintf(stdout, "connected to %s:%d\n", host, port);
     fflush(stdout);
 
     if (action_login(fd, user, pass) != 0) {
-        close(fd);
+        platform_socket_close(fd);
+        platform_net_cleanup();
         return 1;
     }
 
@@ -295,6 +441,7 @@ int main(int argc, char **argv) {
         rc = 1;
     }
 
-    close(fd);
+    platform_socket_close(fd);
+    platform_net_cleanup();
     return rc == 0 ? 0 : 1;
 }

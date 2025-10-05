@@ -6,7 +6,7 @@ import subprocess
 import typer
 
 from ..i18n import t
-from .utils import ROOT, maybe_banner, BIN_AGENT, BIN_SERVER
+from .utils import ROOT, maybe_banner, BIN_AGENT, BIN_SERVER, find_binary
 
 
 demo_app = typer.Typer(help="demos")
@@ -18,15 +18,17 @@ def demo_quickstart():
     python = sys.executable or "python3"
     # Pre-flight checks for C binaries
     missing = []
-    if not BIN_SERVER.exists():
+    server_bin = find_binary("log_collector_server") or BIN_SERVER
+    agent_bin = find_binary("log_agent") or BIN_AGENT
+    if not server_bin.exists():
         missing.append("log_collector_server")
-    if not BIN_AGENT.exists():
+    if not agent_bin.exists():
         missing.append("log_agent")
     if missing:
         typer.echo(
             "[demo] missing C binaries: "
             + ", ".join(missing)
-            + ". Some steps will be skipped. Run 'make all' for full demo.",
+            + ". Some steps will be skipped. Build with CMake (e.g. 'cmake --build build') for the full demo.",
             err=True,
         )
     try:
@@ -65,7 +67,7 @@ def demo_quickstart():
         )
         readme = ROOT / "README.md"
         # Only run upload/download when log_agent is available
-        if readme.exists() and BIN_AGENT.exists():
+        if readme.exists() and agent_bin.exists():
             subprocess.run(
                 [
                     python,
@@ -106,12 +108,12 @@ def demo_quickstart():
                 ],
                 check=False,
             )
-        elif not BIN_AGENT.exists():
+        elif not agent_bin.exists():
             typer.echo(
                 "[demo] 'log_agent' missing — skipping upload/download segment",
                 err=True,
             )
-        if BIN_AGENT.exists():
+        if agent_bin.exists():
             subprocess.run(
                 [
                     python,

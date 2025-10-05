@@ -40,9 +40,14 @@ ming-drlms dev coverage show -
 - `make coverage` 将运行：C 单元、协议集成、房间策略集成（`tests/integration_space.sh`，默认 FAST 模式）、工具 smoke、Python E2E 与 pytest 用例，并生成 C/Python 报告。
 - 若 CI 环境缺少 `nc/timeout` 等工具，脚本会尝试回退方案或缩短等待时间。
 
+## CI/CD 工作流（CI/CD Workflows）
+- `build-and-test.yml`：对 `main` 与所有 `feature/*` 分支的 push 以及 PR 自动触发，在 Linux、macOS、Windows 三个平台并行执行完整的构建、集成测试与覆盖率脚本，并上传调试用构建产物。
+- `release.yml`：只在 `main` 分支 push 与 `v*.*.*` 标签触发；先在 Ubuntu 上复现构建与测试流程，再根据触发来源自动发布到 TestPyPI（main）或 PyPI（tag），标签发布额外调用 `scripts/package_gui.py` 打包 GUI，并将 `.zip`/平台二进制附着在 GitHub Release。
+
 ## 打包与发布（Packaging & Release，Trusted Publishing）
-- 版本来源：Git 标签 vX.Y.Z
-- CI：在 main 分支构建 sdist/wheel 并发布到 TestPyPI；打标签后发布到 PyPI
+- 主线验证（TestPyPI）：代码合并到 `main` 后自动构建 sdist/wheel 并推送至 TestPyPI，对应的 Trusted Publisher 绑定仓库 `main` 分支。
+- 正式发布（PyPI + GUI）：推送 `vX.Y.Z` 标签会触发正式构建，发布到 PyPI，生成 ZIP/应用包并自动创建 GitHub Release。Trusted Publisher 仅接受 `v*` 标签事件，确保正式仓库只由版本标签发布。
+- 手动发布：如需临时重发，可在同一标签上通过 `workflow_dispatch` 重新执行 `release.yml`，也可在本地使用 `python -m build` + `pypa/gh-action-pypi-publish` 手动上传。
 
 ## Git 钩子与代码风格（Hooks & Style）
 ```bash

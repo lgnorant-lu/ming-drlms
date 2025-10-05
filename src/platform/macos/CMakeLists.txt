@@ -1,6 +1,8 @@
 add_library(platform_macos STATIC
     thread.c
-    ipc.c)
+    ipc.c
+    net.c
+    file.c)
 
 target_link_libraries(platform_macos
     PUBLIC

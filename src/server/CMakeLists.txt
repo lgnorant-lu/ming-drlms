@@ -27,6 +27,10 @@ if(UNIX AND NOT APPLE)
     list(APPEND SERVER_LIBS rt)
 endif()
 
+if(WIN32)
+    list(APPEND SERVER_LIBS ws2_32 bcrypt)
+endif()
+
 if(ENABLE_COVERAGE AND COVERAGE_LIBS)
     list(APPEND SERVER_LIBS ${COVERAGE_LIBS})
 endif()

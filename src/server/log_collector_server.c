@@ -2,6 +2,26 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <time.h>
+#include <limits.h>
+#include <ctype.h>
+#include <signal.h>
+#include <fcntl.h>
+
+#include "platform/platform.h"
+#include "platform/compat.h"
+
+#if defined(_WIN32)
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <mstcpip.h>
+#include <windows.h>
+#include <bcrypt.h>
+#include <io.h>
+#include <sys/stat.h>
+#include <process.h>
+#include <direct.h>
+#else
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -9,27 +29,28 @@
 #include <netinet/tcp.h>
 #include <sys/stat.h>
 #include <dirent.h>
-#include <time.h>
-#include <limits.h>
-#include "platform/platform.h"
 #include <sys/time.h>
-#include <ctype.h>
-#include <signal.h>
+#endif
+
 #include "../libipc/shared_buffer.h"
 #include <openssl/sha.h>
+
 #include "rooms.h"
 #include <argon2.h>
-#include <fcntl.h>
+
+#if defined(_WIN32)
+#define getpid _getpid
+#endif
 
 typedef struct {
-    int client_fd;
+    platform_socket_t client_fd;
     struct sockaddr_in addr;
 } client_ctx_t;
 
 static char g_data_dir[PATH_MAX] = "server_files";
 static char g_audit_path[PATH_MAX] = "server_files/ops_audit.log";
 static volatile sig_atomic_t g_stop = 0;
-static int g_listen_fd = -1;
+static platform_socket_t g_listen_fd = PLATFORM_INVALID_SOCKET;
 static long long g_rate_up_bps = 0;   // upload throttle (client->server)
 static long long g_rate_down_bps = 0; // download throttle (server->client)
 static int g_max_conn = 128;
@@ -41,15 +62,9 @@ static int g_rcv_timeout_sec = 319;      // default recv/send timeout seconds
 static platform_mutex_t g_users_file_mu; // protect users.txt writes
 // TCP keepalive tuning (env-overridable)
 static int g_tcp_keepalive_enabled = 1;
-#ifdef TCP_KEEPIDLE
 static int g_tcp_keepidle = 300; // seconds before first probe
-#endif
-#ifdef TCP_KEEPINTVL
 static int g_tcp_keepintvl = 10; // interval between probes
-#endif
-#ifdef TCP_KEEPCNT
-static int g_tcp_keepcnt = 3; // number of probes
-#endif
+static int g_tcp_keepcnt = 3;    // number of probes
 
 // users.txt cache
 typedef struct {
@@ -61,12 +76,30 @@ typedef struct {
 static user_cred_t g_users[256];
 static int g_users_count = 0;
 
+#if defined(_WIN32)
+static void sleep_microseconds(unsigned long long usec) {
+    if (usec == 0)
+        return;
+    DWORD millis = (DWORD)((usec + 999ULL) / 1000ULL);
+    Sleep(millis);
+}
+#else
+static void sleep_microseconds(unsigned long long usec) {
+    if (usec == 0)
+        return;
+    if (usec > 1000000ULL * 1000ULL) {
+        usec = 1000000ULL * 1000ULL;
+    }
+    usleep((useconds_t)usec);
+}
+#endif
+
 // --- Argon2 configuration ---
 static int g_argon2_t_cost = 2;     // iterations
 static int g_argon2_m_cost = 65536; // KiB (64 MiB)
 static int g_argon2_parallel = 1;   // lanes
 
-static int send_all(int fd, const void *data, size_t len);
+static int send_all(platform_socket_t fd, const void *data, size_t len);
 
 static void argon2_load_params_from_env(void) {
     const char *t = getenv("DRLMS_ARGON2_T_COST");
@@ -102,6 +135,13 @@ static int is_argon2_encoded(const char *s) {
 static int generate_random_bytes(unsigned char *buf, size_t len) {
     if (!buf || len == 0)
         return -1;
+#if defined(_WIN32)
+    NTSTATUS status =
+        BCryptGenRandom(NULL, buf, (ULONG)len, BCRYPT_USE_SYSTEM_PREFERRED_RNG);
+    if (status != 0)
+        return -1;
+    return 0;
+#else
     int fd = open("/dev/urandom", O_RDONLY);
     if (fd < 0)
         return -1;
@@ -109,13 +149,14 @@ static int generate_random_bytes(unsigned char *buf, size_t len) {
     while (got < len) {
         ssize_t n = read(fd, buf + got, len - got);
         if (n <= 0) {
-            close(fd);
+            platform_close_fd(fd);
             return -1;
         }
         got += (size_t)n;
     }
-    close(fd);
+    platform_close_fd(fd);
     return 0;
+#endif
 }
 
 static int hash_password_argon2(const char *password, char *out_encoded,
@@ -176,7 +217,7 @@ static int upgrade_user_password_to_argon2(const char *username,
     }
     FILE *fout = fdopen(fd, "w");
     if (!fout) {
-        close(fd);
+        platform_close_fd(fd);
         if (fin)
             fclose(fin);
         platform_mutex_unlock(&g_users_file_mu);
@@ -223,7 +264,7 @@ static int upgrade_user_password_to_argon2(const char *username,
     }
 
     fflush(fout);
-    fsync(fd);
+    (void)platform_fsync_fd(fd);
     fclose(fout);
     // Atomic replace
     if (rename(tmp_path, path) != 0) {
@@ -236,11 +277,7 @@ static int upgrade_user_password_to_argon2(const char *username,
         return -1;
     }
     // Ensure directory entry durability
-    int dfd = open(g_data_dir, O_RDONLY | O_DIRECTORY);
-    if (dfd >= 0) {
-        (void)fsync(dfd);
-        close(dfd);
-    }
+    (void)platform_sync_path(g_data_dir);
     // Reload users cache
     (void)load_users_file();
     platform_mutex_unlock(&g_users_file_mu);
@@ -253,21 +290,43 @@ static int upgrade_user_password_to_argon2(const char *username,
 static void on_signal(int sig) {
     (void)sig;
     g_stop = 1;
-    if (g_listen_fd >= 0)
-        close(g_listen_fd);
+    if (g_listen_fd != PLATFORM_INVALID_SOCKET) {
+        (void)platform_socket_close(g_listen_fd);
+        g_listen_fd = PLATFORM_INVALID_SOCKET;
+    }
 }
 
-static void set_socket_timeouts(int fd, int seconds) {
+static void set_socket_timeouts(platform_socket_t fd, int seconds) {
+#if defined(_WIN32)
+    DWORD timeout_ms = (DWORD)(seconds * 1000);
+    (void)setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&timeout_ms,
+                     sizeof(timeout_ms));
+    (void)setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, (const char *)&timeout_ms,
+                     sizeof(timeout_ms));
+#else
     struct timeval tv;
     tv.tv_sec = seconds;
     tv.tv_usec = 0;
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+#endif
 }
 
-static void enable_tcp_keepalive(int fd) {
+static void enable_tcp_keepalive(platform_socket_t fd) {
     if (!g_tcp_keepalive_enabled)
         return;
+#if defined(_WIN32)
+    BOOL enable = TRUE;
+    (void)setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, (const char *)&enable,
+                     sizeof(enable));
+    struct tcp_keepalive settings;
+    settings.onoff = 1;
+    settings.keepalivetime = g_tcp_keepidle * 1000;
+    settings.keepaliveinterval = g_tcp_keepintvl * 1000;
+    DWORD bytes = 0;
+    (void)WSAIoctl(fd, SIO_KEEPALIVE_VALS, &settings, sizeof(settings), NULL, 0,
+                   &bytes, NULL, NULL);
+#else
     int yes = 1;
     (void)setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &yes, sizeof(yes));
 #ifdef TCP_KEEPIDLE
@@ -282,9 +341,25 @@ static void enable_tcp_keepalive(int fd) {
     int cnt = g_tcp_keepcnt;
     (void)setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, &cnt, sizeof(cnt));
 #endif
+#endif
 }
 
 static int ensure_dir_mode(const char *path, mode_t mode) {
+#if defined(_WIN32)
+    (void)mode;
+    struct _stat st;
+    if (_stat(path, &st) == 0) {
+        if ((st.st_mode & _S_IFDIR) != 0)
+            return 0;
+        errno = ENOTDIR;
+        return -1;
+    }
+    if (_mkdir(path) == 0)
+        return 0;
+    if (errno == EEXIST)
+        return 0;
+    return -1;
+#else
     struct stat st;
     if (stat(path, &st) == 0) {
         if (S_ISDIR(st.st_mode)) {
@@ -297,13 +372,35 @@ static int ensure_dir_mode(const char *path, mode_t mode) {
     if (mkdir(path, mode) == 0)
         return 0;
     return -1;
+#endif
 }
 
 static void rfc3339_time(char *buf, size_t sz) {
     time_t t = time(NULL);
     struct tm tmv;
-    gmtime_r(&t, &tmv);
+    if (
+#if defined(_WIN32)
+        gmtime_s(&tmv, &t)
+#else
+        gmtime_r(&t, &tmv) == NULL
+#endif
+    ) {
+        snprintf(buf, sz, "1970-01-01T00:00:00Z");
+        return;
+    }
     strftime(buf, sz, "%Y-%m-%dT%H:%M:%SZ", &tmv);
+}
+
+static void format_ipv4(char *buf, size_t sz, const struct sockaddr_in *addr) {
+#if defined(_WIN32)
+    if (!InetNtopA(AF_INET, (PVOID)&addr->sin_addr, buf, (DWORD)sz)) {
+        snprintf(buf, sz, "0.0.0.0");
+    }
+#else
+    if (!inet_ntop(AF_INET, &addr->sin_addr, buf, sz)) {
+        snprintf(buf, sz, "0.0.0.0");
+    }
+#endif
 }
 
 static void audit_log(const char *ip, const char *user, const char *action,
@@ -326,7 +423,12 @@ static void audit_log(const char *ip, const char *user, const char *action,
     fclose(f);
 }
 
-static int list_visible_files(int fd) {
+static int list_visible_files(platform_socket_t fd) {
+#if defined(_WIN32)
+    const char *msg = "ERR|UNSUPPORTED|list not implemented\n";
+    (void)send_all(fd, msg, strlen(msg));
+    return -1;
+#else
     DIR *d = opendir(g_data_dir);
     if (!d) {
         const char *msg = "ERR|INTERNAL|open data dir failed\n";
@@ -351,40 +453,63 @@ static int list_visible_files(int fd) {
     closedir(d);
     (void)send_all(fd, "END\n", 4);
     return 0;
+#endif
 }
 
-static int send_all(int fd, const void *data, size_t len) {
+static int send_all(platform_socket_t fd, const void *data, size_t len) {
     const unsigned char *buf = (const unsigned char *)data;
     size_t remaining = len;
 
     while (remaining > 0) {
-        ssize_t written = send(fd, buf, remaining, 0);
-        if (written < 0) {
-            if (errno == EINTR)
+#if defined(_WIN32)
+        int to_write = (remaining > INT_MAX) ? INT_MAX : (int)remaining;
+        int written = send(fd, (const char *)buf, to_write, 0);
+        if (written == SOCKET_ERROR) {
+            int err = WSAGetLastError();
+            if (err == WSAEINTR)
                 continue;
-#ifdef EAGAIN
-            if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                usleep(1000);
+            if (err == WSAEWOULDBLOCK) {
+                sleep_microseconds(1000);
                 continue;
             }
-#endif
+            platform_net_set_last_error(err);
             return -1;
         }
         if (written == 0)
             return -1;
         buf += (size_t)written;
         remaining -= (size_t)written;
+#else
+        ssize_t written = send(fd, buf, remaining, 0);
+        if (written < 0) {
+            if (errno == EINTR)
+                continue;
+#ifdef EAGAIN
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                sleep_microseconds(1000);
+                continue;
+            }
+#endif
+            platform_net_set_last_error(errno);
+            return -1;
+        }
+        if (written == 0)
+            return -1;
+        buf += (size_t)written;
+        remaining -= (size_t)written;
+#endif
     }
     return 0;
 }
 
-static void send_err(int fd, const char *code, const char *message) {
+static void send_err(platform_socket_t fd, const char *code,
+                     const char *message) {
     char buf[512];
     snprintf(buf, sizeof buf, "ERR|%s|%s\n", code, message ? message : "");
     (void)send_all(fd, buf, strlen(buf));
 }
 
-static void send_ok(int fd, const char *msg) {
+static void send_ok(platform_socket_t fd, const char *msg) {
     if (msg && *msg) {
         char buf[512];
         snprintf(buf, sizeof buf, "OK|%s\n", msg);
@@ -438,6 +563,14 @@ static int is_safe_path(const char *path) {
     if (strncmp(path, "/tmp/", 5) == 0)
         return 1;
 
+    // 允许位于当前数据目录 g_data_dir 下的路径
+    size_t dd_len = strnlen(g_data_dir, sizeof g_data_dir);
+    if (dd_len > 0 && strncmp(path, g_data_dir, dd_len) == 0) {
+        char next = path[dd_len];
+        if (g_data_dir[dd_len - 1] == '/' || next == '/' || next == '\0')
+            return 1;
+    }
+
     // 拒绝其他所有绝对路径
     if (*path == '/')
         return 0;
@@ -475,19 +608,56 @@ static int hex_equal_nocase(const char *a, const char *b) {
     return 1;
 }
 
-static int recv_exact(int fd, unsigned char *buf, size_t need) {
+static int recv_exact(platform_socket_t fd, unsigned char *buf, size_t need) {
     size_t got = 0;
     while (got < need) {
-        ssize_t n = recv(fd, (char *)buf + got, need - got, 0);
-        if (n <= 0)
+        size_t step = 0;
+#if defined(_WIN32)
+        size_t remain = need - got;
+        int to_read = (remain > INT_MAX) ? INT_MAX : (int)remain;
+        int nread = recv(fd, (char *)buf + got, to_read, 0);
+        if (nread == 0)
             return -1;
-        got += (size_t)n;
+        if (nread == SOCKET_ERROR) {
+            int err = WSAGetLastError();
+            if (err == WSAEINTR)
+                continue;
+            if (err == WSAEWOULDBLOCK) {
+                sleep_microseconds(1000);
+                continue;
+            }
+            platform_net_set_last_error(err);
+            return -1;
+        }
+        step = (size_t)nread;
+#else
+        ssize_t nread = recv(fd, (char *)buf + got, need - got, 0);
+        if (nread == 0)
+            return -1;
+        if (nread < 0) {
+            if (errno == EINTR)
+                continue;
+#ifdef EAGAIN
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                sleep_microseconds(1000);
+                continue;
+            }
+#endif
+            platform_net_set_last_error(errno);
+            return -1;
+        }
+        step = (size_t)nread;
+#endif
+        got += step;
         if (g_rate_up_bps > 0) {
             // 简单节流：按读取字节估算睡眠时间
-            useconds_t us =
-                (useconds_t)(((double)n / (double)g_rate_up_bps) * 1000000.0);
-            if (us > 0)
-                usleep(us);
+            double seconds = ((double)step / (double)g_rate_up_bps);
+            if (seconds > 0) {
+                unsigned long long us =
+                    (unsigned long long)(seconds * 1000000.0);
+                if (us > 0)
+                    sleep_microseconds(us);
+            }
         }
     }
     return 0;
@@ -523,18 +693,15 @@ static int load_users_file(void) {
         *p2 = '\0';
         if (g_users_count >= (int)(sizeof g_users / sizeof g_users[0]))
             break;
-        strncpy(g_users[g_users_count].user, line,
-                sizeof(g_users[g_users_count].user) - 1);
-        g_users[g_users_count].user[sizeof(g_users[g_users_count].user) - 1] =
-            '\0';
-        strncpy(g_users[g_users_count].salt, p1 + 1,
-                sizeof(g_users[g_users_count].salt) - 1);
-        g_users[g_users_count].salt[sizeof(g_users[g_users_count].salt) - 1] =
-            '\0';
-        strncpy(g_users[g_users_count].hash_str, p2 + 1,
-                sizeof(g_users[g_users_count].hash_str) - 1);
-        g_users[g_users_count]
-            .hash_str[sizeof(g_users[g_users_count].hash_str) - 1] = '\0';
+        snprintf(g_users[g_users_count].user,
+                 sizeof(g_users[g_users_count].user), "%.*s",
+                 (int)(sizeof(g_users[g_users_count].user) - 1), line);
+        snprintf(g_users[g_users_count].salt,
+                 sizeof(g_users[g_users_count].salt), "%.*s",
+                 (int)(sizeof(g_users[g_users_count].salt) - 1), p1 + 1);
+        snprintf(g_users[g_users_count].hash_str,
+                 sizeof(g_users[g_users_count].hash_str), "%.*s",
+                 (int)(sizeof(g_users[g_users_count].hash_str) - 1), p2 + 1);
         g_users_count++;
     }
     fclose(f);
@@ -614,8 +781,8 @@ static void append_central_log(const char *ip, const char *user,
 }
 
 // ADD: upload & download helpers
-static int handle_upload(int fd, const char *ip, const char *username,
-                         char *cmd) {
+static int handle_upload(platform_socket_t fd, const char *ip,
+                         const char *username, char *cmd) {
     // cmd: UPLOAD|filename|size|sha256hex
     char *p1 = strchr(cmd + 7, '|');
     if (!p1) {
@@ -708,7 +875,7 @@ static int handle_upload(int fd, const char *ip, const char *username,
     }
     free(buf);
     fflush(f);
-    fsync(fileno(f));
+    (void)platform_fsync_fd(fileno(f));
     fclose(f);
     unsigned char dg[SHA256_DIGEST_LENGTH];
     SHA256_Final(dg, &ctx);
@@ -731,8 +898,8 @@ static int handle_upload(int fd, const char *ip, const char *username,
     return 0;
 }
 
-static int handle_download(int fd, const char *ip, const char *username,
-                           char *cmd) {
+static int handle_download(platform_socket_t fd, const char *ip,
+                           const char *username, char *cmd) {
     // cmd: DOWNLOAD|filename
     const char *filename = cmd + 9;
     if (*filename == '|')
@@ -799,10 +966,13 @@ static int handle_download(int fd, const char *ip, const char *username,
             return -1;
         }
         if (g_rate_down_bps > 0) {
-            useconds_t us =
-                (useconds_t)(((double)n / (double)g_rate_down_bps) * 1000000.0);
-            if (us > 0)
-                usleep(us);
+            double seconds = ((double)n / (double)g_rate_down_bps);
+            if (seconds > 0) {
+                unsigned long long us =
+                    (unsigned long long)(seconds * 1000000.0);
+                if (us > 0)
+                    sleep_microseconds(us);
+            }
         }
     }
     free(buf);
@@ -812,18 +982,39 @@ static int handle_download(int fd, const char *ip, const char *username,
     return 0;
 }
 
-static int create_server_socket(int port) {
-    int fd = socket(AF_INET, SOCK_STREAM, 0);
+static platform_socket_t create_server_socket(int port) {
+    platform_socket_t fd = socket(AF_INET, SOCK_STREAM, 0);
+#if defined(_WIN32)
+    if (fd == INVALID_SOCKET) {
+        platform_net_set_last_error(WSAGetLastError());
+        perror("socket");
+        return PLATFORM_INVALID_SOCKET;
+    }
+#else
     if (fd < 0) {
         perror("socket");
-        return -1;
+        return PLATFORM_INVALID_SOCKET;
     }
-    fprintf(stderr, "DEBUG: Created socket %d for port %d\n", fd, port);
+#endif
+    fprintf(stderr, "DEBUG: Created socket %lld for port %d\n", (long long)fd,
+            port);
     int opt = 1;
+#if defined(_WIN32)
+    if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (const char *)&opt,
+                   sizeof(opt)) < 0) {
+#else
     if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
+#endif
+        int err_code;
+#if defined(_WIN32)
+        err_code = WSAGetLastError();
+#else
+        err_code = errno;
+#endif
+        platform_net_set_last_error(err_code);
         perror("setsockopt");
-        close(fd);
-        return -1;
+        platform_socket_close(fd);
+        return PLATFORM_INVALID_SOCKET;
     }
     struct sockaddr_in srv;
     memset(&srv, 0, sizeof(srv));
@@ -831,17 +1022,33 @@ static int create_server_socket(int port) {
     srv.sin_addr.s_addr = INADDR_ANY;
     srv.sin_port = htons((uint16_t)port);
     if (bind(fd, (struct sockaddr *)&srv, sizeof(srv)) < 0) {
+        int err_code;
+#if defined(_WIN32)
+        err_code = WSAGetLastError();
+#else
+        err_code = errno;
+#endif
+        platform_net_set_last_error(err_code);
         perror("bind");
-        close(fd);
-        return -1;
+        platform_socket_close(fd);
+        return PLATFORM_INVALID_SOCKET;
     }
-    fprintf(stderr, "DEBUG: Bound socket %d to port %d\n", fd, port);
+    fprintf(stderr, "DEBUG: Bound socket %lld to port %d\n", (long long)fd,
+            port);
     if (listen(fd, 128) < 0) {
+        int err_code;
+#if defined(_WIN32)
+        err_code = WSAGetLastError();
+#else
+        err_code = errno;
+#endif
+        platform_net_set_last_error(err_code);
         perror("listen");
-        close(fd);
-        return -1;
+        platform_socket_close(fd);
+        return PLATFORM_INVALID_SOCKET;
     }
-    fprintf(stderr, "DEBUG: Listening on socket %d for port %d\n", fd, port);
+    fprintf(stderr, "DEBUG: Listening on socket %lld for port %d\n",
+            (long long)fd, port);
     return fd;
 }
 
@@ -849,18 +1056,52 @@ static void *handle_client(void *arg) {
     client_ctx_t *ctx = (client_ctx_t *)arg;
     set_socket_timeouts(ctx->client_fd, g_rcv_timeout_sec);
     char peer_ip[64];
-    inet_ntop(AF_INET, &ctx->addr.sin_addr, peer_ip, sizeof peer_ip);
+    format_ipv4(peer_ip, sizeof peer_ip, &ctx->addr);
     int authenticated = 0;
     char username[64] = {0};
 
     char inbuf[4096];
     size_t inlen = 0;
     for (;;) {
-        ssize_t n =
-            recv(ctx->client_fd, inbuf + inlen, sizeof(inbuf) - 1 - inlen, 0);
-        if (n <= 0)
+        size_t avail = sizeof(inbuf) - 1 - inlen;
+        if (avail == 0)
             break;
-        inlen += (size_t)n;
+#if defined(_WIN32)
+        int to_read = (avail > INT_MAX) ? INT_MAX : (int)avail;
+        int nread = recv(ctx->client_fd, inbuf + inlen, to_read, 0);
+        if (nread == 0)
+            break;
+        if (nread == SOCKET_ERROR) {
+            int err = WSAGetLastError();
+            if (err == WSAEINTR)
+                continue;
+            if (err == WSAEWOULDBLOCK) {
+                sleep_microseconds(1000);
+                continue;
+            }
+            platform_net_set_last_error(err);
+            break;
+        }
+        size_t n = (size_t)nread;
+#else
+        ssize_t nread = recv(ctx->client_fd, inbuf + inlen, avail, 0);
+        if (nread == 0)
+            break;
+        if (nread < 0) {
+            if (errno == EINTR)
+                continue;
+#ifdef EAGAIN
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                sleep_microseconds(1000);
+                continue;
+            }
+#endif
+            platform_net_set_last_error(errno);
+            break;
+        }
+        size_t n = (size_t)nread;
+#endif
+        inlen += n;
         inbuf[inlen] = '\0';
         // 逐行处理
         char *start = inbuf;
@@ -1128,7 +1369,6 @@ static void *handle_client(void *arg) {
                 if (!authenticated) {
                     send_err(ctx->client_fd, "PERM", "login required");
                 } else {
-                    // PUBF|room|filename|size|sha
                     char *p1 = strchr(start + 5, '|');
                     if (!p1) {
                         send_err(ctx->client_fd, "FORMAT", "PUBF fields");
@@ -1166,7 +1406,7 @@ static void *handle_client(void *arg) {
                                         if (snprintf(tmp_path, sizeof tmp_path,
                                                      "%s/.%s.part", g_data_dir,
                                                      filename) >=
-                                            (int)sizeof(tmp_path)) {
+                                            (int)sizeof tmp_path) {
                                             send_err(ctx->client_fd, "FORMAT",
                                                      "name too long");
                                         } else {
@@ -1183,33 +1423,59 @@ static void *handle_client(void *arg) {
                                                 unsigned char *buf =
                                                     (unsigned char *)malloc(
                                                         BUF);
-                                                long long remain = size;
                                                 int fail = 0;
-                                                while (remain > 0) {
-                                                    size_t chunk =
-                                                        (remain >
-                                                         (long long)BUF)
-                                                            ? BUF
-                                                            : (size_t)remain;
-                                                    if (recv_exact(
-                                                            ctx->client_fd, buf,
-                                                            chunk) != 0) {
-                                                        fail = 1;
-                                                        break;
+                                                const char *fail_code = NULL;
+                                                const char *fail_msg = NULL;
+                                                if (!buf) {
+                                                    fail = 1;
+                                                    fail_code = "INTERNAL";
+                                                    fail_msg = "malloc";
+                                                } else {
+                                                    long long remain = size;
+                                                    while (remain > 0) {
+                                                        size_t chunk =
+                                                            (remain >
+                                                             (long long)BUF)
+                                                                ? BUF
+                                                                : (size_t)
+                                                                      remain;
+                                                        if (recv_exact(
+                                                                ctx->client_fd,
+                                                                buf,
+                                                                chunk) != 0) {
+                                                            fail = 1;
+                                                            fail_code = "SIZE";
+                                                            fail_msg = "short";
+                                                            break;
+                                                        }
+                                                        if (fwrite(buf, 1,
+                                                                   chunk, f) !=
+                                                            chunk) {
+                                                            fail = 1;
+                                                            fail_code =
+                                                                "INTERNAL";
+                                                            fail_msg =
+                                                                "write failed";
+                                                            break;
+                                                        }
+                                                        SHA256_Update(&c, buf,
+                                                                      chunk);
+                                                        remain -=
+                                                            (long long)chunk;
                                                     }
-                                                    fwrite(buf, 1, chunk, f);
-                                                    SHA256_Update(&c, buf,
-                                                                  chunk);
-                                                    remain -= chunk;
                                                 }
-                                                free(buf);
+                                                if (buf)
+                                                    free(buf);
                                                 fflush(f);
-                                                fsync(fileno(f));
+                                                (void)platform_fsync_fd(
+                                                    fileno(f));
                                                 fclose(f);
                                                 if (fail) {
                                                     remove(tmp_path);
-                                                    send_err(ctx->client_fd,
-                                                             "SIZE", "short");
+                                                    if (fail_code && fail_msg)
+                                                        send_err(ctx->client_fd,
+                                                                 fail_code,
+                                                                 fail_msg);
                                                 } else {
                                                     unsigned char dg
                                                         [SHA256_DIGEST_LENGTH];
@@ -1259,18 +1525,16 @@ static void *handle_client(void *arg) {
                                                                 (size_t)size,
                                                                 hx,
                                                                 g_rate_down_bps);
-                                                            {
-                                                                char okbuf[128];
-                                                                snprintf(
-                                                                    okbuf,
-                                                                    sizeof okbuf,
-                                                                    "PUBF|%llu",
-                                                                    (unsigned long long)
-                                                                        event_id);
-                                                                send_ok(
-                                                                    ctx->client_fd,
-                                                                    okbuf);
-                                                            }
+                                                            char okbuf[128];
+                                                            snprintf(
+                                                                okbuf,
+                                                                sizeof okbuf,
+                                                                "PUBF|%llu",
+                                                                (unsigned long long)
+                                                                    event_id);
+                                                            send_ok(
+                                                                ctx->client_fd,
+                                                                okbuf);
                                                             audit_log(
                                                                 peer_ip,
                                                                 username,
@@ -1434,7 +1698,7 @@ done:
     if (username[0] != '\0') {
         rooms_handle_owner_disconnect(username, g_rate_down_bps);
     }
-    close(ctx->client_fd);
+    platform_socket_close(ctx->client_fd);
     // decrement active connection counter
     platform_mutex_lock(&g_conn_mu);
     if (g_active_conn > 0)
@@ -1467,11 +1731,21 @@ static long long getenv_ll(const char *name, long long defval) {
 }
 
 int main(void) {
+    if (platform_net_initialize() != 0) {
+        fprintf(stderr, "failed to initialize network stack: %d\n", errno);
+        return 1;
+    }
+#define NET_RETURN(code)                                                       \
+    do {                                                                       \
+        platform_net_cleanup();                                                \
+        return (code);                                                         \
+    } while (0)
+
     argon2_load_params_from_env();
     if (platform_mutex_init(&g_conn_mu) != 0 ||
         platform_mutex_init(&g_users_file_mu) != 0) {
         fprintf(stderr, "failed to initialize server mutexes\n");
-        return 1;
+        NET_RETURN(1);
     }
     int port = getenv_int("DRLMS_PORT", 8080);
     const char *dd = getenv("DRLMS_DATA_DIR");
@@ -1486,26 +1760,22 @@ int main(void) {
     g_rcv_timeout_sec = getenv_int("DRLMS_RCV_TIMEOUT", 319);
     // TCP keepalive tuning via env
     g_tcp_keepalive_enabled = getenv_int("DRLMS_TCP_KEEPALIVE", 1) ? 1 : 0;
-#ifdef TCP_KEEPIDLE
     g_tcp_keepidle = getenv_int("DRLMS_TCP_KEEPIDLE", g_tcp_keepidle);
-#endif
-#ifdef TCP_KEEPINTVL
     g_tcp_keepintvl = getenv_int("DRLMS_TCP_KEEPINTVL", g_tcp_keepintvl);
-#endif
-#ifdef TCP_KEEPCNT
     g_tcp_keepcnt = getenv_int("DRLMS_TCP_KEEPCNT", g_tcp_keepcnt);
-#endif
+#if !defined(_WIN32)
     umask(0077);
+#endif
     if (ensure_dir_mode(g_data_dir, 0700) != 0) {
         perror("ensure data dir");
-        return 1;
+        NET_RETURN(1);
     }
     const char *audit_name = "ops_audit.log";
     size_t dd_len = strnlen(g_data_dir, sizeof g_data_dir);
     size_t fn_len = strlen(audit_name);
     if (dd_len + 1 + fn_len >= sizeof g_audit_path) {
         fprintf(stderr, "data dir too long for audit path\n");
-        return 1;
+        NET_RETURN(1);
     }
     // 手工拼接以避免格式化截断告警
     size_t pos = 0;
@@ -1519,16 +1789,16 @@ int main(void) {
     (void)load_users_file();
     if (shm_init() != 0) {
         perror("shm_init");
-        return 1;
+        NET_RETURN(1);
     }
     if (rooms_init(g_data_dir) != 0) {
         fprintf(stderr, "rooms_init failed\n");
-        return 1;
+        NET_RETURN(1);
     }
-    int sfd = create_server_socket(port);
-    if (sfd < 0) {
+    platform_socket_t sfd = create_server_socket(port);
+    if (sfd == PLATFORM_INVALID_SOCKET) {
         perror("create_server_socket");
-        return 1;
+        NET_RETURN(1);
     }
     g_listen_fd = sfd;
     signal(SIGINT, on_signal);
@@ -1538,20 +1808,49 @@ int main(void) {
     for (;;) {
         struct sockaddr_in cli;
         socklen_t len = sizeof(cli);
-        int cfd = accept(sfd, (struct sockaddr *)&cli, &len);
+        platform_socket_t cfd = accept(sfd, (struct sockaddr *)&cli, &len);
+#if defined(_WIN32)
+        if (cfd == INVALID_SOCKET) {
+            int err = WSAGetLastError();
+            if (err == WSAEINTR) {
+                if (g_stop)
+                    break;
+                continue;
+            }
+            if (err == WSAEWOULDBLOCK) {
+                sleep_microseconds(1000);
+                continue;
+            }
+            if (g_stop && (err == WSAENOTSOCK || err == WSAEINVAL))
+                break;
+            platform_net_set_last_error(err);
+            perror("accept");
+            fprintf(stderr, "accept failed with error %d on socket %lld\n", err,
+                    (long long)sfd);
+            break;
+        }
+#else
         if (cfd < 0) {
             if (errno == EINTR) {
                 if (g_stop)
                     break;
                 continue;
             }
+#ifdef EAGAIN
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                sleep_microseconds(1000);
+                continue;
+            }
+#endif
             if (g_stop && (errno == EBADF || errno == EINVAL))
                 break;
+            platform_net_set_last_error(errno);
             perror("accept");
-            fprintf(stderr, "accept failed with errno %d on socket %d\n", errno,
-                    sfd);
+            fprintf(stderr, "accept failed with errno %d on socket %lld\n",
+                    errno, (long long)sfd);
             break;
         }
+#endif
         // 并发上限控制
         int reject = 0;
         platform_mutex_lock(&g_conn_mu);
@@ -1562,13 +1861,13 @@ int main(void) {
         platform_mutex_unlock(&g_conn_mu);
         if (reject) {
             (void)send_all(cfd, "ERR|BUSY|too many connections\n", 31);
-            close(cfd);
+            platform_socket_close(cfd);
             continue;
         }
         client_ctx_t *ctx = (client_ctx_t *)malloc(sizeof(*ctx));
         if (!ctx) {
             // 内存分配失败：关闭连接并回滚连接计数
-            close(cfd);
+            platform_socket_close(cfd);
             platform_mutex_lock(&g_conn_mu);
             if (g_active_conn > 0)
                 g_active_conn--;
@@ -1582,7 +1881,7 @@ int main(void) {
         int rc = platform_thread_create(&tid, handle_client, ctx);
         if (rc != 0) {
             // 线程创建失败：关闭连接、释放资源并回滚连接计数，避免假性 BUSY
-            close(cfd);
+            platform_socket_close(cfd);
             free(ctx);
             platform_mutex_lock(&g_conn_mu);
             if (g_active_conn > 0)
@@ -1592,9 +1891,11 @@ int main(void) {
         }
         platform_thread_detach(tid);
     }
-    close(sfd);
+    platform_socket_close(sfd);
     shm_cleanup();
     platform_mutex_destroy(&g_conn_mu);
     platform_mutex_destroy(&g_users_file_mu);
-    return 0;
+    NET_RETURN(0);
+
+#undef NET_RETURN
 }

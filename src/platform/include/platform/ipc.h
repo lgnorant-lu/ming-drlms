@@ -7,6 +7,10 @@
 extern "C" {
 #endif
 
+#if defined(_WIN32)
+#include <windows.h>
+#include <wchar.h>
+#else
 #include <sys/ipc.h>
 
 #if defined(__linux__)
@@ -17,14 +21,24 @@ extern "C" {
 #else
 #error "Unsupported platform for platform IPC abstraction"
 #endif
+#endif
 
+#if defined(_WIN32)
+typedef uint32_t platform_ipc_key_t;
+typedef HANDLE platform_shm_handle_t;
+#else
 typedef key_t platform_ipc_key_t;
 typedef int platform_shm_handle_t;
+#endif
 
 #define PLATFORM_SEMAPHORE_NAME_MAX 64
 
 typedef struct platform_semaphore {
-#if defined(__linux__)
+#if defined(_WIN32)
+    HANDLE handle;
+    int is_named;
+    wchar_t name[PLATFORM_SEMAPHORE_NAME_MAX];
+#elif defined(__linux__)
     sem_t handle;
 #elif defined(__APPLE__)
     sem_t *handle;
