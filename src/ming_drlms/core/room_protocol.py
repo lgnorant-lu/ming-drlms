@@ -15,8 +15,11 @@ from __future__ import annotations
 
 import socket as _socket
 import re
-from typing import List, Optional
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import List, Optional, Tuple
 from .protocol import recv_line, recv_exact
+from .socket_stream import SocketStream
 from .types import RoomInfo
 
 
@@ -73,19 +76,129 @@ def _clean_pubt_response(response: str) -> Optional[str]:
     return None
 
 
-def subscribe_room(sock: _socket.socket, room_name: str, since_id: int = 0) -> bool:
-    """订阅房间
+_POLICY_SLUG_TO_CODE = {"retain": 0, "delegate": 1, "teardown": 2}
+_POLICY_CODE_TO_SLUG = {value: key for key, value in _POLICY_SLUG_TO_CODE.items()}
 
-    Args:
-        sock: TCP socket连接
-        room_name: 房间名称
-        since_id: 从哪个事件ID开始接收消息（可选）
 
-    Returns:
-        bool: 订阅是否成功
+def policy_slug_from_code(code: int) -> Optional[str]:
+    return _POLICY_CODE_TO_SLUG.get(code)
+
+
+def _normalize_policy_value(policy: int | str) -> str:
+    if isinstance(policy, int):
+        slug = _POLICY_CODE_TO_SLUG.get(policy)
+        if slug is None:
+            raise ValueError(f"unknown policy code: {policy}")
+        return slug
+    slug = str(policy).strip().lower()
+    if slug not in _POLICY_SLUG_TO_CODE:
+        raise ValueError(f"unknown policy name: {policy}")
+    return slug
+
+
+def _readline(
+    sock: _socket.socket,
+    stream: Optional[SocketStream],
+) -> str:
+    if stream is not None:
+        return stream.readline()
+    return recv_line(sock)
+
+
+def _readexact(
+    sock: _socket.socket,
+    size: int,
+    stream: Optional[SocketStream],
+) -> bytes:
+    if stream is not None:
+        return stream.readexact(size)
+    return recv_exact(sock, size)
+
+
+def subscribe_room(
+    sock: _socket.socket,
+    room_name: str,
+    since_id: int = 0,
+    stream: Optional[SocketStream] = None,
+) -> tuple[bool, list[dict]]:
+    """订阅房间，并收集在确认之前推送的事件。
+
+    返回值: (success, backlog_events)
+    backlog_events 是事件字典列表，可能包含 TEXT/USER_JOIN/USER_LEAVE 等类型。
     """
+
+    backlog: list[dict] = []
+
+    def _consume_event(header: str) -> None:
+        parts = header.split("|")
+        if len(parts) < 2 or parts[0] != "EVT":
+            print(f"Unexpected subscribe response: {header}")
+            return
+
+        evt_type = parts[1]
+
+        if evt_type == "TEXT":
+            if len(parts) < 8:
+                print(f"Invalid TEXT event during subscribe: {header}")
+                return
+            room = parts[2]
+            timestamp = parts[3]
+            user = parts[4]
+            try:
+                event_id = int(parts[5])
+            except ValueError:
+                event_id = None
+            try:
+                length = int(parts[6])
+            except ValueError:
+                length = 0
+            sha = parts[7] if len(parts) > 7 else ""
+
+            payload = b""
+            if length > 0:
+                try:
+                    payload = _readexact(sock, length, stream)
+                except Exception as exc:
+                    print(
+                        f"Failed to read TEXT payload during subscribe: {exc}",
+                        flush=True,
+                    )
+                    return
+            try:
+                message = payload.decode("utf-8", errors="replace") if payload else ""
+            except Exception:
+                message = ""
+
+            backlog.append(
+                {
+                    "type": "TEXT",
+                    "room": room,
+                    "timestamp": timestamp,
+                    "user": user,
+                    "event_id": event_id,
+                    "message": message,
+                    "sha": sha,
+                }
+            )
+        elif evt_type in {"USER_JOIN", "USER_LEAVE"}:
+            if len(parts) < 5:
+                print(f"Invalid {evt_type} event during subscribe: {header}")
+                return
+            room = parts[2]
+            timestamp = parts[3]
+            user = parts[4]
+            backlog.append(
+                {
+                    "type": evt_type,
+                    "room": room,
+                    "timestamp": timestamp,
+                    "user": user,
+                }
+            )
+        else:
+            print(f"Unhandled event type during subscribe: {header}")
+
     try:
-        # 发送订阅命令: SUB|room[|since_id]
         if since_id > 0:
             cmd = f"SUB|{room_name}|{since_id}\n"
         else:
@@ -93,19 +206,59 @@ def subscribe_room(sock: _socket.socket, room_name: str, since_id: int = 0) -> b
 
         sock.sendall(cmd.encode())
 
-        # 接收响应
-        resp = recv_line(sock)
-        if resp.startswith("OK|SUB|"):
-            return True
-        elif resp.startswith("ERR|"):
-            print(f"Subscribe room failed: {resp}")
-            return False
-        else:
-            print(f"Unexpected subscribe response: {resp}")
-            return False
+        while True:
+            resp = _readline(sock, stream)
+            if not resp:
+                continue
+            resp = resp.strip()
+            if not resp:
+                continue
 
+            if resp.startswith("OK|SUB|") or resp.startswith("OK|SUB") or resp == "OK":
+                return True, backlog
+
+            if resp.startswith("OK|"):
+                return True, backlog
+
+            if resp.startswith("ERR|"):
+                print(f"Subscribe room failed: {resp}")
+                return False, backlog
+
+            if resp.startswith("EVT|"):
+                _consume_event(resp)
+                continue
+
+            print(f"Unexpected subscribe response: {resp}")
     except Exception as e:
         print(f"Error subscribing to room: {e}")
+        return False, backlog
+
+    return False, backlog
+
+
+def unsubscribe_room(
+    sock: _socket.socket,
+    room_name: str,
+    stream: Optional[SocketStream] = None,
+) -> bool:
+    """取消房间订阅"""
+
+    if not room_name:
+        return False
+
+    try:
+        cmd = f"UNSUB|{room_name}\n"
+        sock.sendall(cmd.encode())
+        resp = _readline(sock, stream)
+        if resp.startswith("OK|UNSUB|"):
+            return True
+        if resp.startswith("ERR|"):
+            print(f"Unsubscribe failed: {resp}")
+            return False
+        print(f"Unexpected unsubscribe response: {resp}")
+        return False
+    except Exception as e:
+        print(f"Error unsubscribing from room: {e}")
         return False
 
 
@@ -169,6 +322,78 @@ def get_room_info(sock: _socket.socket, room_name: str) -> Optional[RoomInfo]:
     except Exception as e:
         print(f"Error getting room info: {e}")
         return None
+
+
+def set_room_policy(
+    sock: _socket.socket, room_name: str, policy: int | str
+) -> Tuple[bool, str, Optional[int]]:
+    """设置房间策略并返回结果。(success, raw_response, policy_code)"""
+
+    if not sock:
+        raise ValueError("socket is required")
+    if not room_name:
+        raise ValueError("room_name is required")
+
+    slug = _normalize_policy_value(policy)
+
+    try:
+        sock.sendall(f"SETPOLICY|{room_name}|{slug}\n".encode())
+        resp = recv_line(sock)
+    except Exception as exc:
+        return False, f"ERROR:{exc}", None
+
+    if resp.startswith("OK|SETPOLICY") or resp == "OK":
+        return True, resp, _POLICY_SLUG_TO_CODE[slug]
+    return False, resp, None
+
+
+def transfer_room_owner(
+    sock: _socket.socket, room_name: str, new_owner: str
+) -> Tuple[bool, str, Optional[str], List[str]]:
+    """转移房间拥有者，返回(success, primary_response, new_owner|None, trailing_responses)."""
+
+    if not sock:
+        raise ValueError("socket is required")
+    if not room_name:
+        raise ValueError("room_name is required")
+    if not new_owner:
+        raise ValueError("new_owner is required")
+
+    trailing: List[str] = []
+
+    try:
+        sock.sendall(f"TRANSFER|{room_name}|{new_owner}\n".encode())
+        primary = recv_line(sock)
+    except Exception as exc:
+        return False, f"ERROR:{exc}", None, trailing
+
+    if primary.startswith("OK|TRANSFER|"):
+        parts = primary.split("|")
+        granted_owner = parts[2] if len(parts) >= 3 else new_owner
+
+        original_timeout = None
+        try:
+            original_timeout = sock.gettimeout()
+            sock.settimeout(1.5)
+        except Exception:
+            original_timeout = None
+
+        try:
+            follow = recv_line(sock)
+            if follow:
+                trailing.append(follow)
+        except Exception:
+            pass
+        finally:
+            if original_timeout is not None:
+                try:
+                    sock.settimeout(original_timeout)
+                except Exception:
+                    pass
+
+        return True, primary, granted_owner, trailing
+
+    return False, primary, None, trailing
 
 
 def send_message(sock: _socket.socket, room_name: str, message: str) -> bool:
@@ -256,7 +481,11 @@ def get_history(
     """
     try:
         # 发送历史查询命令: HISTORY|room|since_id|limit
-        cmd = f"HISTORY|{room_name}|{since_id}|{limit}\n"
+        if since_id > 0:
+            cmd = f"HISTORY|{room_name}|{limit}|{since_id}\n"
+        else:
+            cmd = f"HISTORY|{room_name}|{limit}\n"
+
         sock.sendall(cmd.encode())
 
         messages = []
@@ -311,64 +540,175 @@ def get_history(
         return []
 
 
-def get_available_rooms(sock: _socket.socket) -> List[RoomInfo]:
-    """获取可用房间列表
+@dataclass
+class RoomListPage:
+    rooms: List[RoomInfo]
+    offset: int
+    limit: int
+    total: int
+    has_more: bool
+    next_offset: int
+    legacy_fallback: bool = False
 
-    注意：这个函数需要服务器支持LIST_ROOMS命令，如果服务器不支持，
-    我们可以通过尝试获取已知房间信息来实现
 
-    Args:
-        sock: TCP socket连接
+def list_rooms(
+    sock: _socket.socket, offset: int = 0, limit: int = 50
+) -> RoomListPage:
+    """使用 LISTROOMS 命令分页获取房间列表。
 
-    Returns:
-        List[RoomInfo]: 可用房间列表
+    如果服务器不支持 LISTROOMS，将回退到默认房间集合并标记 legacy_fallback。
     """
-    # 由于服务器可能没有LIST_ROOMS命令，我们先返回一些默认房间
-    # 实际应用中，这些房间信息应该通过其他方式获取
-    default_rooms = [
-        RoomInfo(
-            name="general",
-            owner="system",
-            policy=0,
-            subscriber_count=0,
-            last_event_id=0,
-            created_at=0,
-        ),
-        RoomInfo(
-            name="dev",
-            owner="system",
-            policy=0,
-            subscriber_count=0,
-            last_event_id=0,
-            created_at=0,
-        ),
-        RoomInfo(
-            name="design",
-            owner="system",
-            policy=0,
-            subscriber_count=0,
-            last_event_id=0,
-            created_at=0,
-        ),
-    ]
 
-    # 尝试获取每个房间的详细信息
-    rooms = []
-    for room in default_rooms:
-        room_info = get_room_info(sock, room.name)
-        if room_info:
-            rooms.append(room_info)
+    def _parse_epoch(value: str) -> int:
+        if not value or value == "-":
+            return 0
+        try:
+            dt = datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
+            return int(dt.replace(tzinfo=timezone.utc).timestamp())
+        except Exception:
+            return 0
+
+    request_offset = max(0, offset)
+    request_limit = max(1, min(500, limit))
+
+    try:
+        if request_offset > 0 or request_limit != 50:
+            cmd = f"LISTROOMS|{request_offset}|{request_limit}\n"
         else:
-            # 如果获取失败，使用默认信息
-            rooms.append(room)
+            cmd = "LISTROOMS\n"
+        sock.sendall(cmd.encode())
 
-    return rooms
+        header = recv_line(sock)
+        if not header.startswith("BEGIN|ROOMS|"):
+            raise RuntimeError("Unexpected LISTROOMS header")
+
+        total = 0
+        header_parts = header.split("|")
+        if len(header_parts) >= 3:
+            try:
+                total = int(header_parts[2])
+            except ValueError:
+                total = 0
+
+        rooms: List[RoomInfo] = []
+        while True:
+            line = recv_line(sock)
+            if line == "END|ROOMS":
+                break
+            if not line.startswith("ROOM|"):
+                continue
+            parts = line.split("|")
+            if len(parts) < 8:
+                continue
+            try:
+                policy = int(parts[3])
+            except ValueError:
+                policy = 0
+            try:
+                subscribers = int(parts[4])
+            except ValueError:
+                subscribers = 0
+            try:
+                last_event = int(parts[5])
+            except ValueError:
+                last_event = 0
+            created_ts = _parse_epoch(parts[6])
+            updated_ts = _parse_epoch(parts[7])
+            rooms.append(
+                RoomInfo(
+                    name=parts[1],
+                    owner=parts[2],
+                    policy=policy,
+                    subscriber_count=subscribers,
+                    last_event_id=last_event,
+                    created_at=created_ts,
+                    updated_at=updated_ts,
+                )
+            )
+
+        trailer = recv_line(sock)
+        if not trailer.startswith("OK|ROOMS|"):
+            raise RuntimeError("LISTROOMS missing trailer")
+
+        trailer_parts = trailer.split("|")
+        returned = len(rooms)
+        has_more = False
+        if len(trailer_parts) >= 3:
+            try:
+                returned = int(trailer_parts[2])
+            except ValueError:
+                returned = len(rooms)
+        if len(trailer_parts) >= 4:
+            has_more = trailer_parts[3] == "1"
+
+        returned = min(returned, len(rooms))
+        next_offset = request_offset + returned
+        if total <= 0:
+            total = max(len(rooms), next_offset)
+
+        return RoomListPage(
+            rooms=rooms,
+            offset=request_offset,
+            limit=request_limit,
+            total=total,
+            has_more=has_more,
+            next_offset=next_offset,
+        )
+    except Exception:
+        fallback_rooms = [
+            RoomInfo(
+                name="general",
+                owner="system",
+                policy=0,
+                subscriber_count=0,
+                last_event_id=0,
+                created_at=0,
+            ),
+            RoomInfo(
+                name="dev",
+                owner="system",
+                policy=0,
+                subscriber_count=0,
+                last_event_id=0,
+                created_at=0,
+            ),
+            RoomInfo(
+                name="design",
+                owner="system",
+                policy=0,
+                subscriber_count=0,
+                last_event_id=0,
+                created_at=0,
+            ),
+        ]
+        return RoomListPage(
+            rooms=fallback_rooms,
+            offset=0,
+            limit=request_limit,
+            total=len(fallback_rooms),
+            has_more=False,
+            next_offset=len(fallback_rooms),
+            legacy_fallback=True,
+        )
+
+
+def get_available_rooms(sock: _socket.socket) -> List[RoomInfo]:
+    """兼容旧调用方式，返回当前页的房间列表。"""
+
+    page = list_rooms(sock)
+    return page.rooms
 
 
 __all__ = [
     "subscribe_room",
+    "unsubscribe_room",
     "get_room_info",
+    "set_room_policy",
+    "transfer_room_owner",
+    "policy_slug_from_code",
     "send_message",
     "get_history",
+    "list_rooms",
     "get_available_rooms",
+    "RoomListPage",
 ]

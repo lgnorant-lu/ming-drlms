@@ -598,6 +598,211 @@ int sqlite_delete_latest_event_for_room(SQLiteStorage *storage,
     return 0;
 }
 
+int sqlite_get_room_info(SQLiteStorage *storage, const char *room_name,
+                         SQLiteRoomInfo *out) {
+    if (!storage || !room_name || !out) {
+        return -1;
+    }
+
+    platform_mutex_lock(&storage->mu);
+
+    const char *sql =
+        "SELECT rooms.name, rooms.owner, rooms.policy, rooms.last_event_id, "
+        "COALESCE(strftime('%s', rooms.created_at), 0), "
+        "COALESCE(MAX(strftime('%s', events.timestamp)), "
+        "         strftime('%s', rooms.created_at)) "
+        "FROM rooms "
+        "LEFT JOIN events ON rooms.name = events.room_name "
+        "WHERE rooms.name = ? "
+        "GROUP BY rooms.name;";
+
+    sqlite3_stmt *stmt = NULL;
+    int rc = sqlite3_prepare_v2(storage->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        platform_mutex_unlock(&storage->mu);
+        return -1;
+    }
+
+    sqlite3_bind_text(stmt, 1, room_name, -1, SQLITE_TRANSIENT);
+
+    rc = sqlite3_step(stmt);
+    if (rc == SQLITE_ROW) {
+        memset(out, 0, sizeof(*out));
+        const unsigned char *name = sqlite3_column_text(stmt, 0);
+        const unsigned char *owner = sqlite3_column_text(stmt, 1);
+        int policy = sqlite3_column_int(stmt, 2);
+        sqlite3_int64 last_event_id = sqlite3_column_int64(stmt, 3);
+        sqlite3_int64 created_epoch = sqlite3_column_int64(stmt, 4);
+        sqlite3_int64 updated_epoch = sqlite3_column_int64(stmt, 5);
+
+        if (name) {
+            snprintf(out->name, sizeof(out->name), "%s", name);
+        }
+        if (owner) {
+            snprintf(out->owner, sizeof(out->owner), "%s", owner);
+        }
+        out->policy = policy;
+        out->last_event_id = (unsigned long long)last_event_id;
+        out->created_at = (time_t)created_epoch;
+        out->updated_at = (time_t)updated_epoch;
+
+        sqlite3_finalize(stmt);
+        platform_mutex_unlock(&storage->mu);
+        return 0;
+    }
+
+    sqlite3_finalize(stmt);
+    platform_mutex_unlock(&storage->mu);
+    return -1;
+}
+
+int sqlite_upsert_room_owner(SQLiteStorage *storage, const char *room_name,
+                             const char *owner) {
+    if (!storage || !room_name || !owner) {
+        return -1;
+    }
+
+    platform_mutex_lock(&storage->mu);
+
+    const char *sql =
+        "INSERT INTO rooms (name, owner, policy, last_event_id) "
+        "VALUES (?, ?, 0, 0) "
+        "ON CONFLICT(name) DO UPDATE SET "
+        "  owner = excluded.owner,"
+        "  policy = rooms.policy,"
+        "  last_event_id = rooms.last_event_id;";
+
+    sqlite3_stmt *stmt = NULL;
+    int rc = sqlite3_prepare_v2(storage->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        platform_mutex_unlock(&storage->mu);
+        return -1;
+    }
+
+    sqlite3_bind_text(stmt, 1, room_name, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, owner, -1, SQLITE_TRANSIENT);
+
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    platform_mutex_unlock(&storage->mu);
+
+    return (rc == SQLITE_DONE) ? 0 : -1;
+}
+
+int sqlite_list_rooms(SQLiteStorage *storage, size_t offset, size_t limit,
+                      SQLiteRoomInfo *out, size_t capacity,
+                      size_t *returned, size_t *total_count,
+                      int *has_more) {
+    if (!storage || !out || capacity == 0) {
+        return -1;
+    }
+
+    if (limit == 0 || limit > capacity) {
+        limit = capacity;
+    }
+
+    platform_mutex_lock(&storage->mu);
+
+    sqlite3_stmt *stmt = NULL;
+    size_t total = 0;
+    int rc = sqlite3_prepare_v2(storage->db, "SELECT COUNT(*) FROM rooms;", -1,
+                                &stmt, NULL);
+    if (rc == SQLITE_OK) {
+        rc = sqlite3_step(stmt);
+        if (rc == SQLITE_ROW) {
+            total = (size_t)sqlite3_column_int64(stmt, 0);
+        }
+    }
+    if (stmt) {
+        sqlite3_finalize(stmt);
+        stmt = NULL;
+    }
+
+    if (rc != SQLITE_ROW && rc != SQLITE_DONE) {
+        platform_mutex_unlock(&storage->mu);
+        return -1;
+    }
+
+    if (total_count) {
+        *total_count = total;
+    }
+
+    if (limit == 0) {
+        if (returned)
+            *returned = 0;
+        if (has_more)
+            *has_more = (offset < total) ? 1 : 0;
+        platform_mutex_unlock(&storage->mu);
+        return 0;
+    }
+
+    const char *sql =
+        "SELECT rooms.name, rooms.owner, rooms.policy, rooms.last_event_id, "
+        "COALESCE(strftime('%s', rooms.created_at), 0), "
+        "COALESCE(MAX(strftime('%s', events.timestamp)), "
+        "         strftime('%s', rooms.created_at)) "
+        "FROM rooms "
+        "LEFT JOIN events ON rooms.name = events.room_name "
+        "GROUP BY rooms.name "
+        "ORDER BY rooms.name "
+        "LIMIT ? OFFSET ?;";
+
+    rc = sqlite3_prepare_v2(storage->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        platform_mutex_unlock(&storage->mu);
+        return -1;
+    }
+
+    sqlite3_bind_int(stmt, 1, (int)limit);
+    sqlite3_bind_int(stmt, 2, (int)offset);
+
+    size_t count = 0;
+    while ((rc = sqlite3_step(stmt)) == SQLITE_ROW && count < capacity) {
+        SQLiteRoomInfo *info = &out[count];
+        memset(info, 0, sizeof(*info));
+
+        const unsigned char *name = sqlite3_column_text(stmt, 0);
+        const unsigned char *owner = sqlite3_column_text(stmt, 1);
+        int policy = sqlite3_column_int(stmt, 2);
+        sqlite3_int64 last_event_id = sqlite3_column_int64(stmt, 3);
+        sqlite3_int64 created_epoch = sqlite3_column_int64(stmt, 4);
+        sqlite3_int64 updated_epoch = sqlite3_column_int64(stmt, 5);
+
+        if (name) {
+            snprintf(info->name, sizeof(info->name), "%s", name);
+        }
+        if (owner) {
+            snprintf(info->owner, sizeof(info->owner), "%s", owner);
+        }
+        info->policy = policy;
+        info->last_event_id = (unsigned long long)last_event_id;
+        info->created_at = (time_t)created_epoch;
+        info->updated_at = (time_t)updated_epoch;
+
+        count++;
+    }
+
+    if (stmt) {
+        sqlite3_finalize(stmt);
+    }
+
+    if (returned) {
+        *returned = count;
+    }
+    if (has_more) {
+        size_t visible_offset = offset + count;
+        *has_more = (visible_offset < total) ? 1 : 0;
+    }
+
+    platform_mutex_unlock(&storage->mu);
+
+    if (rc != SQLITE_ROW && rc != SQLITE_DONE) {
+        return -1;
+    }
+
+    return 0;
+}
+
 void sqlite_storage_cleanup(SQLiteStorage *storage) {
     if (!storage) {
         return;

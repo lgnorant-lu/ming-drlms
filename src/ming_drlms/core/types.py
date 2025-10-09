@@ -13,6 +13,7 @@ class RoomInfo:
     subscriber_count: int
     last_event_id: int
     created_at: int
+    updated_at: int = 0
 
 
 __all__ = ["RoomInfo"]

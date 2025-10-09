@@ -1,1 +1,3 @@
 recursive-include src/ming_drlms/bin *
+recursive-include src/ming_drlms_gui/assets *
+recursive-include src/ming_drlms_gui/i18n *.json

@@ -21,6 +21,8 @@ import time
 from pathlib import Path
 from typing import List, Optional, Sequence, Tuple
 
+import pytest
+
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8080
 _SOCKET_TIMEOUT = 20.0
@@ -28,6 +30,7 @@ _POLL_INTERVAL = 0.2
 _SERVER_START_TIMEOUT = 5.0
 _PORT_REUSE_GRACE = 5.0
 _RANDOM = random.SystemRandom()
+_REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _debug(msg: str) -> None:
@@ -595,6 +598,49 @@ def grant_exec(path: Path) -> Path:
         except OSError:
             pass
     return resolved
+
+
+@pytest.fixture(scope="session")
+def server_binary_path() -> Path:
+    env_path = os.environ.get("DRLMS_SERVER_BIN")
+    if env_path:
+        candidate = Path(env_path)
+    else:
+        default_name = "log_collector_server.exe" if os.name == "nt" else "log_collector_server"
+        candidate = (_REPO_ROOT / default_name).resolve()
+        if not candidate.exists():
+            build_candidate = (_REPO_ROOT / "build" / default_name).resolve()
+            if not build_candidate.exists() and os.name == "nt":
+                alt = build_candidate.with_suffix("")
+                if alt.exists():
+                    build_candidate = alt
+            if build_candidate.exists():
+                candidate = build_candidate
+    try:
+        return grant_exec(candidate)
+    except FileNotFoundError:
+        pytest.skip(f"log_collector_server binary missing: {candidate}")
+
+
+@pytest.fixture(scope="session")
+def default_host() -> str:
+    return DEFAULT_HOST
+
+
+def _next_free_port() -> int:
+    return _find_free_port()
+
+
+@pytest.mark.integration
+def test_server_protocol_suite(server_binary_path: Path, default_host: str) -> None:
+    port = _next_free_port()
+    run_protocol_tests(default_host, port, server_binary_path)
+
+
+@pytest.mark.integration
+def test_server_upgrade_flow(server_binary_path: Path, default_host: str) -> None:
+    port = _next_free_port()
+    run_upgrade_tests(server_binary_path, default_host, port)
 
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:

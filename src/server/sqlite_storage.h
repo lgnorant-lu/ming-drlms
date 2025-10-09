@@ -10,6 +10,7 @@
 #include "platform/platform.h"
 #include <stdint.h>
 #include <stddef.h>
+#include <time.h>
 
 /**
  * SQLite存储上下文
@@ -18,6 +19,15 @@ typedef struct {
     sqlite3 *db;
     platform_mutex_t mu;
 } SQLiteStorage;
+
+typedef struct {
+    char name[65];
+    char owner[65];
+    int policy;
+    unsigned long long last_event_id;
+    time_t created_at;
+    time_t updated_at;
+} SQLiteRoomInfo;
 
 /**
  * 初始化SQLite存储
@@ -109,6 +119,17 @@ int sqlite_update_room_last_event_id(SQLiteStorage *storage,
 
 int sqlite_delete_latest_event_for_room(SQLiteStorage *storage,
                                         const char *room_name);
+
+int sqlite_list_rooms(SQLiteStorage *storage, size_t offset, size_t limit,
+                      SQLiteRoomInfo *out, size_t capacity,
+                      size_t *returned, size_t *total_count,
+                      int *has_more);
+
+int sqlite_get_room_info(SQLiteStorage *storage, const char *room_name,
+                         SQLiteRoomInfo *out);
+
+int sqlite_upsert_room_owner(SQLiteStorage *storage, const char *room_name,
+                              const char *owner);
 
 /**
  * 清理SQLite存储资源

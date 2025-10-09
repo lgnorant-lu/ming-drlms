@@ -36,6 +36,7 @@ struct Room {
     size_t subs_cap;
     unsigned long long last_event_id;
     char owner[64];
+    platform_socket_t owner_fd;
     int policy; // 0=retain,1=delegate,2=teardown
     time_t created_at;
 };
@@ -53,6 +54,95 @@ static platform_mutex_t g_rooms_mu;
 // SQLite存储
 static SQLiteStorage g_sqlite_storage = {0};
 static int g_use_sqlite = 0; // 0=使用文件存储，1=使用SQLite存储
+
+static void merge_runtime_room_info(RoomSummary *summary, const char *name) {
+    if (!summary || !name)
+        return;
+
+    Room *room = NULL;
+    platform_mutex_lock(&g_rooms_mu);
+    RoomNode *cur = g_rooms;
+    while (cur) {
+        if (strcmp(cur->name, name) == 0) {
+            room = &cur->room;
+            break;
+        }
+        cur = cur->next;
+    }
+    platform_mutex_unlock(&g_rooms_mu);
+
+    if (!room)
+        return;
+
+    platform_mutex_lock(&room->mu);
+    if (room->owner[0] != '\0') {
+        snprintf(summary->owner, sizeof(summary->owner), "%s", room->owner);
+    }
+    summary->policy = room->policy;
+    summary->online_users = room->subs_len;
+    if (room->last_event_id > summary->last_event_id) {
+        summary->last_event_id = room->last_event_id;
+    }
+    if (room->created_at != 0) {
+        summary->created_at = room->created_at;
+    }
+    platform_mutex_unlock(&room->mu);
+}
+
+static int rooms_list_from_memory(RoomSummary *out, size_t capacity,
+                                  size_t offset, size_t limit,
+                                  size_t *returned, size_t *total_estimate,
+                                  int *has_more) {
+    if (!out || capacity == 0)
+        return -1;
+
+    if (limit > capacity)
+        limit = capacity;
+
+    platform_mutex_lock(&g_rooms_mu);
+    size_t total = 0;
+    RoomNode *cur = g_rooms;
+    while (cur) {
+        total++;
+        cur = cur->next;
+    }
+
+    if (total_estimate)
+        *total_estimate = total;
+
+    size_t idx = 0;
+    size_t count = 0;
+    cur = g_rooms;
+    while (cur && count < limit && count < capacity) {
+        if (idx++ < offset) {
+            cur = cur->next;
+            continue;
+        }
+        RoomSummary *summary = &out[count];
+        memset(summary, 0, sizeof(*summary));
+        snprintf(summary->name, sizeof(summary->name), "%s", cur->name);
+
+        platform_mutex_lock(&cur->room.mu);
+        snprintf(summary->owner, sizeof(summary->owner), "%s",
+                 cur->room.owner);
+        summary->policy = cur->room.policy;
+        summary->online_users = cur->room.subs_len;
+        summary->last_event_id = cur->room.last_event_id;
+        summary->created_at = cur->room.created_at;
+        summary->updated_at = cur->room.created_at;
+        platform_mutex_unlock(&cur->room.mu);
+
+        count++;
+        cur = cur->next;
+    }
+    platform_mutex_unlock(&g_rooms_mu);
+
+    if (returned)
+        *returned = count;
+    if (has_more)
+        *has_more = ((offset + count) < total) ? 1 : 0;
+    return 0;
+}
 
 typedef struct {
     platform_socket_t fd;
@@ -175,6 +265,7 @@ Room *rooms_get_or_create(const char *name) {
     node->room.subs_cap = 0;
     node->room.last_event_id = 0;
     node->room.owner[0] = '\0';
+    node->room.owner_fd = PLATFORM_INVALID_SOCKET;
     node->room.policy = 0; // retain by default
     node->room.created_at = time(NULL);
 
@@ -183,6 +274,26 @@ Room *rooms_get_or_create(const char *name) {
 
     Room *room = &node->room;
     platform_mutex_unlock(&g_rooms_mu);
+
+    if (g_use_sqlite) {
+        SQLiteRoomInfo info;
+        if (sqlite_get_room_info(&g_sqlite_storage, name, &info) == 0) {
+            platform_mutex_lock(&room->mu);
+            if (info.owner[0] != '\0') {
+                snprintf(room->owner, sizeof room->owner, "%s",
+                         info.owner);
+            }
+            room->policy = info.policy;
+            if (info.last_event_id > room->last_event_id) {
+                room->last_event_id = info.last_event_id;
+            }
+            if (info.created_at != 0) {
+                room->created_at = info.created_at;
+            }
+            room->owner_fd = PLATFORM_INVALID_SOCKET;
+            platform_mutex_unlock(&room->mu);
+        }
+    }
 
     // ensure room dir exists (best effort)
     char path[1024];
@@ -218,6 +329,10 @@ int rooms_add_subscriber_ex(Room *room, platform_socket_t fd,
         room->subs[room->subs_len].user[0] = '\0';
     }
     room->subs_len++;
+    if (username && *username && room->owner[0] != '\0' &&
+        strcmp(room->owner, username) == 0) {
+        room->owner_fd = fd;
+    }
     platform_mutex_unlock(&room->mu);
     return 0;
 }
@@ -251,6 +366,9 @@ int rooms_remove_fd_from_all(platform_socket_t fd) {
             }
             ++i;
         }
+        if (cur->room.owner_fd == fd) {
+            cur->room.owner_fd = PLATFORM_INVALID_SOCKET;
+        }
         platform_mutex_unlock(&cur->room.mu);
         cur = cur->next;
     }
@@ -258,14 +376,50 @@ int rooms_remove_fd_from_all(platform_socket_t fd) {
     return 0;
 }
 
-void rooms_assign_owner_if_empty(Room *room, const char *user) {
+static platform_socket_t rooms_find_fd_by_user_locked(Room *room,
+                                                      const char *user) {
+    if (!room || !user || !*user)
+        return PLATFORM_INVALID_SOCKET;
+    for (size_t i = 0; i < room->subs_len; ++i) {
+        if (room->subs[i].user[0] != '\0' &&
+            strcmp(room->subs[i].user, user) == 0) {
+            return room->subs[i].fd;
+        }
+    }
+    return PLATFORM_INVALID_SOCKET;
+}
+
+static void rooms_apply_owner_locked(Room *room, const char *user,
+                                     platform_socket_t preferred_fd) {
+    platform_socket_t bound_fd = preferred_fd;
+    if (bound_fd == PLATFORM_INVALID_SOCKET && user && *user) {
+        bound_fd = rooms_find_fd_by_user_locked(room, user);
+    }
+    if (user && *user) {
+        snprintf(room->owner, sizeof room->owner, "%s", user);
+    } else {
+        room->owner[0] = '\0';
+    }
+    room->owner_fd = bound_fd;
+}
+
+void rooms_assign_owner_if_empty(Room *room, const char *room_name,
+                                 const char *user, platform_socket_t owner_fd) {
     if (!room || !user || !*user)
         return;
+    int assigned = 0;
     platform_mutex_lock(&room->mu);
     if (room->owner[0] == '\0') {
-        snprintf(room->owner, sizeof room->owner, "%s", user);
+        rooms_apply_owner_locked(room, user, owner_fd);
+        assigned = 1;
+    } else if (strcmp(room->owner, user) == 0 &&
+               owner_fd != PLATFORM_INVALID_SOCKET) {
+        room->owner_fd = owner_fd;
     }
     platform_mutex_unlock(&room->mu);
+    if (assigned && g_use_sqlite) {
+        (void)sqlite_upsert_room_owner(&g_sqlite_storage, room_name, user);
+    }
 }
 
 void rooms_set_policy(Room *room, int policy) {
@@ -276,12 +430,16 @@ void rooms_set_policy(Room *room, int policy) {
     platform_mutex_unlock(&room->mu);
 }
 
-void rooms_set_owner(Room *room, const char *user) {
-    if (!room || !user)
+void rooms_set_owner(Room *room, const char *room_name, const char *user,
+                     platform_socket_t owner_fd) {
+    if (!room)
         return;
     platform_mutex_lock(&room->mu);
-    snprintf(room->owner, sizeof room->owner, "%s", user);
+    rooms_apply_owner_locked(room, user, owner_fd);
     platform_mutex_unlock(&room->mu);
+    if (g_use_sqlite && user && *user) {
+        (void)sqlite_upsert_room_owner(&g_sqlite_storage, room_name, user);
+    }
 }
 
 void rooms_get_info(Room *room, char *owner_out, size_t owner_cap,
@@ -344,10 +502,13 @@ static void rooms_clear_all_subscribers(Room *room, int close_fds) {
         }
     }
     room->subs_len = 0;
+    room->owner_fd = PLATFORM_INVALID_SOCKET;
     platform_mutex_unlock(&room->mu);
 }
 
-void rooms_handle_owner_disconnect(const char *owner, long long rate_bps) {
+void rooms_handle_owner_disconnect(const char *owner,
+                                   platform_socket_t owner_fd,
+                                   long long rate_bps) {
     if (!owner || !*owner)
         return;
     platform_mutex_lock(&g_rooms_mu);
@@ -366,6 +527,20 @@ void rooms_handle_owner_disconnect(const char *owner, long long rate_bps) {
                        &subs, &last_eid, &created);
         if (strcmp(room_owner, owner) != 0)
             continue;
+        int owns_session = 0;
+        platform_mutex_lock(&node->room.mu);
+        if (node->room.owner[0] != '\0' &&
+            strcmp(node->room.owner, owner) == 0) {
+            if (node->room.owner_fd == owner_fd ||
+                node->room.owner_fd == PLATFORM_INVALID_SOCKET ||
+                owner_fd == PLATFORM_INVALID_SOCKET) {
+                owns_session = 1;
+                node->room.owner_fd = PLATFORM_INVALID_SOCKET;
+            }
+        }
+        platform_mutex_unlock(&node->room.mu);
+        if (!owns_session)
+            continue;
         if (policy == 0) {
             // retain: do nothing
             continue;
@@ -373,18 +548,21 @@ void rooms_handle_owner_disconnect(const char *owner, long long rate_bps) {
             // delegate: pick the first non-empty subscriber username not equal
             // to owner
             char new_owner[64] = {0};
+            platform_socket_t new_owner_fd = PLATFORM_INVALID_SOCKET;
             platform_mutex_lock(&node->room.mu);
             for (size_t i = 0; i < node->room.subs_len; ++i) {
                 if (node->room.subs[i].user[0] != '\0' &&
                     strcmp(node->room.subs[i].user, owner) != 0) {
                     snprintf(new_owner, sizeof new_owner, "%s",
                              node->room.subs[i].user);
+                    new_owner_fd = node->room.subs[i].fd;
                     break;
                 }
             }
             platform_mutex_unlock(&node->room.mu);
             if (new_owner[0] != '\0') {
-                rooms_set_owner(&node->room, new_owner);
+                rooms_set_owner(&node->room, node->name, new_owner,
+                                new_owner_fd);
                 // broadcast owner changed notification
                 char ts[64];
                 rfc3339_time_local(ts, sizeof ts);
@@ -845,6 +1023,70 @@ int rooms_history_send(Room *room, const char *room_name, platform_socket_t fd,
     }
     fclose(f);
     return 0;
+}
+
+int rooms_list(RoomSummary *out, size_t capacity, size_t offset, size_t limit,
+               size_t *returned, size_t *total_estimate, int *has_more) {
+    if (!out || capacity == 0)
+        return -1;
+
+    const size_t max_limit = 500;
+    if (limit == 0)
+        limit = capacity;
+    if (limit > capacity)
+        limit = capacity;
+    if (limit > max_limit)
+        limit = max_limit;
+
+    if (g_use_sqlite) {
+        SQLiteRoomInfo *rows =
+            (SQLiteRoomInfo *)calloc(capacity, sizeof(SQLiteRoomInfo));
+        if (!rows)
+            return -1;
+
+        size_t rows_returned = 0;
+        size_t total = 0;
+        int more = 0;
+        int rc = sqlite_list_rooms(&g_sqlite_storage, offset, limit, rows,
+                                   capacity, &rows_returned, &total, &more);
+        if (rc != 0) {
+            free(rows);
+            return -1;
+        }
+
+        for (size_t i = 0; i < rows_returned; ++i) {
+            RoomSummary *summary = &out[i];
+            memset(summary, 0, sizeof(*summary));
+            snprintf(summary->name, sizeof(summary->name), "%s",
+                     rows[i].name);
+            snprintf(summary->owner, sizeof(summary->owner), "%s",
+                     rows[i].owner);
+            summary->policy = rows[i].policy;
+            summary->online_users = 0;
+            summary->last_event_id = rows[i].last_event_id;
+            summary->created_at = rows[i].created_at;
+            summary->updated_at =
+                rows[i].updated_at ? rows[i].updated_at : rows[i].created_at;
+
+            merge_runtime_room_info(summary, summary->name);
+
+            if (summary->updated_at == 0)
+                summary->updated_at = summary->created_at;
+        }
+
+        free(rows);
+
+        if (returned)
+            *returned = rows_returned;
+        if (total_estimate)
+            *total_estimate = total;
+        if (has_more)
+            *has_more = more;
+        return 0;
+    }
+
+    return rooms_list_from_memory(out, capacity, offset, limit, returned,
+                                  total_estimate, has_more);
 }
 
 // SQLite历史回调函数

@@ -30,6 +30,7 @@ dependencies = [
 [project.optional-dependencies]
 gui = [
     "flet>=0.28.3,<0.29.0",
+    "pillow>=10.0.0",
 ]
 
 [project.urls]
@@ -48,12 +49,18 @@ include-package-data = true
 
 [tool.setuptools.package-data]
 "ming_drlms" = ["cli_help/*.md"]
+"ming_drlms_gui" = ["assets/**/*", "i18n/*.json"]
 
 [tool.setuptools_scm]
 write_to = "src/ming_drlms/_version.py"
 fallback_version = "0.0.0"
 version_scheme = "no-guess-dev"
 local_scheme = "no-local-version"
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: marks tests that exercise the external server binary",
+]
 
 [tool.ruff]
 # 在所有检查中（lint, format等）排除以下文件和目录

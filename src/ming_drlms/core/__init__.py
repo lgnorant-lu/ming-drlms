@@ -13,7 +13,9 @@ from .room_protocol import (
     get_room_info,
     send_message,
     get_history,
+    list_rooms,
     get_available_rooms,
+    RoomListPage,
 )  # noqa: F401
 
 __all__ = [
@@ -28,5 +30,7 @@ __all__ = [
     "get_room_info",
     "send_message",
     "get_history",
+    "list_rooms",
     "get_available_rooms",
+    "RoomListPage",
 ]

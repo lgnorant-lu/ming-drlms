@@ -100,6 +100,7 @@ static int g_argon2_m_cost = 65536; // KiB (64 MiB)
 static int g_argon2_parallel = 1;   // lanes
 
 static int send_all(platform_socket_t fd, const void *data, size_t len);
+static void send_err(platform_socket_t fd, const char *code, const char *message);
 
 static void argon2_load_params_from_env(void) {
     const char *t = getenv("DRLMS_ARGON2_T_COST");
@@ -391,6 +392,30 @@ static void rfc3339_time(char *buf, size_t sz) {
     strftime(buf, sz, "%Y-%m-%dT%H:%M:%SZ", &tmv);
 }
 
+static void time_to_rfc3339(time_t ts, char *buf, size_t sz) {
+    if (!buf || sz == 0)
+        return;
+
+    if (ts <= 0) {
+        snprintf(buf, sz, "-");
+        return;
+    }
+
+    struct tm tmv;
+#if defined(_WIN32)
+    if (gmtime_s(&tmv, &ts) != 0) {
+        snprintf(buf, sz, "-");
+        return;
+    }
+#else
+    if (gmtime_r(&ts, &tmv) == NULL) {
+        snprintf(buf, sz, "-");
+        return;
+    }
+#endif
+    strftime(buf, sz, "%Y-%m-%dT%H:%M:%SZ", &tmv);
+}
+
 static void format_ipv4(char *buf, size_t sz, const struct sockaddr_in *addr) {
 #if defined(_WIN32)
     if (!InetNtopA(AF_INET, (PVOID)&addr->sin_addr, buf, (DWORD)sz)) {
@@ -454,6 +479,107 @@ static int list_visible_files(platform_socket_t fd) {
     (void)send_all(fd, "END\n", 4);
     return 0;
 #endif
+}
+
+static int handle_list_rooms(platform_socket_t fd, const char *params) {
+    size_t offset = 0;
+    size_t limit = 50;
+
+    if (params && *params) {
+        const char *cursor = params;
+        if (*cursor == '|') {
+            cursor++;
+            char *endptr = NULL;
+            unsigned long long tmp = strtoull(cursor, &endptr, 10);
+            if (endptr == cursor) {
+                send_err(fd, "FORMAT", "LISTROOMS offset");
+                return -1;
+            }
+            offset = (size_t)tmp;
+            if (*endptr == '|') {
+                cursor = endptr + 1;
+                tmp = strtoull(cursor, &endptr, 10);
+                if (endptr == cursor || tmp == 0) {
+                    send_err(fd, "FORMAT", "LISTROOMS limit");
+                    return -1;
+                }
+                limit = (size_t)tmp;
+            }
+            if (*endptr != '\0') {
+                send_err(fd, "FORMAT", "LISTROOMS trailing");
+                return -1;
+            }
+        } else {
+            send_err(fd, "FORMAT", "LISTROOMS fields");
+            return -1;
+        }
+    }
+
+    if (limit > 500)
+        limit = 500;
+    if (limit == 0)
+        limit = 1;
+
+    RoomSummary *rows =
+        (RoomSummary *)calloc(limit, sizeof(RoomSummary));
+    if (!rows) {
+        send_err(fd, "INTERNAL", "oom");
+        return -1;
+    }
+
+    size_t returned = 0;
+    size_t total = 0;
+    int has_more = 0;
+    int rc = rooms_list(rows, limit, offset, limit, &returned, &total,
+                        &has_more);
+    if (rc != 0) {
+        free(rows);
+        send_err(fd, "INTERNAL", "rooms");
+        return -1;
+    }
+
+    char line[512];
+    int ret = 0;
+
+    int len = snprintf(line, sizeof line, "BEGIN|ROOMS|%zu\n", total);
+    if (len < 0 || send_all(fd, line, (size_t)len) != 0) {
+        ret = -1;
+        goto done;
+    }
+
+    for (size_t i = 0; i < returned; ++i) {
+        char created_buf[32];
+        char updated_buf[32];
+        time_to_rfc3339(rows[i].created_at, created_buf, sizeof created_buf);
+        time_to_rfc3339(rows[i].updated_at, updated_buf, sizeof updated_buf);
+
+        len = snprintf(
+            line, sizeof line,
+            "ROOM|%s|%s|%d|%zu|%llu|%s|%s\n", rows[i].name, rows[i].owner,
+            rows[i].policy, rows[i].online_users,
+            (unsigned long long)rows[i].last_event_id, created_buf,
+            updated_buf);
+        if (len < 0 || send_all(fd, line, (size_t)len) != 0) {
+            ret = -1;
+            goto done;
+        }
+    }
+
+    if (send_all(fd, "END|ROOMS\n", 10) != 0) {
+        ret = -1;
+        goto done;
+    }
+
+    len = snprintf(line, sizeof line, "OK|ROOMS|%zu|%d\n", returned,
+                   has_more ? 1 : 0);
+    if (len < 0 || send_all(fd, line, (size_t)len) != 0) {
+        ret = -1;
+        goto done;
+    }
+
+done:
+    free(rows);
+    return ret;
 }
 
 static int send_all(platform_socket_t fd, const void *data, size_t len) {
@@ -1149,6 +1275,17 @@ static void *handle_client(void *arg) {
                     audit_log(peer_ip, username, "LIST", "", "", 0, 0, "", "OK",
                               "");
                 }
+            } else if (strncmp(start, "LISTROOMS", 9) == 0) {
+                if (!authenticated) {
+                    send_err(ctx->client_fd, "PERM", "login required");
+                } else {
+                    const char *params = start + 9;
+                    int lr_rc = handle_list_rooms(ctx->client_fd, params);
+                    if (lr_rc == 0) {
+                        audit_log(peer_ip, username, "LISTROOMS", "", "",
+                                  0, 0, "", "OK", "");
+                    }
+                }
             } else if (strncmp(start, "LOG|", 4) == 0) {
                 if (!authenticated) {
                     send_err(ctx->client_fd, "PERM", "login required");
@@ -1193,7 +1330,8 @@ static void *handle_client(void *arg) {
                             if (p1)
                                 *p1 = '|';
                         } else {
-                            rooms_assign_owner_if_empty(r, username);
+                            rooms_assign_owner_if_empty(r, room, username,
+                                                        ctx->client_fd);
                             rooms_add_subscriber_ex(r, ctx->client_fd,
                                                     username);
                             {
@@ -1297,7 +1435,8 @@ static void *handle_client(void *arg) {
                                     send_err(ctx->client_fd, "INTERNAL",
                                              "room");
                                 } else {
-                                    rooms_assign_owner_if_empty(r, username);
+                                    rooms_assign_owner_if_empty(
+                                        r, room, username, ctx->client_fd);
                                     (void)send_all(ctx->client_fd, "READY\n",
                                                    6);
                                     unsigned char *buf =
@@ -1400,8 +1539,9 @@ static void *handle_client(void *arg) {
                                         send_err(ctx->client_fd, "INTERNAL",
                                                  "room");
                                     } else {
-                                        rooms_assign_owner_if_empty(r,
-                                                                    username);
+                                        rooms_assign_owner_if_empty(
+                                            r, room, username,
+                                            ctx->client_fd);
                                         char tmp_path[PATH_MAX];
                                         if (snprintf(tmp_path, sizeof tmp_path,
                                                      "%s/.%s.part", g_data_dir,
@@ -1666,7 +1806,8 @@ static void *handle_client(void *arg) {
                                     send_err(ctx->client_fd, "PERM",
                                              "owner required");
                                 } else {
-                                    rooms_set_owner(r, new_owner);
+                                    rooms_set_owner(r, room, new_owner,
+                                                    PLATFORM_INVALID_SOCKET);
                                     char okbuf[128];
                                     snprintf(okbuf, sizeof okbuf, "TRANSFER|%s",
                                              new_owner);
@@ -1696,7 +1837,8 @@ done:
     rooms_remove_fd_from_all(ctx->client_fd);
     // if this user is an owner of any room, apply policy on disconnect
     if (username[0] != '\0') {
-        rooms_handle_owner_disconnect(username, g_rate_down_bps);
+        rooms_handle_owner_disconnect(username, ctx->client_fd,
+                                      g_rate_down_bps);
     }
     platform_socket_close(ctx->client_fd);
     // decrement active connection counter
