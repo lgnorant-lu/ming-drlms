@@ -366,32 +366,29 @@ class EventListener:
                     )
                     return
 
-                # 在UI线程中调用回调
+                # 使用pubsub发送消息到主线程（线程安全）
                 if self.on_message_received:
-                    callback = self.on_message_received
-                    # 使用Flet的线程安全更新机制
                     try:
-                        # Flet的正确线程安全方法
-                        if hasattr(self.page, "call_soon_threadsafe"):
-                            self.page.call_soon_threadsafe(
-                                lambda cb=callback: cb(
-                                    room_name, user, message_text, event_id
-                                )
-                            )
-                        else:
-                            # 备用方案：直接调用（假设在主线程中）
-                            print(
-                                f"DEBUG: Calling message callback directly: {room_name}, {user}, {message_text[:50]}..., event_id: {event_id}",
-                                flush=True,
-                            )
-                            callback(room_name, user, message_text, event_id)
+                        # 通过pubsub发送消息事件
+                        self.page.pubsub.send_all({
+                            "type": "room_message",
+                            "room_name": room_name,
+                            "user": user,
+                            "message": message_text,
+                            "event_id": event_id
+                        })
+                        print(
+                            f"DEBUG: Sent message via pubsub: {room_name}, {user}, event_id: {event_id}",
+                            flush=True,
+                        )
                     except Exception as e:
-                        print(f"DEBUG: Error in thread-safe callback: {e}", flush=True)
-                        # 最后的备用方案
+                        print(f"DEBUG: Error sending message via pubsub: {e}", flush=True)
+                        # 备用方案：直接调用callback（仅用于调试）
                         try:
+                            callback = self.on_message_received
                             callback(room_name, user, message_text, event_id)
                         except Exception as e2:
-                            print(f"DEBUG: Error in direct callback: {e2}", flush=True)
+                            print(f"DEBUG: Error in fallback callback: {e2}", flush=True)
             else:
                 print(
                     f"DEBUG: Invalid TEXT event format: {'|'.join(parts)}", flush=True
@@ -430,32 +427,26 @@ class EventListener:
                     f"DEBUG: User joined - Room: {room_name}, User: {user}", flush=True
                 )
 
-                # 在UI线程中调用回调
+                # 使用pubsub发送用户加入事件到主线程
                 if self.on_user_joined:
-                    callback = self.on_user_joined
                     try:
-                        if hasattr(self.page, "call_soon_threadsafe"):
-                            self.page.call_soon_threadsafe(
-                                lambda cb=callback: cb(room_name, user)
-                            )
-                        else:
-                            print(
-                                f"DEBUG: Calling user joined callback directly: {room_name}, {user}",
-                                flush=True,
-                            )
-                            callback(room_name, user)
-                    except Exception as e:
+                        self.page.pubsub.send_all({
+                            "type": "user_join",
+                            "room_name": room_name,
+                            "user": user
+                        })
                         print(
-                            f"DEBUG: Error in user joined thread-safe callback: {e}",
+                            f"DEBUG: Sent user join via pubsub: {room_name}, {user}",
                             flush=True,
                         )
+                    except Exception as e:
+                        print(f"DEBUG: Error sending user join via pubsub: {e}", flush=True)
+                        # 备用方案
                         try:
+                            callback = self.on_user_joined
                             callback(room_name, user)
                         except Exception as e2:
-                            print(
-                                f"DEBUG: Error in user joined direct callback: {e2}",
-                                flush=True,
-                            )
+                            print(f"DEBUG: Error in fallback user join callback: {e2}", flush=True)
             else:
                 print(
                     f"DEBUG: Invalid USER_JOIN event format: {'|'.join(parts)}",
@@ -475,32 +466,26 @@ class EventListener:
 
                 print(f"DEBUG: User left - Room: {room_name}, User: {user}", flush=True)
 
-                # 在UI线程中调用回调
+                # 使用pubsub发送用户离开事件到主线程
                 if self.on_user_left:
-                    callback = self.on_user_left
                     try:
-                        if hasattr(self.page, "call_soon_threadsafe"):
-                            self.page.call_soon_threadsafe(
-                                lambda cb=callback: cb(room_name, user)
-                            )
-                        else:
-                            print(
-                                f"DEBUG: Calling user left callback directly: {room_name}, {user}",
-                                flush=True,
-                            )
-                            callback(room_name, user)
-                    except Exception as e:
+                        self.page.pubsub.send_all({
+                            "type": "user_leave",
+                            "room_name": room_name,
+                            "user": user
+                        })
                         print(
-                            f"DEBUG: Error in user left thread-safe callback: {e}",
+                            f"DEBUG: Sent user leave via pubsub: {room_name}, {user}",
                             flush=True,
                         )
+                    except Exception as e:
+                        print(f"DEBUG: Error sending user leave via pubsub: {e}", flush=True)
+                        # 备用方案
                         try:
+                            callback = self.on_user_left
                             callback(room_name, user)
                         except Exception as e2:
-                            print(
-                                f"DEBUG: Error in user left direct callback: {e2}",
-                                flush=True,
-                            )
+                            print(f"DEBUG: Error in fallback user leave callback: {e2}", flush=True)
             else:
                 print(
                     f"DEBUG: Invalid USER_LEAVE event format: {'|'.join(parts)}",

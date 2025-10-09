@@ -17,7 +17,7 @@ import flet as ft
 from ..ui.theme import pixel_text, spacing, panel, pixel_button
 from ..state import Session
 from ming_drlms.core.types import RoomInfo
-from typing import Optional, Callable, List
+from typing import Optional, Callable, List, Dict
 from ming_drlms.core.room_protocol import get_available_rooms
 
 
@@ -30,6 +30,8 @@ class RoomList:
         self.page = page
         self.room_selected_callback: Optional[Callable[[str, str], None]] = None
         self.current_room_id: Optional[str] = None
+        self.sort_mode: str = "alphabetical"
+        self._current_search_term: str = ""
 
         # 房间数据（从服务器加载）
         self.rooms: List[RoomInfo] = []
@@ -120,8 +122,10 @@ class RoomList:
         """创建UI组件"""
         # 搜索框
         self.search_field = ft.TextField(
-            label=self.i18n.get("rooms.search", "Search rooms..."),
+            hint_text=self.i18n.get("rooms.search", "Search rooms..."),
             on_change=self._on_search_change,
+            dense=True,
+            filled=True,
         )
 
         # 创建房间按钮
@@ -146,18 +150,17 @@ class RoomList:
 
     def _filter_rooms(self, search_term: str):
         """过滤房间列表"""
+        self._current_search_term = search_term
         self.room_items.controls.clear()
 
-        filtered_rooms = [
-            room for room in self.rooms if search_term in room.name.lower()
-        ]
+        ordered_rooms = self._apply_filters_and_sort(search_term)
 
-        if not filtered_rooms:
+        if not ordered_rooms:
             self.room_items.controls.append(
                 pixel_text(self.i18n.get("rooms.empty", "No rooms found"), 10)
             )
         else:
-            for room in filtered_rooms:
+            for room in ordered_rooms:
                 self.room_items.controls.append(self._make_room_item(room))
 
         # 更新页面
@@ -169,12 +172,14 @@ class RoomList:
         try:
             self.room_items.controls.clear()
 
-            if not self.rooms:
+            ordered_rooms = self._apply_filters_and_sort(self._current_search_term)
+
+            if not ordered_rooms:
                 self.room_items.controls.append(
                     pixel_text(self.i18n.get("rooms.empty", "No rooms available"), 10)
                 )
             else:
-                for room in self.rooms:
+                for room in ordered_rooms:
                     try:
                         self.room_items.controls.append(self._make_room_item(room))
                     except Exception as e:
@@ -213,12 +218,18 @@ class RoomList:
         if user_count == 0:
             user_count = 1  # 至少显示当前用户
 
+        unread = self.sess.get_unread(room.name)
+        unread_badge = (
+            pixel_text(f"🔔 {unread}", 9, "#d32f2f") if unread > 0 else None
+        )
+
         # 房间信息显示
         room_info = ft.Column(
             [
                 pixel_text(room.name, 12, "primary"),
                 pixel_text(f"👥 {user_count} users", 10, "muted"),
                 pixel_text(f"Owner: {room.owner}", 9, "muted"),
+                *([unread_badge] if unread_badge else []),
             ],
             spacing=2,
             tight=True,
@@ -403,3 +414,75 @@ class RoomList:
             ),
             self.i18n.get("panel.rooms.title", "Rooms"),
         )
+
+    # ------------------------------------------------------------------
+    # Filtering & sorting helpers
+    def _apply_filters_and_sort(self, search_term: str = "") -> List[RoomInfo]:
+        if not self.rooms:
+            return []
+
+        term = (search_term or "").strip().lower()
+        rooms = list(self.rooms)
+
+        if not term:
+            return self._sort_rooms(rooms)
+
+        scored: list[tuple[int, RoomInfo]] = []
+        for room in rooms:
+            name = room.name.lower()
+            if name == term:
+                rank = 0
+            elif name.startswith(term):
+                rank = 1
+            elif term in name:
+                rank = 2
+            else:
+                rank = 3
+            scored.append((rank, room))
+
+        best_matches = [pair for pair in scored if pair[0] < 3]
+        if not best_matches:
+            first = term[0]
+            fallback_ranks: Dict[str, int] = {}
+            for room in rooms:
+                name = room.name.lower()
+                if name.startswith(first):
+                    rank = 0
+                else:
+                    rank = 1 + abs(ord(name[0]) - ord(first))
+                fallback_ranks[room.name] = rank
+            return self._sort_rooms(rooms, fallback_ranks)
+
+        rank_lookup = {room.name: rank for rank, room in best_matches}
+        filtered = [room for _, room in best_matches]
+        return sorted(
+            filtered,
+            key=lambda room: (
+                rank_lookup.get(room.name, 3),
+                -self.sess.get_unread(room.name),
+                room.name.lower(),
+            ),
+        )
+
+    def _sort_rooms(
+        self,
+        rooms: List[RoomInfo],
+        rank_lookup: Optional[Dict[str, int]] = None,
+    ) -> List[RoomInfo]:
+        if self.sort_mode == "unread":
+            return sorted(
+                rooms,
+                key=lambda room: (
+                    -self.sess.get_unread(room.name),
+                    -room.last_event_id,
+                    room.name.lower(),
+                ),
+            )
+
+        if self.sort_mode == "smart" and rank_lookup:
+            return sorted(
+                rooms,
+                key=lambda room: (rank_lookup.get(room.name, 3), room.name.lower()),
+            )
+
+        return sorted(rooms, key=lambda room: room.name.lower())

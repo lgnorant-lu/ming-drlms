@@ -97,36 +97,74 @@ class EventBus:
     # ------------------------------------------------------------------
     # subscription helpers
     def subscribe(self, room_name: str) -> bool:
+        """订阅房间（不重建监听器，保持持续监听）"""
         if not room_name:
             return False
+        
+        # 如果已经订阅，直接返回成功
         if room_name in self._session.room_subscriptions:
+            print(f"DEBUG: Room {room_name} already subscribed", flush=True)
             return True
 
         if not self._session.event_sock or not self._session.authed:
+            print(f"DEBUG: Cannot subscribe - no socket or not authenticated", flush=True)
             return False
 
         with self._subscribe_lock:
-            if self._listener:
-                if self._listener.is_running():
-                    self._listener.stop()
-                self._listener = None
+            # 确保监听器正在运行（不要停止它）
+            if not self.ensure_running():
+                print(f"DEBUG: Failed to ensure listener is running", flush=True)
+                return False
 
+            # 发送订阅命令并处理backlog事件
             since_id = self._session.get_room_max_event_id(room_name)
-            success = subscribe_room(
+            print(f"DEBUG: Subscribing to room {room_name} with since_id={since_id}", flush=True)
+            
+            success, backlog = subscribe_room(
                 self._session.event_sock,
                 room_name,
                 since_id,
             )
 
-            # 无论订阅是否成功，都尝试重新启动监听器
-            listener_ready = self.ensure_running()
-
-            if success and listener_ready:
+            if success:
+                # 处理订阅期间推送的backlog事件
+                print(f"DEBUG: Subscription successful, processing {len(backlog)} backlog events", flush=True)
+                for event in backlog:
+                    self._dispatch_backlog_event(event)
+                
+                # 更新Session状态
                 self._session.subscribe_to_room(room_name, since_id)
                 return True
-
-            # 如果订阅失败或监听器无法重新启动，则认为订阅失败
-            return False
+            else:
+                print(f"DEBUG: Subscription failed for room {room_name}", flush=True)
+                return False
+    
+    def _dispatch_backlog_event(self, event: dict):
+        """分发backlog事件（订阅时服务器推送的历史事件）"""
+        event_type = event.get("type")
+        
+        if event_type == "TEXT":
+            room = event.get("room")
+            user = event.get("user")
+            message = event.get("message")
+            event_id = event.get("event_id")
+            
+            if room and user and message is not None:
+                self._dispatch_message(room, user, message, event_id)
+        
+        elif event_type == "USER_JOIN":
+            room = event.get("room")
+            user = event.get("user")
+            
+            if room and user:
+                self._dispatch_user_joined(room, user)
+        
+        elif event_type == "USER_LEAVE":
+            room = event.get("room")
+            user = event.get("user")
+            
+            if room and user:
+                self._dispatch_user_left(room, user)
 
     # ------------------------------------------------------------------
     # internal dispatchers

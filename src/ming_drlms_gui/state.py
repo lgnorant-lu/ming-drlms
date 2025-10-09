@@ -32,6 +32,7 @@ class Session:
     global_displayed_messages: set = field(
         default_factory=set
     )  # 全局已显示消息集合 (event_id)
+    unread_counts: Dict[str, int] = field(default_factory=dict)
 
     def reset(self) -> None:
         try:
@@ -59,10 +60,12 @@ class Session:
             self.room_subscriptions.clear()
             self.room_users.clear()
             self.global_displayed_messages.clear()
+            self.unread_counts.clear()
 
     def set_current_room(self, room_name: str) -> None:
         """设置当前房间"""
         self.current_room = room_name
+        self.reset_unread(room_name)
 
     def add_room(self, room_info: RoomInfo) -> None:
         """添加房间到可用房间列表"""
@@ -120,6 +123,7 @@ class Session:
         # 清理房间用户状态
         self.room_users.clear()
         self.room_subscriptions.clear()
+        self.unread_counts.clear()
         print("DEBUG: Session listeners and user state cleaned up", flush=True)
 
     def is_message_displayed(self, event_id: int) -> bool:
@@ -138,3 +142,28 @@ class Session:
         """更新房间的最后事件ID"""
         if event_id > self.room_subscriptions.get(room_name, 0):
             self.room_subscriptions[room_name] = event_id
+
+    # ------------------------------------------------------------------
+    # Unread tracking helpers
+    def increment_unread(self, room_name: str, amount: int = 1) -> int:
+        if not room_name:
+            return 0
+        if room_name == self.current_room:
+            self.reset_unread(room_name)
+            return 0
+        if amount <= 0:
+            return self.unread_counts.get(room_name, 0)
+        new_value = self.unread_counts.get(room_name, 0) + amount
+        self.unread_counts[room_name] = new_value
+        return new_value
+
+    def get_unread(self, room_name: str) -> int:
+        return self.unread_counts.get(room_name, 0)
+
+    def reset_unread(self, room_name: Optional[str]) -> None:
+        if not room_name:
+            return
+        self.unread_counts.pop(room_name, None)
+
+    def clear_unread(self) -> None:
+        self.unread_counts.clear()

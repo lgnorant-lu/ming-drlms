@@ -21,6 +21,7 @@ from ..state import Session
 from .file_panel import FilePanel
 from .event_bus import EventBus
 from ming_drlms.core.room_protocol import send_message
+from . import chat_panel
 
 
 class RoomContent:
@@ -57,8 +58,45 @@ class RoomContent:
         self._unregister_join = None
         self._unregister_left = None
 
+        # 订阅pubsub消息（线程安全的UI更新）
+        if page:
+            page.pubsub.subscribe(self._on_pubsub_message)
+
         # 创建聊天组件
         self._create_chat_components()
+
+    def _on_pubsub_message(self, message: dict):
+        """处理pubsub消息（在主线程中调用，线程安全）"""
+        if not isinstance(message, dict):
+            return
+        
+        msg_type = message.get("type")
+        
+        if msg_type == "room_message":
+            # 处理房间消息
+            room_name = message.get("room_name")
+            user = message.get("user")
+            msg_text = message.get("message")
+            event_id = message.get("event_id")
+            
+            if room_name and user and msg_text is not None:
+                self._on_message_received(room_name, user, msg_text, event_id)
+        
+        elif msg_type == "user_join":
+            # 处理用户加入
+            room_name = message.get("room_name")
+            user = message.get("user")
+            
+            if room_name and user:
+                self._on_user_joined(room_name, user)
+        
+        elif msg_type == "user_leave":
+            # 处理用户离开
+            room_name = message.get("room_name")
+            user = message.get("user")
+            
+            if room_name and user:
+                self._on_user_left(room_name, user)
 
     def _create_chat_components(self):
         """创建聊天功能组件"""
@@ -203,6 +241,9 @@ class RoomContent:
         # 这里将来会加载房间聊天历史
         self._update_content()
 
+        if not cached_messages:
+            self._load_history()
+
         # 确保事件监听器运行并订阅房间
         if self.event_bus and not self.event_bus.subscribe(room_id):
             self._add_system_message("❌ 房间订阅失败，请检查连接状态")
@@ -231,6 +272,7 @@ class RoomContent:
         is_self: bool = False,
         event_id: Optional[int] = None,
         room: Optional[str] = None,
+        flash: bool = False,
     ) -> None:
         """添加用户消息"""
         # 检查是否已显示过这条消息（去重）- 现在使用全局事件ID
@@ -248,6 +290,7 @@ class RoomContent:
             "is_self": is_self,
             "event_id": event_id,
             "room": room or self.current_room_id,
+            "flash": flash,
         }
         self.messages.append(message)
 
@@ -261,6 +304,68 @@ class RoomContent:
 
         self._sync_room_cache()
         self._update_message_display()
+
+    def _parse_timestamp(self, value: Optional[str]) -> datetime:
+        if not value:
+            return datetime.now()
+        cleaned = value
+        if value.endswith("Z"):
+            cleaned = value[:-1] + "+00:00"
+        try:
+            return datetime.fromisoformat(cleaned)
+        except ValueError:
+            return datetime.now()
+
+    def _load_history(self, limit: int = 50) -> int:
+        if not self.current_room_id or not self.sess.sock or not self.sess.authed:
+            return 0
+
+        since_id = self.sess.get_room_max_event_id(self.current_room_id)
+        try:
+            history = chat_panel.get_history(
+                self.sess.sock,
+                self.current_room_id,
+                since_id=since_id,
+                limit=limit,
+            )
+        except Exception as exc:
+            print(f"DEBUG: Error loading history: {exc}", flush=True)
+            return 0
+
+        appended = 0
+        for record in history:
+            event_id = record.get("event_id")
+            if event_id is not None and self.sess.is_message_displayed(event_id):
+                continue
+
+            user = record.get("user", "")
+            text = record.get("message", "")
+            timestamp = self._parse_timestamp(record.get("timestamp"))
+
+            entry = {
+                "type": "user",
+                "text": text,
+                "user": user,
+                "timestamp": timestamp,
+                "is_self": user == self.sess.user,
+                "event_id": event_id,
+                "room": self.current_room_id,
+                "flash": False,
+            }
+
+            self.messages.append(entry)
+            self.sess.add_user_to_room(self.current_room_id, user)
+            if event_id is not None:
+                self.sess.mark_message_displayed(event_id)
+                self.sess.update_room_last_event_id(self.current_room_id, event_id)
+
+            appended += 1
+
+        if appended:
+            self._sync_room_cache()
+            self._update_message_display()
+
+        return appended
 
     def _sync_room_cache(self, room_id: Optional[str] = None) -> None:
         target_room = room_id or self.current_room_id
@@ -305,7 +410,7 @@ class RoomContent:
                         padding=ft.padding.symmetric(
                             horizontal=spacing(1), vertical=spacing(0.5)
                         ),
-                        bgcolor="#007bff",
+                        bgcolor="#5ab1ff" if msg.get("flash") else "#007bff",
                         border_radius=ft.border_radius.all(16),
                     )
                     content = ft.Row(
@@ -327,7 +432,7 @@ class RoomContent:
                         padding=ft.padding.symmetric(
                             horizontal=spacing(1), vertical=spacing(0.5)
                         ),
-                        bgcolor="#28a745",
+                        bgcolor="#5ad47a" if msg.get("flash") else "#28a745",
                         border_radius=ft.border_radius.all(16),
                     )
                     content = ft.Row(
@@ -372,7 +477,38 @@ class RoomContent:
         if room_name == self.current_room_id:
             # 判断是否是自己发送的消息
             is_self = user == self.sess.user
-            self._add_user_message(message, user, is_self, event_id, room_name)
+            self.sess.reset_unread(room_name)
+            self._add_user_message(
+                message,
+                user,
+                is_self,
+                event_id,
+                room_name,
+                flash=True,
+            )
+        else:
+            self.sess.add_user_to_room(room_name, user)
+            unread_total = self.sess.increment_unread(room_name)
+            print(
+                f"DEBUG: Message for other room '{room_name}', unread now {unread_total}",
+                flush=True,
+            )
+            if event_id is not None:
+                self.sess.update_room_last_event_id(room_name, event_id)
+
+            cache = self.room_message_cache.setdefault(room_name, [])
+            cache.append(
+                {
+                    "type": "user",
+                    "text": message,
+                    "user": user,
+                    "timestamp": datetime.now(),
+                    "is_self": user == self.sess.user,
+                    "event_id": event_id,
+                    "room": room_name,
+                    "flash": True,
+                }
+            )
 
     def _on_user_joined(self, room_name: str, user: str):
         """处理用户加入"""
@@ -495,7 +631,7 @@ class RoomContent:
         file_panel_content = self._get_file_panel()
 
         tabs = ft.Tabs(
-            selected_index=1,
+            selected_index=0,  # 默认显示Chat标签页
             tabs=[
                 ft.Tab(
                     text="💬 Chat",
