@@ -8,7 +8,10 @@ import os
 import sys
 import hashlib
 import tempfile
+import socket
 from pathlib import Path
+
+import pytest
 
 # 添加项目根目录到Python路径
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
@@ -122,6 +125,16 @@ except ImportError:
     HAS_GUI_CLIENT = False
 
 
+def _require_server(host: str, port: int) -> None:
+    """Skip integration tests when the file server is not available."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(0.5)
+        try:
+            sock.connect((host, port))
+        except OSError:
+            pytest.skip(f"File server unavailable at {host}:{port}")
+
+
 def create_test_file(size_mb: int, content: bytes = None) -> str:
     """创建测试文件"""
     if content is None:
@@ -157,6 +170,7 @@ def create_test_content(size_mb: int, pattern: str) -> bytes:
     return content
 
 
+@pytest.mark.integration
 def test_upload_download(
     host: str = "127.0.0.1",
     port: int = 8080,
@@ -164,6 +178,7 @@ def test_upload_download(
     password: str = "testpass",
 ):
     """测试上传和下载功能"""
+    _require_server(host, port)
     print("=== Starting File Upload/Download Test ===")
 
     # 创建测试文件
@@ -248,6 +263,7 @@ def test_upload_download(
                 pass
 
 
+@pytest.mark.integration
 def test_path_traversal_attack(
     host: str = "127.0.0.1",
     port: int = 8080,
@@ -255,6 +271,7 @@ def test_path_traversal_attack(
     password: str = "testpass",
 ):
     """测试路径遍历攻击是否被阻止"""
+    _require_server(host, port)
     print("\n=== Testing Path Traversal Attack Prevention ===")
 
     malicious_filenames = [
@@ -309,6 +326,7 @@ def test_path_traversal_attack(
             pass
 
 
+@pytest.mark.integration
 def test_buffer_corruption(
     host: str = "127.0.0.1",
     port: int = 8080,
@@ -316,6 +334,7 @@ def test_buffer_corruption(
     password: str = "testpass",
 ):
     """测试缓冲区污染问题是否已修复"""
+    _require_server(host, port)
     print("\n=== Testing Buffer Corruption Prevention ===")
 
     # 创建两个不同内容的文件
