@@ -14,18 +14,24 @@ Changed history:
 from __future__ import annotations
 
 import flet as ft
-from ..ui.theme import pixel_text, spacing, panel
+from typing import Optional, Union
+
 from ..state import Session
-from .event_bus import EventBus
-from typing import Optional
+from ..ui.theme import pixel_text, spacing, panel
+from ..viewmodels.rooms_view_model import RoomsViewModel
 
 
 class UserList:
     """用户列表组件"""
 
-    def __init__(self, i18n: dict, sess: Session):
+    def __init__(self, i18n: dict, source: Union[RoomsViewModel, Session]):
         self.i18n = i18n
-        self.sess = sess
+        if isinstance(source, RoomsViewModel):
+            self.view_model = source
+            self.sess = source.session
+        else:
+            self.view_model = None
+            self.sess = source
         self.current_room_id: Optional[str] = None
 
         # 用户数据（从服务器动态获取）
@@ -34,9 +40,9 @@ class UserList:
         # 延迟创建UI组件
         self._components_created = False
 
-        # 事件总线（共享）
-        self.event_bus: Optional[EventBus] = None
+        # 引用与监听器
         self.page_ref: Optional[ft.Page] = None
+        self._current_room_unsub = None
         self._unregister_join = None
         self._unregister_left = None
 
@@ -45,16 +51,55 @@ class UserList:
         # 用户列表
         self.user_items = ft.Column(spacing=spacing(1))
 
+    def _bind_view_model(self) -> None:
+        if not self.view_model:
+            return
+        if self._current_room_unsub is None:
+            self._current_room_unsub = self.view_model.add_current_room_listener(
+                self._on_current_room_changed
+            )
+        if self._unregister_join is None:
+            self._unregister_join = self.view_model.add_user_join_listener(
+                self._on_user_joined
+            )
+        if self._unregister_left is None:
+            self._unregister_left = self.view_model.add_user_leave_listener(
+                self._on_user_left
+            )
+        self.current_room_id = self.view_model.current_room_id
+
+    def dispose(self) -> None:
+        if self._current_room_unsub:
+            try:
+                self._current_room_unsub()
+            except Exception:
+                pass
+            self._current_room_unsub = None
+        if self._unregister_join:
+            try:
+                self._unregister_join()
+            except Exception:
+                pass
+            self._unregister_join = None
+        if self._unregister_left:
+            try:
+                self._unregister_left()
+            except Exception:
+                pass
+            self._unregister_left = None
+
+    def _on_current_room_changed(
+        self, room_id: Optional[str], room_name: Optional[str]
+    ) -> None:
+        self.current_room_id = room_id
+        self.load_users()
+
     def set_current_room(self, room_id: str):
         """设置当前房间"""
         self.current_room_id = room_id
 
         # 这里将来会根据房间ID加载对应的用户列表 [TODO?]
         self.load_users()
-
-        # 确保订阅新房间
-        if self.event_bus and room_id:
-            self.event_bus.subscribe(room_id)
 
     def load_users(self):
         """加载用户列表"""
@@ -127,10 +172,17 @@ class UserList:
             except Exception:
                 pass
 
-    def add_user(self, user_name: str, status: str = "online", activity: str = ""):
+    def add_user(
+        self,
+        user_name: str,
+        status: str = "online",
+        activity: str = "",
+        *,
+        update_session: bool = True,
+    ):
         """添加用户到列表"""
         # 添加用户到Session
-        if self.current_room_id:
+        if self.current_room_id and update_session:
             self.sess.add_user_to_room(self.current_room_id, user_name)
 
         # 检查用户是否已存在
@@ -150,10 +202,10 @@ class UserList:
         self.users.append(new_user)
         self.load_users()  # 刷新显示
 
-    def remove_user(self, user_name: str):
+    def remove_user(self, user_name: str, *, update_session: bool = True):
         """从列表中移除用户"""
         # 从Session中移除用户
-        if self.current_room_id:
+        if self.current_room_id and update_session:
             self.sess.remove_user_from_room(self.current_room_id, user_name)
 
         self.users = [user for user in self.users if user["name"] != user_name]
@@ -162,48 +214,21 @@ class UserList:
     def set_page(self, page: ft.Page):
         """设置页面引用"""
         self.page_ref = page
-        # 页面设置后，确保事件总线处于运行状态
-        if self.event_bus:
-            self.event_bus.ensure_running()
 
-    def bind_event_bus(self, event_bus: EventBus) -> None:
-        if self.event_bus is event_bus:
-            return
-
-        if self._unregister_join:
-            self._unregister_join()
-            self._unregister_join = None
-        if self._unregister_left:
-            self._unregister_left()
-            self._unregister_left = None
-
-        self.event_bus = event_bus
-        self._unregister_join = event_bus.register_user_join_handler(
-            self._on_user_joined
-        )
-        self._unregister_left = event_bus.register_user_left_handler(self._on_user_left)
-
-        if self.current_room_id:
-            self.event_bus.subscribe(self.current_room_id)
+    def bind_event_bus(self, event_bus) -> None:
+        if self.view_model:
+            self.view_model.set_event_bus(event_bus)
 
     def _on_user_joined(self, room_name: str, user: str):
         """处理用户加入事件"""
         if room_name == self.current_room_id:
             print(f"DEBUG: User {user} joined room {room_name}", flush=True)
-            # 确保用户被添加到Session中
-            self.sess.add_user_to_room(room_name, user)
-            self.add_user(user, "online", "online")
-            # 刷新用户列表显示
             self.load_users()
 
     def _on_user_left(self, room_name: str, user: str):
         """处理用户离开事件"""
         if room_name == self.current_room_id:
             print(f"DEBUG: User {user} left room {room_name}", flush=True)
-            # 确保用户从Session中被移除
-            self.sess.remove_user_from_room(room_name, user)
-            self.remove_user(user)
-            # 刷新用户列表显示
             self.load_users()
 
     def update_user_activity(self, user_name: str, activity: str):
@@ -296,7 +321,8 @@ class UserList:
                     content=ft.Text(f"User List Error: {e}", color="red"), padding=10
                 )
 
-        # 初始加载用户
+        # 绑定 ViewModel 并加载用户
+        self._bind_view_model()
         self.load_users()
 
         # 用户列表滚动容器

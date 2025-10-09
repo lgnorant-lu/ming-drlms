@@ -91,18 +91,6 @@ def view(i18n: dict, page: ft.Page, sess: Session, on_disconnect) -> ft.Containe
 
     print("DEBUG: Status bar created", flush=True)
 
-    # 初始化组件
-    print("DEBUG: Creating RoomList component...", flush=True)
-    try:
-        room_list = RoomList(i18n, sess, page)
-        print("DEBUG: RoomList created successfully", flush=True)
-    except Exception as e:
-        print(f"DEBUG: ERROR creating RoomList: {e}", flush=True)
-        import traceback
-
-        traceback.print_exc()
-        raise
-
     # Phase 2架构：创建ViewModel和EventBus
     print("DEBUG: Creating EventBus and ViewModel...", flush=True)
     try:
@@ -111,6 +99,17 @@ def view(i18n: dict, page: ft.Page, sess: Session, on_disconnect) -> ft.Containe
         print("DEBUG: ViewModel created successfully", flush=True)
     except Exception as e:
         print(f"DEBUG: ERROR creating ViewModel: {e}", flush=True)
+        import traceback
+
+        traceback.print_exc()
+        raise
+
+    print("DEBUG: Creating RoomList component...", flush=True)
+    try:
+        room_list = RoomList(i18n, view_model, page)
+        print("DEBUG: RoomList created successfully", flush=True)
+    except Exception as e:
+        print(f"DEBUG: ERROR creating RoomList: {e}", flush=True)
         import traceback
 
         traceback.print_exc()
@@ -130,10 +129,8 @@ def view(i18n: dict, page: ft.Page, sess: Session, on_disconnect) -> ft.Containe
 
     print("DEBUG: Creating UserList component...", flush=True)
     try:
-        user_list = UserList(i18n, sess)
+        user_list = UserList(i18n, view_model)
         user_list.set_page(page)
-        # Phase 2: UserList仍然绑定EventBus（未来可改为使用ViewModel）
-        user_list.bind_event_bus(event_bus)
         print("DEBUG: UserList created successfully", flush=True)
     except Exception as e:
         print(f"DEBUG: ERROR creating UserList: {e}", flush=True)
@@ -255,8 +252,6 @@ def view(i18n: dict, page: ft.Page, sess: Session, on_disconnect) -> ft.Containe
         print(f"DEBUG: Room selected: {room_id} - {room_name}", flush=True)
         # Phase 2: 使用ViewModel的switch_room方法进行房间切换
         view_model.switch_room(room_id, room_name)
-        # UserList仍然直接更新（未来可改为订阅ViewModel）
-        user_list.set_current_room(room_id)
 
     room_list.set_room_selected_callback(on_room_selected)
     print("DEBUG: Component communication setup completed", flush=True)

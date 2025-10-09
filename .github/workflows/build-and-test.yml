@@ -111,6 +111,16 @@ jobs:
           python -m pip install -r requirements-dev.txt
           python -m pip install ".[gui]" build coverage
 
+      - name: Run Ruff static analysis
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m ruff check src/ tests/
+
+      - name: Run Python unit tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest -m "not integration" tests/python
+
       - name: Run coverage and integration suite
         shell: bash
         env:

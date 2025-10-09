@@ -14,74 +14,67 @@ Changed history:
 from __future__ import annotations
 
 import flet as ft
-from ..ui.theme import pixel_text, spacing, panel, pixel_button
-from ..state import Session
+from typing import Dict, List, Optional, Callable, Union
+
 from ming_drlms.core.types import RoomInfo
-from typing import Optional, Callable, List, Dict
-from ming_drlms.core.room_protocol import get_available_rooms
+
+from ..state import Session
+from ..ui.theme import pixel_text, spacing, panel, pixel_button
+from ..viewmodels.rooms_view_model import RoomsViewModel
 
 
 class RoomList:
     """房间列表管理组件 - F-M3-01"""
 
-    def __init__(self, i18n: dict, sess: Session, page: ft.Page = None):
+    def __init__(
+        self,
+        i18n: dict,
+        source: Union[RoomsViewModel, Session],
+        page: ft.Page = None,
+    ):
         self.i18n = i18n
-        self.sess = sess
         self.page = page
+
+        if isinstance(source, RoomsViewModel):
+            self.view_model = source
+            self.sess = source.session
+        else:
+            self.sess = source
+            self.view_model = RoomsViewModel(self.sess)
+
+        self._rooms_unsub = None
+        self._current_room_unsub = None
+        self._is_loading: bool = False
+        self._rooms_cache: List[RoomInfo] = []
+
         self.room_selected_callback: Optional[Callable[[str, str], None]] = None
         self.current_room_id: Optional[str] = None
         self.sort_mode: str = "alphabetical"
         self._current_search_term: str = ""
 
         # 房间数据（从服务器加载）
-        self.rooms: List[RoomInfo] = []
+        self.rooms: List[RoomInfo] = []  # Deprecated: maintained for backward compat
 
         # 延迟创建UI组件
         self._components_created = False
 
-    def load_rooms(self):
-        """从服务器加载房间列表"""
-        if not self.sess.sock or not self.sess.authed:
-            print(
-                "DEBUG: Cannot load rooms - not connected or authenticated", flush=True
-            )
+    def load_rooms(self, force: bool = False, background: bool = True) -> None:
+        """通过ViewModel刷新房间列表"""
+        if not self.view_model:
+            print("DEBUG: RoomList has no ViewModel bound", flush=True)
             return
 
-        try:
-            print("DEBUG: Loading rooms from server...", flush=True)
-            rooms = get_available_rooms(self.sess.sock)
-            print(f"DEBUG: Loaded {len(rooms)} rooms from server", flush=True)
-
-            # 更新房间列表
-            self.rooms = rooms
-
-            # 更新Session中的房间信息
-            for room in rooms:
-                self.sess.add_room(room)
-
-            # 刷新UI显示
-            if self._components_created:
-                self._update_room_display()
-                if self.page:
-                    self.page.update()
-
-        except Exception as e:
-            print(f"DEBUG: Error loading rooms: {e}", flush=True)
-            # 如果加载失败，使用默认房间
-            try:
-                self._load_default_rooms()
-            except Exception as e2:
-                print(f"DEBUG: Error loading default rooms: {e2}", flush=True)
-                # 如果连默认房间都加载失败，显示错误信息
-                self.room_items.controls.clear()
-                self.room_items.controls.append(
-                    pixel_text("Failed to load rooms", 10, "error")
-                )
+        print(
+            f"DEBUG: Requesting room refresh (force={force}, background={background})",
+            flush=True,
+        )
+        self._set_loading_state(True)
+        self.view_model.refresh_rooms(force=force, background=background)
 
     def _load_default_rooms(self):
         """加载默认房间（当服务器加载失败时使用）"""
         print("DEBUG: Loading default rooms", flush=True)
-        self.rooms = [
+        defaults = [
             RoomInfo(
                 name="general",
                 owner="system",
@@ -89,6 +82,7 @@ class RoomList:
                 subscriber_count=0,
                 last_event_id=0,
                 created_at=0,
+                updated_at=0,
             ),
             RoomInfo(
                 name="dev",
@@ -97,6 +91,7 @@ class RoomList:
                 subscriber_count=0,
                 last_event_id=0,
                 created_at=0,
+                updated_at=0,
             ),
             RoomInfo(
                 name="design",
@@ -105,18 +100,14 @@ class RoomList:
                 subscriber_count=0,
                 last_event_id=0,
                 created_at=0,
+                updated_at=0,
             ),
         ]
 
-        # 更新Session中的房间信息
-        for room in self.rooms:
+        for room in defaults:
             self.sess.add_room(room)
 
-        # 刷新UI显示
-        if self._components_created:
-            self._update_room_display()
-            if self.page:
-                self.page.update()
+        self.view_model.update_rooms_cache(defaults)
 
     def _create_components(self):
         """创建UI组件"""
@@ -141,7 +132,74 @@ class RoomList:
         self.refresh_btn = pixel_button(
             self.i18n.get("refresh.btn", "Refresh"), "accent"
         )
-        self.refresh_btn.on_click = lambda _: self.load_rooms()
+        self.refresh_btn.on_click = lambda _: self.load_rooms(
+            force=True, background=True
+        )
+
+    def _set_loading_state(self, is_loading: bool) -> None:
+        self._is_loading = is_loading
+        if not self._components_created:
+            return
+
+        if not hasattr(self, "_loading_placeholder"):
+            self._loading_placeholder = pixel_text(
+                self.i18n.get("rooms.loading", "Loading rooms..."), 10, "muted"
+            )
+
+        if is_loading:
+            if self._loading_placeholder not in self.room_items.controls:
+                self.room_items.controls.insert(0, self._loading_placeholder)
+        else:
+            if self._loading_placeholder in self.room_items.controls:
+                self.room_items.controls.remove(self._loading_placeholder)
+
+    def _bind_view_model(self) -> None:
+        if not self.view_model:
+            return
+        if self._rooms_unsub is None:
+            self._rooms_unsub = self.view_model.add_room_list_listener(
+                self._on_rooms_updated
+            )
+        if self._current_room_unsub is None:
+            self._current_room_unsub = self.view_model.add_current_room_listener(
+                self._on_current_room_changed
+            )
+        # 同步当前状态
+        self.current_room_id = self.view_model.current_room_id
+
+    def dispose(self) -> None:
+        if self._rooms_unsub:
+            try:
+                self._rooms_unsub()
+            except Exception:
+                pass
+            self._rooms_unsub = None
+        if self._current_room_unsub:
+            try:
+                self._current_room_unsub()
+            except Exception:
+                pass
+            self._current_room_unsub = None
+
+    def _on_rooms_updated(self, rooms: List[RoomInfo]) -> None:
+        self._rooms_cache = list(rooms)
+        self.rooms = list(rooms)  # legacy attr
+        self._set_loading_state(False)
+        if not self._components_created:
+            return
+        self._update_room_display()
+        if self.page:
+            self.page.update()
+
+    def _on_current_room_changed(
+        self, room_id: Optional[str], room_name: Optional[str]
+    ) -> None:
+        self.current_room_id = room_id
+        if not self._components_created:
+            return
+        self._update_selection_styles()
+        if self.page:
+            self.page.update()
 
     def _on_search_change(self, e):
         """搜索框变化回调"""
@@ -201,6 +259,13 @@ class RoomList:
             except Exception:
                 pass  # 连错误显示都失败时，静默处理
 
+    def _get_room_snapshot(self) -> List[RoomInfo]:
+        if self._rooms_cache:
+            return list(self._rooms_cache)
+        if self.rooms:
+            return list(self.rooms)
+        return []
+
     def _make_room_item(self, room: RoomInfo):
         """创建房间项"""
         is_selected = room.name == self.current_room_id
@@ -219,9 +284,7 @@ class RoomList:
             user_count = 1  # 至少显示当前用户
 
         unread = self.sess.get_unread(room.name)
-        unread_badge = (
-            pixel_text(f"🔔 {unread}", 9, "#d32f2f") if unread > 0 else None
-        )
+        unread_badge = pixel_text(f"🔔 {unread}", 9, "#d32f2f") if unread > 0 else None
 
         # 房间信息显示
         room_info = ft.Column(
@@ -246,12 +309,13 @@ class RoomList:
 
     def _update_selection_styles(self):
         """更新选择样式"""
+        rooms_snapshot = self._get_room_snapshot()
         for item in self.room_items.controls:
             if hasattr(item, "content") and hasattr(item.content, "controls"):
                 # 获取房间ID（从第一个文本控件获取房间名）
                 room_name = item.content.controls[0].value
                 room_id = next(
-                    (r.name for r in self.rooms if r.name == room_name), None
+                    (r.name for r in rooms_snapshot if r.name == room_name), None
                 )
                 is_selected = room_id == self.current_room_id
 
@@ -289,11 +353,13 @@ class RoomList:
                 subscriber_count=1,
                 last_event_id=0,
                 created_at=0,
+                updated_at=0,
             )
 
-            self.rooms.append(new_room)
             self.sess.add_room(new_room)
-            self._update_room_display()
+            updated_rooms = [r for r in self._rooms_cache if r.name != new_room.name]
+            updated_rooms.append(new_room)
+            self.view_model.update_rooms_cache(updated_rooms)
             if self.page:
                 self.page.update()
 
@@ -377,8 +443,9 @@ class RoomList:
         if hasattr(self, "page"):
             self.set_page(self.page)
 
-        # 初始加载房间
-        self.load_rooms()
+        # 绑定 ViewModel 并加载房间
+        self._bind_view_model()
+        self.load_rooms(background=True)
 
         # 房间列表滚动容器
         rooms_scrollable = ft.Container(
@@ -418,11 +485,11 @@ class RoomList:
     # ------------------------------------------------------------------
     # Filtering & sorting helpers
     def _apply_filters_and_sort(self, search_term: str = "") -> List[RoomInfo]:
-        if not self.rooms:
+        rooms = self._get_room_snapshot()
+        if not rooms:
             return []
 
         term = (search_term or "").strip().lower()
-        rooms = list(self.rooms)
 
         if not term:
             return self._sort_rooms(rooms)

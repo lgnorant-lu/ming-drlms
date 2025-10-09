@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import threading
 from typing import Callable, List, Optional
+
+from ming_drlms.core.room_protocol import get_available_rooms
+from ming_drlms.core.types import RoomInfo
 
 from ..state import Session
 
@@ -17,6 +21,20 @@ class RoomsViewModel:
     def __init__(self, session: Session, event_bus=None):
         self._session = session
         self._event_bus = event_bus
+
+        # 房间列表监听
+        self._rooms: List[RoomInfo] = []
+        self._room_listeners: List[Callable[[List[RoomInfo]], None]] = []
+        self._rooms_lock = threading.Lock()
+        self._rooms_loading = False
+
+        # EventBus注销句柄
+        self._eventbus_unreg_message = None
+        self._eventbus_unreg_join = None
+        self._eventbus_unreg_leave = None
+
+        if event_bus:
+            self.set_event_bus(event_bus)
 
         # 观察者列表
         self._room_metadata_listeners: List[Callable[[Optional[str]], None]] = []
@@ -45,6 +63,25 @@ class RoomsViewModel:
         def unregister() -> None:
             if listener in self._room_metadata_listeners:
                 self._room_metadata_listeners.remove(listener)
+
+        return unregister
+
+    def add_room_list_listener(
+        self, listener: Callable[[List[RoomInfo]], None]
+    ) -> Callable[[], None]:
+        """注册房间列表监听器，立即推送最新快照"""
+        if listener not in self._room_listeners:
+            self._room_listeners.append(listener)
+
+        # 立即推送一次当前房间列表快照
+        try:
+            listener(self.get_rooms())
+        except Exception:
+            pass
+
+        def unregister() -> None:
+            if listener in self._room_listeners:
+                self._room_listeners.remove(listener)
 
         return unregister
 
@@ -205,6 +242,111 @@ class RoomsViewModel:
             except Exception:
                 pass
 
+    def get_rooms(self) -> List[RoomInfo]:
+        with self._rooms_lock:
+            return list(self._rooms)
+
+    def refresh_rooms(self, *, force: bool = False, background: bool = False) -> None:
+        """刷新房间列表，可选择异步执行"""
+
+        def _task() -> None:
+            self._refresh_rooms(force)
+
+        if background:
+            threading.Thread(target=_task, daemon=True).start()
+        else:
+            _task()
+
+    def update_rooms_cache(self, rooms: List[RoomInfo], *, notify: bool = True) -> None:
+        """外部用于更新房间缓存（例如本地创建房间后）"""
+        with self._rooms_lock:
+            self._rooms = list(rooms)
+            self._session.available_rooms = list(rooms)
+        if notify:
+            self._notify_room_listeners()
+
+    def _refresh_rooms(self, force: bool) -> None:
+        notify_snapshot: Optional[List[RoomInfo]] = None
+        with self._rooms_lock:
+            if self._rooms_loading:
+                return
+            if self._rooms and not force:
+                notify_snapshot = list(self._rooms)
+            else:
+                self._rooms_loading = True
+
+        if notify_snapshot is not None:
+            for listener in list(self._room_listeners):
+                try:
+                    listener(notify_snapshot)
+                except Exception:
+                    pass
+            return
+
+        rooms: List[RoomInfo] = []
+        try:
+            if self._session.sock and self._session.authed:
+                rooms = get_available_rooms(self._session.sock)
+            if not rooms:
+                rooms = list(self._session.available_rooms)
+            if not rooms:
+                rooms = self._default_rooms()
+
+            for room in rooms:
+                self._session.add_room(room)
+
+        except Exception as exc:
+            print(f"DEBUG: Failed to refresh rooms: {exc}", flush=True)
+            fallback = list(self._session.available_rooms)
+            rooms = fallback if fallback else self._default_rooms()
+
+        finally:
+            with self._rooms_lock:
+                self._rooms = list(rooms)
+                self._session.available_rooms = list(rooms)
+                self._rooms_loading = False
+
+        self._notify_room_listeners()
+
+    def _notify_room_listeners(self) -> None:
+        snapshot = self.get_rooms()
+        for listener in list(self._room_listeners):
+            try:
+                listener(snapshot)
+            except Exception as exc:
+                print(f"DEBUG: Error notifying room listener: {exc}", flush=True)
+
+    def _default_rooms(self) -> List[RoomInfo]:
+        return [
+            RoomInfo(
+                name="general",
+                owner="system",
+                policy=0,
+                subscriber_count=0,
+                last_event_id=0,
+                created_at=0,
+                updated_at=0,
+            ),
+            RoomInfo(
+                name="dev",
+                owner="system",
+                policy=0,
+                subscriber_count=0,
+                last_event_id=0,
+                created_at=0,
+                updated_at=0,
+            ),
+            RoomInfo(
+                name="design",
+                owner="system",
+                policy=0,
+                subscriber_count=0,
+                last_event_id=0,
+                created_at=0,
+                updated_at=0,
+            ),
+        ]
+
     # ------------------------------------------------------------------
     # Session 代理
     @property
@@ -217,4 +359,39 @@ class RoomsViewModel:
 
     def set_event_bus(self, event_bus) -> None:
         """设置EventBus引用"""
+        # 先移除旧的注册
+        if self._eventbus_unreg_message:
+            try:
+                self._eventbus_unreg_message()
+            except Exception:
+                pass
+            self._eventbus_unreg_message = None
+
+        if self._eventbus_unreg_join:
+            try:
+                self._eventbus_unreg_join()
+            except Exception:
+                pass
+            self._eventbus_unreg_join = None
+
+        if self._eventbus_unreg_leave:
+            try:
+                self._eventbus_unreg_leave()
+            except Exception:
+                pass
+            self._eventbus_unreg_leave = None
+
         self._event_bus = event_bus
+        if not event_bus:
+            return
+
+        self._eventbus_unreg_message = event_bus.register_message_handler(
+            self.on_message_received
+        )
+        self._eventbus_unreg_join = event_bus.register_user_join_handler(
+            self.on_user_joined
+        )
+        self._eventbus_unreg_leave = event_bus.register_user_left_handler(
+            self.on_user_left
+        )
+        event_bus.ensure_running()
