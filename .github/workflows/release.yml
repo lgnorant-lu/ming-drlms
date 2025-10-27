@@ -117,7 +117,7 @@ jobs:
       name: test-pypi
     steps:
       - name: Download dist from build job
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v6
         with:
           name: ming-drlms-dist
           path: dist
@@ -139,7 +139,7 @@ jobs:
       url: https://pypi.org/project/ming-drlms
     steps:
       - name: Download dist from build job
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v6
         with:
           name: ming-drlms-dist
           path: dist
@@ -157,7 +157,7 @@ jobs:
 
     steps:
       - name: Download dist from build job
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v6
         with:
           name: ming-drlms-dist
           path: dist
