@@ -1,7 +1,11 @@
+import os
 import sys
 from pathlib import Path
 
 import pytest
+
+# Force python implementation for protobuf to stay compatible with generated files
+os.environ.setdefault("PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION", "python")
 
 # Ensure local src takes precedence before tests import target modules
 _root = Path(__file__).resolve().parents[2]

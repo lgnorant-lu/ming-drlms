@@ -46,8 +46,37 @@ endif()
 
 find_package(Threads REQUIRED)
 find_package(OpenSSL REQUIRED)
-find_package(SQLite3 REQUIRED)
 find_package(Argon2 REQUIRED)
+
+# Prefer system SQLite3 when available; fall back to vcpkg's unofficial-sqlite3
+set(HAVE_SYSTEM_SQLITE3 0)
+find_package(SQLite3 QUIET)
+if(SQLite3_FOUND)
+    message(STATUS "Found system SQLite3: ${SQLite3_VERSION}")
+    set(HAVE_SYSTEM_SQLITE3 1)
+else()
+    find_package(unofficial-sqlite3 CONFIG REQUIRED)
+endif()
+
+# Protobuf-C (for protoc-c generated C stubs)
+find_package(PkgConfig QUIET)
+if(PKG_CONFIG_FOUND)
+    pkg_check_modules(PROTOBUF_C QUIET libprotobuf-c)
+endif()
+if(NOT PROTOBUF_C_FOUND)
+    # Fallback: try to link by name; some distros don't provide pkg-config files
+    find_library(PROTOBUF_C_LIBRARY NAMES protobuf-c)
+    if(PROTOBUF_C_LIBRARY)
+        set(PROTOBUF_C_LIBRARIES ${PROTOBUF_C_LIBRARY})
+        set(PROTOBUF_C_FOUND TRUE)
+        message(STATUS "Found protobuf-c library (fallback): ${PROTOBUF_C_LIBRARY}")
+    endif()
+endif()
+
+if(PROTOBUF_C_FOUND)
+    message(STATUS "Found protobuf-c via pkg-config: ${PROTOBUF_C_VERSION}")
+    add_compile_definitions(HAVE_PROTOBUF_C=1)
+endif()
 
 add_subdirectory(src/platform)
 add_subdirectory(src/libipc)

@@ -18,7 +18,6 @@ import time
 import socket as _socket
 from typing import Optional, Callable, Dict
 from ..state import Session
-from ming_drlms.core.protocol import recv_line
 
 
 class EventListener:
@@ -33,6 +32,11 @@ class EventListener:
         ] = None,
         on_user_joined: Optional[Callable[[str, str], None]] = None,
         on_user_left: Optional[Callable[[str, str], None]] = None,
+        on_ignite_request: Optional[Callable[[Dict[str, str]], None]] = None,
+        on_ignite_established: Optional[Callable[[Dict[str, str]], None]] = None,
+        on_befriend_request: Optional[Callable[[Dict[str, str]], None]] = None,
+        on_befriend_established: Optional[Callable[[Dict[str, str]], None]] = None,
+        on_note_updated: Optional[Callable[[Dict[str, str]], None]] = None,
     ):
         """初始化事件监听器
 
@@ -48,6 +52,11 @@ class EventListener:
         self.on_message_received = on_message_received
         self.on_user_joined = on_user_joined
         self.on_user_left = on_user_left
+        self.on_ignite_request = on_ignite_request
+        self.on_ignite_established = on_ignite_established
+        self.on_befriend_request = on_befriend_request
+        self.on_befriend_established = on_befriend_established
+        self.on_note_updated = on_note_updated
         self.user_list = None  # 引用用户列表组件
 
         self._running = False
@@ -60,6 +69,11 @@ class EventListener:
             "USER_JOIN": self._handle_user_join_event,
             "USER_LEAVE": self._handle_user_leave_event,
             "FILE": self._handle_file_event,
+            "IGNITE_REQUEST": self._handle_ignite_request_event,
+            "IGNITE_ESTABLISHED": self._handle_ignite_established_event,
+            "BEFRIEND_REQUEST": self._handle_befriend_request_event,
+            "BEFRIEND_ESTABLISHED": self._handle_befriend_established_event,
+            "NOTE_UPDATED": self._handle_note_updated_event,
         }
 
     def start(self) -> bool:
@@ -82,7 +96,9 @@ class EventListener:
         try:
             try:
                 # 使用较短的socket超时，便于在需要时暂停监听
-                self.session.event_sock.settimeout(1.0)
+                with self.session.event_sock_lock:
+                    if self.session.event_sock:
+                        self.session.event_sock.settimeout(1.0)
             except Exception:
                 pass
             self._running = True
@@ -104,7 +120,9 @@ class EventListener:
         print("DEBUG: Stopping event listener", flush=True)
         try:
             if self.session.event_sock:
-                self.session.event_sock.settimeout(0.2)
+                with self.session.event_sock_lock:
+                    if self.session.event_sock:
+                        self.session.event_sock.settimeout(0.2)
         except Exception:
             pass
         self._running = False
@@ -134,37 +152,52 @@ class EventListener:
 
                 # 尝试接收一行数据（非阻塞）
                 try:
-                    line = recv_line(self.session.event_sock)
-                    if line:
-                        empty_reads = 0  # 重置空读计数
-                        print(f"DEBUG: Raw data received: '{line}'", flush=True)
-
-                        # 验证数据长度
-                        if len(line) > 4096:  # 超过4KB的数据可能是错误的
+                    should_sleep = False
+                    with self.session.event_sock_lock:
+                        stream = self.session.event_stream
+                        if not stream.socket:
                             print(
-                                f"DEBUG: Data too long ({len(line)} chars), possible corruption",
+                                "DEBUG: Event stream detached, stopping listener",
                                 flush=True,
                             )
-                            continue
-
-                        self._process_event(line)
-                    else:
-                        # 没有数据，短暂休眠
-                        empty_reads += 1
-                        if empty_reads % 50 == 0:  # 每50次空读打印一次
+                            self._running = False
+                            break
+                        line = stream.readline()
+                        if line:
+                            empty_reads = 0  # 重置空读计数
                             print(
-                                f"DEBUG: Event listener waiting... ({empty_reads} empty reads)",
+                                f"DEBUG: Raw data received: '{line}'",
                                 flush=True,
                             )
+
+                            # 验证数据长度
+                            if len(line) > 4096:  # 超过4KB的数据可能是错误的
+                                print(
+                                    f"DEBUG: Data too long ({len(line)} chars), possible corruption",
+                                    flush=True,
+                                )
+                            else:
+                                self._process_event(line)
+                        else:
+                            # 没有数据，短暂休眠
+                            empty_reads += 1
+                            if empty_reads % 50 == 0:  # 每50次空读打印一次
+                                print(
+                                    f"DEBUG: Event listener waiting... ({empty_reads} empty reads)",
+                                    flush=True,
+                                )
+                            should_sleep = True
+
+                    if should_sleep:
                         time.sleep(0.1)
 
-                        # 防止无限循环
-                        if empty_reads > max_empty_reads:
-                            print(
-                                "DEBUG: Too many empty reads, stopping listener",
-                                flush=True,
-                            )
-                            break
+                    # 防止无限循环
+                    if empty_reads > max_empty_reads:
+                        print(
+                            "DEBUG: Too many empty reads, stopping listener",
+                            flush=True,
+                        )
+                        break
                 except _socket.timeout:
                     # 超时正常，继续监听
                     empty_reads += 1
@@ -269,7 +302,17 @@ class EventListener:
                 return
 
             # 验证事件类型是否有效
-            valid_event_types = ["TEXT", "USER_JOIN", "USER_LEAVE", "FILE"]
+            valid_event_types = [
+                "TEXT",
+                "USER_JOIN",
+                "USER_LEAVE",
+                "FILE",
+                "IGNITE_REQUEST",
+                "IGNITE_ESTABLISHED",
+                "BEFRIEND_REQUEST",
+                "BEFRIEND_ESTABLISHED",
+                "NOTE_UPDATED",
+            ]
             if event_type not in valid_event_types:
                 print(f"DEBUG: Unknown event type '{event_type}': {line}", flush=True)
                 return
@@ -286,170 +329,239 @@ class EventListener:
     def _handle_text_event(self, parts: list):
         """处理文本消息事件"""
         try:
-            # EVT|TEXT|room|timestamp|user|event_id|length|sha
-            if len(parts) >= 8:
+            room_name = ""
+            instance_id = ""
+            display_token = ""
+            legacy_user = ""
+            event_id = 0
+            message_text = ""
+            sha = ""
+            timestamp = ""
+            length = 0
+
+            if len(parts) >= 9:
                 try:
                     room_name = parts[2]
-                    timestamp = parts[3]
-                    user = parts[4]
-                    event_id = int(parts[5])
-                    length = int(parts[6])
-                    sha = parts[7]
-
-                    # 验证消息长度合理性
-                    if length <= 0 or length > 65536:  # 64KB 最大限制
-                        print(
-                            f"DEBUG: Invalid message length: {length}, skipping",
-                            flush=True,
-                        )
-                        return
-
-                    # 接收消息内容的原始字节
-                    try:
-                        message_bytes = self._receive_bytes(length)
-                        if len(message_bytes) != length:
-                            print(
-                                f"DEBUG: Received {len(message_bytes)} bytes, expected {length}, skipping",
-                                flush=True,
-                            )
-                            return
-
-                        message_text = message_bytes.decode("utf-8", errors="replace")
-                        # 验证解码后的文本长度合理
-                        if (
-                            len(message_text) > length * 4
-                        ):  # UTF-8解码后长度不应该超过4倍
-                            print(
-                                f"DEBUG: Decoded text too long: {len(message_text)} vs expected {length}, skipping",
-                                flush=True,
-                            )
-                            return
-
-                    except (ConnectionError, OSError) as e:
-                        print(
-                            f"DEBUG: Failed to receive message bytes: {e}", flush=True
-                        )
-                        return
-
-                    # 验证SHA校验和
-                    import hashlib
-
-                    calculated_sha = hashlib.sha256(message_bytes).hexdigest()
-                    if calculated_sha != sha:
-                        print(
-                            f"DEBUG: SHA mismatch! Expected: {sha}, Got: {calculated_sha}",
-                            flush=True,
-                        )
-                        # 仍然继续处理，但记录警告
-
-                    # 清理消息内容中的控制字符
-                    message_text = (
-                        message_text.replace("\n", " ")
-                        .replace("\r", " ")
-                        .replace("\t", " ")
-                    )
-                    # 移除多余的空格
-                    message_text = " ".join(message_text.split())
-
+                    instance_id = parts[3]
+                    timestamp = parts[4]
+                    display_token = parts[5]
+                    event_id = int(parts[6])
+                    length = int(parts[7])
+                    sha = parts[8]
+                except (ValueError, IndexError) as exc:
                     print(
-                        (
-                            "DEBUG: Text event - Room: %s, User: %s, Timestamp: %s, Length: %s, SHA: %s, Message: '%s'"
-                            % (room_name, user, timestamp, length, sha, message_text)
-                        ),
-                        flush=True,
-                    )
-
-                except (ValueError, IndexError) as e:
-                    print(
-                        f"DEBUG: Error parsing TEXT event parts: {e}, parts: {parts}",
+                        f"DEBUG: Error parsing TEXT event header: {exc}, parts: {parts}",
                         flush=True,
                     )
                     return
-
-                # 使用pubsub发送消息到主线程（线程安全）
-                if self.on_message_received:
-                    try:
-                        # 通过pubsub发送消息事件
-                        self.page.pubsub.send_all({
-                            "type": "room_message",
-                            "room_name": room_name,
-                            "user": user,
-                            "message": message_text,
-                            "event_id": event_id
-                        })
-                        print(
-                            f"DEBUG: Sent message via pubsub: {room_name}, {user}, event_id: {event_id}",
-                            flush=True,
-                        )
-                    except Exception as e:
-                        print(f"DEBUG: Error sending message via pubsub: {e}", flush=True)
-                        # 备用方案：直接调用callback（仅用于调试）
-                        try:
-                            callback = self.on_message_received
-                            callback(room_name, user, message_text, event_id)
-                        except Exception as e2:
-                            print(f"DEBUG: Error in fallback callback: {e2}", flush=True)
+            elif len(parts) >= 8:
+                # 兼容旧格式
+                try:
+                    room_name = parts[2]
+                    timestamp = parts[3]
+                    legacy_user = parts[4]
+                    event_id = int(parts[5])
+                    length = int(parts[6])
+                    sha = parts[7]
+                    display_token = ""
+                    instance_id = ""
+                except (ValueError, IndexError) as exc:
+                    print(
+                        f"DEBUG: Error parsing legacy TEXT event header: {exc}, parts: {parts}",
+                        flush=True,
+                    )
+                    return
             else:
                 print(
-                    f"DEBUG: Invalid TEXT event format: {'|'.join(parts)}", flush=True
+                    f"DEBUG: Invalid TEXT event format: {'|'.join(parts)}",
+                    flush=True,
+                )
+                return
+
+            if not instance_id and room_name:
+                instance_id = self.session.make_legacy_instance_id(room_name)
+
+            if length <= 0 or length > 65536:
+                print(f"DEBUG: Invalid message length: {length}, skipping", flush=True)
+                return
+
+            try:
+                message_bytes = self._receive_bytes(length)
+                if len(message_bytes) != length:
+                    print(
+                        f"DEBUG: Received {len(message_bytes)} bytes, expected {length}, skipping",
+                        flush=True,
+                    )
+                    return
+                message_text = message_bytes.decode("utf-8", errors="replace")
+                if len(message_text) > length * 4:
+                    print(
+                        f"DEBUG: Decoded text too long: {len(message_text)} vs expected {length}, skipping",
+                        flush=True,
+                    )
+                    return
+            except (ConnectionError, OSError) as exc:
+                print(f"DEBUG: Failed to receive message bytes: {exc}", flush=True)
+                return
+
+            import hashlib
+
+            calculated_sha = hashlib.sha256(message_bytes).hexdigest()
+            if sha and calculated_sha != sha:
+                print(
+                    f"DEBUG: SHA mismatch! Expected: {sha}, Got: {calculated_sha}",
+                    flush=True,
                 )
 
-        except Exception as e:
-            print(f"DEBUG: Error handling text event: {e}", flush=True)
+            message_text = (
+                message_text.replace("\n", " ").replace("\r", " ").replace("\t", " ")
+            )
+            message_text = " ".join(message_text.split())
+
+            if not instance_id and room_name:
+                instance_id = self.session.make_legacy_instance_id(room_name)
+
+            if room_name and instance_id:
+                self.session.update_subscription_state(
+                    room_name, instance_id=instance_id
+                )
+
+            alias = legacy_user or display_token
+            if display_token:
+                info = self.session.ensure_participant(room_name, display_token)
+                alias = info.alias
+            elif not alias:
+                alias = self.session.user
+
+            print(
+                (
+                    "DEBUG: Text event - Room: %s, Alias: %s, Instance: %s, Length: %s, Message: '%s'"
+                    % (room_name, alias, instance_id, length, message_text)
+                ),
+                flush=True,
+            )
+
+            payload = {
+                "type": "room_message",
+                "room_name": room_name,
+                "user": alias,
+                "display_token": display_token,
+                "instance_id": instance_id,
+                "message": message_text,
+                "event_id": event_id,
+                "timestamp": timestamp,
+            }
+
+            if self.on_message_received:
+                try:
+                    self.page.pubsub.send_all(payload)
+                    print(
+                        f"DEBUG: Sent message via pubsub: {room_name}, {alias}, event_id: {event_id}",
+                        flush=True,
+                    )
+                except Exception as exc:
+                    print(f"DEBUG: Error sending message via pubsub: {exc}", flush=True)
+                    try:
+                        callback = self.on_message_received
+                        callback(
+                            room_name,
+                            alias,
+                            message_text,
+                            event_id,
+                            timestamp,
+                        )
+                    except Exception as fallback_exc:
+                        print(
+                            f"DEBUG: Error in fallback callback: {fallback_exc}",
+                            flush=True,
+                        )
+
+        except Exception as exc:
+            print(f"DEBUG: Error handling text event: {exc}", flush=True)
 
     def _receive_bytes(self, length: int) -> bytes:
         """接收指定长度的字节数据"""
-        data = b""
-        remaining = length
-
-        sock = self.session.event_sock
-        if sock is None:
-            raise ConnectionError("Event socket unavailable")
-
-        while remaining > 0:
-            chunk = sock.recv(min(remaining, 4096))
-            if not chunk:
-                raise ConnectionError("Connection closed while receiving message bytes")
-            data += chunk
-            remaining -= len(chunk)
-
-        return data
+        if length <= 0:
+            return b""
+        with self.session.event_sock_lock:
+            stream = self.session.event_stream
+            if not stream.socket:
+                raise ConnectionError("Event stream unavailable")
+            return stream.readexact(length)
 
     def _handle_user_join_event(self, parts: list):
         """处理用户加入事件"""
         try:
-            # EVT|USER_JOIN|room|timestamp|user
-            if len(parts) >= 5:
+            alias = ""
+            room_name = ""
+            instance_id = ""
+            display_token = ""
+
+            if len(parts) >= 6:
                 room_name = parts[2]
-                user = parts[4]
-
-                print(
-                    f"DEBUG: User joined - Room: {room_name}, User: {user}", flush=True
-                )
-
-                # 使用pubsub发送用户加入事件到主线程
-                if self.on_user_joined:
-                    try:
-                        self.page.pubsub.send_all({
-                            "type": "user_join",
-                            "room_name": room_name,
-                            "user": user
-                        })
-                        print(
-                            f"DEBUG: Sent user join via pubsub: {room_name}, {user}",
-                            flush=True,
-                        )
-                    except Exception as e:
-                        print(f"DEBUG: Error sending user join via pubsub: {e}", flush=True)
-                        # 备用方案
-                        try:
-                            callback = self.on_user_joined
-                            callback(room_name, user)
-                        except Exception as e2:
-                            print(f"DEBUG: Error in fallback user join callback: {e2}", flush=True)
+                instance_id = parts[3]
+                _timestamp = parts[4]
+                display_token = parts[5]
+            elif len(parts) >= 5:
+                room_name = parts[2]
+                _timestamp = parts[3]
+                alias = parts[4]
             else:
                 print(
                     f"DEBUG: Invalid USER_JOIN event format: {'|'.join(parts)}",
+                    flush=True,
+                )
+                return
+
+            if not instance_id and room_name:
+                instance_id = self.session.make_legacy_instance_id(room_name)
+
+            if room_name and instance_id:
+                self.session.update_subscription_state(
+                    room_name, instance_id=instance_id
+                )
+
+            if display_token:
+                info = self.session.ensure_participant(room_name, display_token)
+                alias = info.alias
+            elif alias:
+                self.session.add_user_to_room(room_name, alias)
+
+            print(
+                f"DEBUG: User joined - Room: {room_name}, Alias: {alias}, Instance: {instance_id}",
+                flush=True,
+            )
+
+            if self.on_user_joined and alias:
+                payload = {
+                    "type": "user_join",
+                    "room_name": room_name,
+                    "user": alias,
+                    "display_token": display_token,
+                    "instance_id": instance_id,
+                }
+                try:
+                    self.page.pubsub.send_all(payload)
+                    print(
+                        f"DEBUG: Sent user join via pubsub: {room_name}, {alias}",
+                        flush=True,
+                    )
+                except Exception as exc:
+                    print(
+                        f"DEBUG: Error sending user join via pubsub: {exc}",
+                        flush=True,
+                    )
+                    try:
+                        callback = self.on_user_joined
+                        callback(room_name, alias)
+                    except Exception as fallback_exc:
+                        print(
+                            f"DEBUG: Error in fallback user join callback: {fallback_exc}",
+                            flush=True,
+                        )
+            else:
+                print(
+                    f"DEBUG: USER_JOIN event missing alias after parsing: {'|'.join(parts)}",
                     flush=True,
                 )
 
@@ -459,38 +571,68 @@ class EventListener:
     def _handle_user_leave_event(self, parts: list):
         """处理用户离开事件"""
         try:
-            # EVT|USER_LEAVE|room|timestamp|user
-            if len(parts) >= 5:
+            alias = ""
+            room_name = ""
+            instance_id = ""
+            display_token = ""
+
+            if len(parts) >= 6:
                 room_name = parts[2]
-                user = parts[4]
-
-                print(f"DEBUG: User left - Room: {room_name}, User: {user}", flush=True)
-
-                # 使用pubsub发送用户离开事件到主线程
-                if self.on_user_left:
-                    try:
-                        self.page.pubsub.send_all({
-                            "type": "user_leave",
-                            "room_name": room_name,
-                            "user": user
-                        })
-                        print(
-                            f"DEBUG: Sent user leave via pubsub: {room_name}, {user}",
-                            flush=True,
-                        )
-                    except Exception as e:
-                        print(f"DEBUG: Error sending user leave via pubsub: {e}", flush=True)
-                        # 备用方案
-                        try:
-                            callback = self.on_user_left
-                            callback(room_name, user)
-                        except Exception as e2:
-                            print(f"DEBUG: Error in fallback user leave callback: {e2}", flush=True)
+                instance_id = parts[3]
+                _timestamp = parts[4]
+                display_token = parts[5]
+            elif len(parts) >= 5:
+                room_name = parts[2]
+                _timestamp = parts[3]
+                alias = parts[4]
             else:
                 print(
                     f"DEBUG: Invalid USER_LEAVE event format: {'|'.join(parts)}",
                     flush=True,
                 )
+                return
+
+            if room_name and instance_id:
+                self.session.update_subscription_state(
+                    room_name, instance_id=instance_id
+                )
+
+            if display_token:
+                info = self.session.ensure_participant(room_name, display_token)
+                alias = info.alias
+
+            print(
+                f"DEBUG: User left - Room: {room_name}, Alias: {alias}, Instance: {instance_id}",
+                flush=True,
+            )
+
+            if self.on_user_left and alias:
+                payload = {
+                    "type": "user_leave",
+                    "room_name": room_name,
+                    "user": alias,
+                    "display_token": display_token,
+                    "instance_id": instance_id,
+                }
+                try:
+                    self.page.pubsub.send_all(payload)
+                    print(
+                        f"DEBUG: Sent user leave via pubsub: {room_name}, {alias}",
+                        flush=True,
+                    )
+                except Exception as exc:
+                    print(
+                        f"DEBUG: Error sending user leave via pubsub: {exc}",
+                        flush=True,
+                    )
+                    try:
+                        callback = self.on_user_left
+                        callback(room_name, alias)
+                    except Exception as fallback_exc:
+                        print(
+                            f"DEBUG: Error in fallback user leave callback: {fallback_exc}",
+                            flush=True,
+                        )
 
         except Exception as e:
             print(f"DEBUG: Error handling user leave event: {e}", flush=True)
@@ -523,3 +665,348 @@ class EventListener:
 
         except Exception as e:
             print(f"DEBUG: Error handling file event: {e}", flush=True)
+
+    def _handle_ignite_request_event(self, parts: list):
+        try:
+            if len(parts) < 7:
+                print(
+                    f"DEBUG: Invalid IGNITE_REQUEST event format: {'|'.join(parts)}",
+                    flush=True,
+                )
+                return
+
+            room_name = parts[2]
+            instance_id = parts[3]
+            timestamp = parts[4]
+            display_token = parts[5]
+            request_id = parts[6]
+
+            alias = display_token
+            if display_token:
+                info = self.session.ensure_participant(room_name, display_token)
+                alias = info.alias
+
+            if room_name and not instance_id:
+                instance_id = self.session.make_legacy_instance_id(room_name)
+
+            if room_name and instance_id:
+                self.session.update_subscription_state(
+                    room_name, instance_id=instance_id
+                )
+
+            self.session.register_ignite_request(
+                room_name,
+                request_id,
+                alias,
+                display_token,
+                instance_id,
+                timestamp,
+                direction="incoming",
+            )
+
+            payload = {
+                "type": "ignite_request",
+                "room_name": room_name,
+                "instance_id": instance_id,
+                "timestamp": timestamp,
+                "display_token": display_token,
+                "alias": alias,
+                "request_id": request_id,
+            }
+
+            print(
+                f"DEBUG: Ignite request received - Room: {room_name}, Alias: {alias}, Request ID: {request_id}",
+                flush=True,
+            )
+
+            try:
+                self.page.pubsub.send_all(payload)
+            except Exception as exc:
+                print(
+                    f"DEBUG: Error sending ignite request via pubsub: {exc}",
+                    flush=True,
+                )
+                if self.on_ignite_request:
+                    try:
+                        self.on_ignite_request(payload)
+                    except Exception as fallback_exc:
+                        print(
+                            f"DEBUG: Error in ignite request fallback: {fallback_exc}",
+                            flush=True,
+                        )
+
+        except Exception as exc:
+            print(f"DEBUG: Error handling ignite request event: {exc}", flush=True)
+
+    def _handle_ignite_established_event(self, parts: list):
+        try:
+            if len(parts) < 6:
+                print(
+                    f"DEBUG: Invalid IGNITE_ESTABLISHED event format: {'|'.join(parts)}",
+                    flush=True,
+                )
+                return
+
+            room_name = parts[2]
+            instance_id = parts[3]
+            timestamp = parts[4]
+            display_token = parts[5]
+
+            alias = display_token
+            if display_token:
+                info = self.session.ensure_participant(room_name, display_token)
+                alias = info.alias
+
+            if room_name and not instance_id:
+                instance_id = self.session.make_legacy_instance_id(room_name)
+
+            if room_name and instance_id:
+                self.session.update_subscription_state(
+                    room_name, instance_id=instance_id
+                )
+
+            self.session.clear_ignite_requests_for_alias(room_name, alias)
+
+            payload = {
+                "type": "ignite_established",
+                "room_name": room_name,
+                "instance_id": instance_id,
+                "timestamp": timestamp,
+                "display_token": display_token,
+                "alias": alias,
+            }
+
+            print(
+                f"DEBUG: Ignite established - Room: {room_name}, Alias: {alias}",
+                flush=True,
+            )
+
+            try:
+                self.page.pubsub.send_all(payload)
+            except Exception as exc:
+                print(
+                    f"DEBUG: Error sending ignite established via pubsub: {exc}",
+                    flush=True,
+                )
+                if self.on_ignite_established:
+                    try:
+                        self.on_ignite_established(payload)
+                    except Exception as fallback_exc:
+                        print(
+                            f"DEBUG: Error in ignite established fallback: {fallback_exc}",
+                            flush=True,
+                        )
+
+        except Exception as exc:
+            print(f"DEBUG: Error handling ignite established event: {exc}", flush=True)
+
+    def _handle_befriend_request_event(self, parts: list):
+        try:
+            if len(parts) < 6:
+                print(
+                    f"DEBUG: Invalid BEFRIEND_REQUEST event format: {'|'.join(parts)}",
+                    flush=True,
+                )
+                return
+
+            room_name = parts[2]
+            instance_id = parts[3]
+            timestamp = parts[4]
+            display_token = parts[5]
+            request_id = parts[6] if len(parts) > 6 else ""
+
+            alias = display_token
+            if display_token:
+                info = self.session.ensure_participant(room_name, display_token)
+                alias = info.alias
+
+            if room_name and not instance_id:
+                instance_id = self.session.make_legacy_instance_id(room_name)
+
+            if room_name and instance_id:
+                self.session.update_subscription_state(
+                    room_name, instance_id=instance_id
+                )
+
+            self.session.register_friend_request(
+                room_name,
+                request_id,
+                alias,
+                display_token,
+                instance_id,
+                timestamp,
+                direction="incoming",
+            )
+
+            payload = {
+                "type": "befriend_request",
+                "room_name": room_name,
+                "instance_id": instance_id,
+                "timestamp": timestamp,
+                "display_token": display_token,
+                "alias": alias,
+                "request_id": request_id,
+            }
+
+            print(
+                f"DEBUG: Befriend request received - Room: {room_name}, Alias: {alias}, Request ID: {request_id}",
+                flush=True,
+            )
+
+            try:
+                self.page.pubsub.send_all(payload)
+            except Exception as exc:
+                print(
+                    f"DEBUG: Error sending befriend request via pubsub: {exc}",
+                    flush=True,
+                )
+                if self.on_befriend_request:
+                    try:
+                        self.on_befriend_request(payload)
+                    except Exception as fallback_exc:
+                        print(
+                            f"DEBUG: Error in befriend request fallback: {fallback_exc}",
+                            flush=True,
+                        )
+
+        except Exception as exc:
+            print(f"DEBUG: Error handling befriend request event: {exc}", flush=True)
+
+    def _handle_befriend_established_event(self, parts: list):
+        try:
+            if len(parts) < 6:
+                print(
+                    f"DEBUG: Invalid BEFRIEND_ESTABLISHED event format: {'|'.join(parts)}",
+                    flush=True,
+                )
+                return
+
+            room_name = parts[2]
+            instance_id = parts[3]
+            timestamp = parts[4]
+            generated_name = parts[5]
+            note_override = parts[6] if len(parts) > 6 else ""
+            display_token = parts[7] if len(parts) > 7 else ""
+
+            alias = generated_name
+            if display_token:
+                info = self.session.ensure_participant(room_name, display_token)
+                alias = info.alias
+
+            if room_name and not instance_id:
+                instance_id = self.session.make_legacy_instance_id(room_name)
+
+            if room_name and instance_id:
+                self.session.update_subscription_state(
+                    room_name, instance_id=instance_id
+                )
+
+            self.session.register_friendship(
+                room_name,
+                alias,
+                display_token or None,
+                note_override=note_override or None,
+            )
+
+            payload = {
+                "type": "befriend_established",
+                "room_name": room_name,
+                "instance_id": instance_id,
+                "timestamp": timestamp,
+                "display_token": display_token,
+                "alias": alias,
+                "generated_name": generated_name,
+                "note_override": note_override,
+            }
+
+            print(
+                f"DEBUG: Befriend established - Room: {room_name}, Alias: {alias}",
+                flush=True,
+            )
+
+            try:
+                self.page.pubsub.send_all(payload)
+            except Exception as exc:
+                print(
+                    f"DEBUG: Error sending befriend established via pubsub: {exc}",
+                    flush=True,
+                )
+                if self.on_befriend_established:
+                    try:
+                        self.on_befriend_established(payload)
+                    except Exception as fallback_exc:
+                        print(
+                            f"DEBUG: Error in befriend established fallback: {fallback_exc}",
+                            flush=True,
+                        )
+
+        except Exception as exc:
+            print(
+                f"DEBUG: Error handling befriend established event: {exc}", flush=True
+            )
+
+    def _handle_note_updated_event(self, parts: list):
+        try:
+            if len(parts) < 6:
+                print(
+                    f"DEBUG: Invalid NOTE_UPDATED event format: {'|'.join(parts)}",
+                    flush=True,
+                )
+                return
+
+            room_name = parts[2]
+            instance_id = parts[3]
+            timestamp = parts[4]
+            generated_name = parts[5]
+            note_override = parts[6] if len(parts) > 6 else ""
+            display_token = parts[7] if len(parts) > 7 else ""
+
+            alias = generated_name
+            if display_token:
+                info = self.session.ensure_participant(room_name, display_token)
+                alias = info.alias
+
+            if room_name and not instance_id:
+                instance_id = self.session.make_legacy_instance_id(room_name)
+
+            if room_name and instance_id:
+                self.session.update_subscription_state(
+                    room_name, instance_id=instance_id
+                )
+
+            self.session.set_friend_note(alias, note_override or None)
+
+            payload = {
+                "type": "note_updated",
+                "room_name": room_name,
+                "instance_id": instance_id,
+                "timestamp": timestamp,
+                "display_token": display_token,
+                "alias": alias,
+                "generated_name": generated_name,
+                "note_override": note_override,
+            }
+
+            print(
+                f"DEBUG: Note updated - Alias: {alias}, Note: {note_override}",
+                flush=True,
+            )
+
+            try:
+                self.page.pubsub.send_all(payload)
+            except Exception as exc:
+                print(
+                    f"DEBUG: Error sending note updated via pubsub: {exc}",
+                    flush=True,
+                )
+                if self.on_note_updated:
+                    try:
+                        self.on_note_updated(payload)
+                    except Exception as fallback_exc:
+                        print(
+                            f"DEBUG: Error in note updated fallback: {fallback_exc}",
+                            flush=True,
+                        )
+
+        except Exception as exc:
+            print(f"DEBUG: Error handling note updated event: {exc}", flush=True)

@@ -4,6 +4,7 @@ import os
 import shutil
 import signal
 import subprocess
+import sys
 import time
 from pathlib import Path
 import typer
@@ -152,6 +153,26 @@ def server_up(
         raise typer.Exit(code=2)
     cfg = load_config(config)
     cfg.port, cfg.data_dir, cfg.strict, cfg.max_conn = port, data_dir, strict, max_conn
+
+    try:
+        cfg.data_dir.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+
+    migration_script = ROOT / "scripts" / "m5_phase1_migration.py"
+    db_path = cfg.data_dir / "drlms.db"
+    if migration_script.exists() and db_path.exists():
+        result = subprocess.run(
+            [sys.executable, str(migration_script), "--db", str(db_path)],
+            check=False,
+        )
+        if result.returncode != 0:
+            print(
+                f"[red]database migration failed (code={result.returncode})."
+                " Aborting server start.[/red]"
+            )
+            raise typer.Exit(code=result.returncode)
+
     env = env_with(
         DRLMS_PORT=cfg.port,
         DRLMS_DATA_DIR=str(cfg.data_dir),
@@ -160,6 +181,11 @@ def server_up(
         DRLMS_RATE_UP_BPS=cfg.rate_up_bps,
         DRLMS_RATE_DOWN_BPS=cfg.rate_down_bps,
         DRLMS_MAX_UPLOAD=cfg.max_upload,
+        DRLMS_DEFAULT_INSTANCE_CAPACITY=cfg.rooms_default_instance_capacity,
+        DRLMS_MAX_INSTANCES_PER_ROOM=cfg.rooms_max_instances,
+        DRLMS_INSTANCE_IDLE_TTL=cfg.rooms_instance_idle_ttl,
+        DRLMS_INSTANCE_GC_INTERVAL=cfg.rooms_instance_gc_interval,
+        DRLMS_EPHEMERAL_HISTORY_LIMIT=cfg.rooms_ephemeral_history_limit,
         LD_LIBRARY_PATH=str(server_bin.parent),
     )
     if os.name == "nt":
@@ -168,7 +194,6 @@ def server_up(
             if env.get("PATH")
             else str(server_bin.parent)
         )
-    cfg.data_dir.mkdir(exist_ok=True)
     SERVER_LOG.parent.mkdir(parents=True, exist_ok=True)
     with open(SERVER_LOG, "w") as lf:
         p = subprocess.Popen(

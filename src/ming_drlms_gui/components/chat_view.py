@@ -19,6 +19,7 @@ from datetime import datetime
 from ..ui.theme import pixel_text, spacing
 from ..viewmodels.rooms_view_model import RoomsViewModel
 from . import chat_panel
+from ..utils.time_format import parse_iso_timestamp, format_chat_timestamp
 
 
 class ChatView:
@@ -38,9 +39,9 @@ class ChatView:
 
         # 消息列表（当前房间）
         self.messages: List[Dict] = []
+        self._last_room_id: Optional[str] = None
 
-        # 房间消息缓存（用于房间切换时保持历史）
-        self.room_message_cache: Dict[str, List[Dict]] = {}
+        self.ephemeral_rooms: set[str] = set()
 
         # UI控件
         self.message_list_control = None
@@ -48,6 +49,7 @@ class ChatView:
         self.send_button = None
         self.test_button = None
         self.chat_container = None
+        self.loading_banner = None
 
         # 创建UI组件
         self._create_components()
@@ -66,6 +68,12 @@ class ChatView:
 
         # 订阅房间切换事件
         self.view_model.add_current_room_listener(self._on_room_changed)
+        self.view_model.add_ignite_request_listener(self._on_ignite_request)
+        self.view_model.add_ignite_established_listener(self._on_ignite_established)
+        self.view_model.add_befriend_request_listener(self._on_befriend_request)
+        self.view_model.add_befriend_established_listener(self._on_befriend_established)
+        self.view_model.add_note_updated_listener(self._on_note_updated)
+        self.view_model.add_room_ready_listener(self._on_room_ready)
 
     def _create_components(self):
         """创建聊天UI组件"""
@@ -92,13 +100,31 @@ class ChatView:
             on_click=self._on_send_message,
         )
 
+        self.loading_banner = ft.Container(
+            visible=False,
+            content=pixel_text(
+                self.i18n.get("chat.loading_indicator", "⌛ 正在同步房间..."),
+                10,
+                "muted",
+            ),
+            padding=ft.padding.symmetric(vertical=spacing(0.5)),
+            alignment=ft.alignment.center,
+        )
+
         # 聊天容器
         self.chat_container = ft.Container(
             content=ft.Column(
                 [
                     # 消息显示区域
                     ft.Container(
-                        content=self.message_list_control,
+                        content=ft.Column(
+                            [
+                                self.loading_banner,
+                                self.message_list_control,
+                            ],
+                            spacing=spacing(0.5),
+                            expand=True,
+                        ),
                         expand=True,
                         bgcolor="#f8f9fa",
                         border_radius=8,
@@ -128,14 +154,32 @@ class ChatView:
 
         print(f"DEBUG: ChatView - Room changed to {room_id}", flush=True)
 
-        # 保存当前房间的消息到缓存
-        if self.view_model.current_room_id:
-            old_room_id = self.view_model.current_room_id
-            if old_room_id != room_id:  # 确实切换了房间
-                self._sync_room_cache(old_room_id)
+        if room_id == RoomsViewModel.HOME_ROOM_ID:
+            self.messages = []
+            self._add_system_message(
+                self.i18n.get("chat.loading_room", "🚧 正在加载房间，请稍候...")
+            )
+            self._last_room_id = room_id
+            return
+
+        previous_room = self._last_room_id
+        if previous_room and previous_room != room_id:
+            self._sync_room_cache(previous_room)
+        self._last_room_id = room_id
+
+        session = self.view_model.session
+        is_ephemeral = session.is_room_ephemeral(room_id)
+        if is_ephemeral:
+            self.ephemeral_rooms.add(room_id)
+        else:
+            self.ephemeral_rooms.discard(room_id)
 
         # 加载新房间的消息
-        cached_messages = self.room_message_cache.get(room_id)
+        cached_messages: List[Dict]
+        if is_ephemeral:
+            cached_messages = []
+        else:
+            cached_messages = session.get_cached_room_messages(room_id)
         if cached_messages:
             self.messages = [msg.copy() for msg in cached_messages]
             print(
@@ -150,12 +194,19 @@ class ChatView:
             )
             # 首次进入房间，添加欢迎消息
             self._add_system_message(f"已进入房间: {room_name or room_id}")
+            if is_ephemeral:
+                self._add_system_message(
+                    self.i18n.get(
+                        "chat.ephemeral_notice",
+                        "⚠️ This room is ephemeral. History and attachments are not retained.",
+                    )
+                )
 
         # 刷新UI
         self._update_message_display()
 
         # 如果是新房间（无缓存），加载历史消息
-        if not cached_messages:
+        if not cached_messages and not is_ephemeral:
             self._load_history()
 
     def _load_history(self, limit: int = 50) -> int:
@@ -165,6 +216,9 @@ class ChatView:
             return 0
 
         session = self.view_model.session
+        if session.is_room_ephemeral(current_room_id):
+            print("DEBUG: Skipping history load for ephemeral room", flush=True)
+            return 0
         if not session.sock or not session.authed:
             return 0
 
@@ -186,23 +240,30 @@ class ChatView:
             if event_id is not None and session.is_message_displayed(event_id):
                 continue
 
-            user = record.get("user", "")
+            display_token = record.get("display_token")
+            alias = record.get("user", "")
             text = record.get("message", "")
-            timestamp = self._parse_timestamp(record.get("timestamp"))
+            timestamp = parse_iso_timestamp(record.get("timestamp"))
+
+            if display_token:
+                info = session.ensure_participant(current_room_id, display_token)
+                alias = info.alias
+            elif alias:
+                session.add_user_to_room(current_room_id, alias)
 
             entry = {
                 "type": "user",
                 "text": text,
-                "user": user,
+                "user": alias,
+                "display_token": display_token,
                 "timestamp": timestamp,
-                "is_self": user == session.user,
+                "is_self": session.is_self_alias(current_room_id, alias),
                 "event_id": event_id,
                 "room": current_room_id,
-                "flash": False,  # 历史消息不闪烁
+                "flash": False,
             }
 
             self.messages.append(entry)
-            session.add_user_to_room(current_room_id, user)
             if event_id is not None:
                 session.mark_message_displayed(event_id)
                 session.update_room_last_event_id(current_room_id, event_id)
@@ -215,24 +276,15 @@ class ChatView:
 
         return appended
 
-    def _parse_timestamp(self, value: Optional[str]) -> datetime:
-        """解析时间戳"""
-        if not value:
-            return datetime.now()
-        cleaned = value
-        if value.endswith("Z"):
-            cleaned = value[:-1] + "+00:00"
-        try:
-            return datetime.fromisoformat(cleaned)
-        except ValueError:
-            return datetime.now()
-
     def _sync_room_cache(self, room_id: Optional[str] = None) -> None:
         """同步房间消息缓存"""
         target_room = room_id or self.view_model.current_room_id
         if not target_room:
             return
-        self.room_message_cache[target_room] = [msg.copy() for msg in self.messages]
+        if target_room in self.ephemeral_rooms:
+            self.view_model.session.clear_room_message_cache(target_room)
+            return
+        self.view_model.session.set_room_message_cache(target_room, self.messages)
 
     def _add_system_message(self, text: str):
         """添加系统消息"""
@@ -253,6 +305,8 @@ class ChatView:
         event_id: Optional[int] = None,
         room: Optional[str] = None,
         flash: bool = False,
+        display_token: Optional[str] = None,
+        timestamp: Optional[datetime] = None,
     ) -> None:
         """添加用户消息"""
         # 检查是否已显示过这条消息（去重）
@@ -268,11 +322,12 @@ class ChatView:
             "type": "user",
             "text": text,
             "user": user,
-            "timestamp": datetime.now(),
+            "timestamp": timestamp or datetime.now(),
             "is_self": is_self,
             "event_id": event_id,
             "room": room or self.view_model.current_room_id,
             "flash": flash,
+            "display_token": display_token,
         }
         self.messages.append(message)
 
@@ -309,7 +364,8 @@ class ChatView:
                 )
             else:
                 # 用户消息
-                time_str = msg["timestamp"].strftime("%H:%M")
+                timestamp_value = msg.get("timestamp")
+                time_str = format_chat_timestamp(timestamp_value)
                 if msg.get("is_self", False):
                     # 自己的消息（右对齐）- 蓝色气泡
                     bubble = ft.Container(
@@ -373,6 +429,7 @@ class ChatView:
         user: str,
         message: str,
         event_id: Optional[int] = None,
+        timestamp: Optional[str] = None,
     ) -> None:
         """处理接收到的消息（从ViewModel）"""
         print(
@@ -380,9 +437,17 @@ class ChatView:
             flush=True,
         )
 
+        session = self.view_model.session
+        display_token = session.get_display_token_for_alias(room_name, user)
+        timestamp_dt = (
+            parse_iso_timestamp(timestamp)
+            if isinstance(timestamp, str)
+            else (timestamp if isinstance(timestamp, datetime) else datetime.now())
+        )
+
         # 只处理当前房间的消息
         if room_name == self.view_model.current_room_id:
-            is_self = user == self.view_model.session.user
+            is_self = session.is_self_alias(room_name, user)
             self._add_user_message(
                 message,
                 user,
@@ -390,22 +455,28 @@ class ChatView:
                 event_id,
                 room_name,
                 flash=True,  # 实时消息闪烁
+                display_token=display_token,
+                timestamp=timestamp_dt,
             )
         else:
             # 其他房间的消息，缓存但不显示
-            cache = self.room_message_cache.setdefault(room_name, [])
-            cache.append(
-                {
-                    "type": "user",
-                    "text": message,
-                    "user": user,
-                    "timestamp": datetime.now(),
-                    "is_self": user == self.view_model.session.user,
-                    "event_id": event_id,
-                    "room": room_name,
-                    "flash": True,
-                }
-            )
+            cache_entry = {
+                "type": "user",
+                "text": message,
+                "user": user,
+                "timestamp": timestamp_dt,
+                "is_self": session.is_self_alias(room_name, user),
+                "event_id": event_id,
+                "room": room_name,
+                "flash": True,
+                "display_token": display_token,
+            }
+            if not session.is_room_ephemeral(room_name):
+                session.append_room_message_cache(
+                    room_name,
+                    cache_entry,
+                    limit=300,
+                )
 
     def _on_user_joined(self, room_name: str, user: str):
         """处理用户加入（从ViewModel）"""
@@ -416,6 +487,89 @@ class ChatView:
         """处理用户离开（从ViewModel）"""
         if room_name == self.view_model.current_room_id:
             self._add_system_message(f"🔴 {user} 离开了房间")
+
+    def _on_ignite_request(self, payload: dict):
+        room = payload.get("room_name")
+        if room != self.view_model.current_room_id:
+            return
+        alias = payload.get("alias")
+        if not alias:
+            return
+        self._add_system_message(
+            self.i18n.get("chat.ignite_request", "🔥 {alias} wants to ignite!").format(
+                alias=alias
+            )
+        )
+
+    def _on_ignite_established(self, payload: dict):
+        room = payload.get("room_name")
+        if room != self.view_model.current_room_id:
+            return
+        alias = payload.get("alias")
+        if not alias:
+            return
+        self._add_system_message(
+            self.i18n.get(
+                "chat.ignite_established", "🔥 You ignited with {alias}!"
+            ).format(alias=alias)
+        )
+
+    def _on_befriend_request(self, payload: dict):
+        room = payload.get("room_name")
+        if room != self.view_model.current_room_id:
+            return
+        alias = payload.get("alias")
+        if not alias:
+            return
+        self._add_system_message(
+            self.i18n.get(
+                "chat.friend_request",
+                "🌟 {alias} wants to become your friend.",
+            ).format(alias=alias)
+        )
+
+    def _on_befriend_established(self, payload: dict):
+        room = payload.get("room_name")
+        if room != self.view_model.current_room_id:
+            return
+        alias = payload.get("alias")
+        if not alias:
+            return
+        self._add_system_message(
+            self.i18n.get(
+                "chat.friend_established",
+                "🌟 You are now friends with {alias}!",
+            ).format(alias=alias)
+        )
+
+    def _on_note_updated(self, payload: dict):
+        room = payload.get("room_name")
+        if room != self.view_model.current_room_id:
+            return
+        alias = payload.get("alias")
+        note = payload.get("note_override")
+        if not alias:
+            return
+        if note:
+            message = self.i18n.get(
+                "chat.friend_note_updated",
+                "📝 {alias} updated their note: {note}",
+            ).format(alias=alias, note=note)
+        else:
+            message = self.i18n.get(
+                "chat.friend_note_cleared",
+                "📝 {alias} cleared their note.",
+            ).format(alias=alias)
+        self._add_system_message(message)
+
+    def _on_room_ready(self, room_id: str, ready: bool) -> None:
+        if room_id != self.view_model.current_room_id:
+            return
+        if not self.loading_banner:
+            return
+        self.loading_banner.visible = not ready
+        if self.page:
+            self.page.update()
 
     def _on_send_message(self, e=None):
         """发送消息"""
@@ -432,17 +586,13 @@ class ChatView:
         # 发送到服务器
         try:
             if session.sock and session.authed:
-                from ming_drlms.core.room_protocol import send_message
-
                 print(
-                    f"DEBUG: Sending message to room {current_room_id}: {message_text}",
+                    f"DEBUG: MP2 GUI send not wired; dropping message for room {current_room_id}: {message_text}",
                     flush=True,
                 )
-                success = send_message(session.sock, current_room_id, message_text)
-                print(f"DEBUG: Message send result: {success}", flush=True)
-
+                success = False
                 if not success:
-                    self._add_system_message("❌ 消息发送失败")
+                    self._add_system_message("❌ 消息发送暂未在GUI中适配MP2")
             else:
                 self._add_system_message("❌ 未连接到服务器")
         except Exception as ex:

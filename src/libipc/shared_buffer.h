@@ -7,11 +7,11 @@
 #include <stddef.h>
 
 #define BUFFER_SIZE 16384
-#define MAX_MSG_SIZE 1024
+#define MAX_MSG_SIZE 4096
 #define NUM_SLOTS (BUFFER_SIZE / MAX_MSG_SIZE)
 
 #define SHARED_BUFFER_MAGIC 0x44524c4du /* 'DRLM' */
-#define SHARED_BUFFER_VERSION 1u
+#define SHARED_BUFFER_VERSION 2u
 
 // 分片头（位于每个槽位起始处）
 typedef struct {

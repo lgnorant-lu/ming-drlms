@@ -5,13 +5,21 @@
 """
 
 import os
+import pytest
+
+# Skip legacy text-protocol dependent flows in MP2-only mode
+if os.getenv("DRLMS_ENABLE_MPROTO_V2") == "1":
+    pytest.skip(
+        "Skipped in MP2-only mode: legacy text protocol dependent test",
+        allow_module_level=True,
+    )
+
 import sys
 import hashlib
 import tempfile
 import socket
 from pathlib import Path
 
-import pytest
 
 # 添加项目根目录到Python路径
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))

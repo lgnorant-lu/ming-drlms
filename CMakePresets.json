@@ -1,0 +1,48 @@
+{
+  "version": 5,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 26,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "windows-vcpkg",
+      "displayName": "Windows MSVC + vcpkg",
+      "description": "Configure the project with Visual Studio 2022 and the shared vcpkg toolchain.",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build",
+      "toolchainFile": "D:/Coding/vcpkg/scripts/buildsystems/vcpkg.cmake",
+      "cacheVariables": {
+        "VCPKG_TARGET_TRIPLET": "x64-windows",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/dist"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "windows-vcpkg-debug",
+      "displayName": "Build Debug (MSVC + vcpkg)",
+      "configurePreset": "windows-vcpkg",
+      "configuration": "Debug"
+    },
+    {
+      "name": "windows-vcpkg-release",
+      "displayName": "Build Release (MSVC + vcpkg)",
+      "configurePreset": "windows-vcpkg",
+      "configuration": "Release"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "windows-vcpkg-test",
+      "configurePreset": "windows-vcpkg",
+      "configuration": "Release",
+      "description": "Run ctest after building with vcpkg toolchain.",
+      "output": {
+        "shortProgress": true
+      }
+    }
+  ]
+}

@@ -1,4 +1,7 @@
 pytest
 pytest-cov
 ruff
-graphviz
+# graphviz
+protobuf>=4.25, 
+argon2-cffi>=21.3.0, 
+pyyaml>=6.0.1,

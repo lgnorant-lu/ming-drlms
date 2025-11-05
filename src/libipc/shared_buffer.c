@@ -1,11 +1,12 @@
-#include "shared_buffer.h"
-#include "platform/compat.h"
 #include <string.h>
 #include <errno.h>
 #include <stdlib.h>
+#include "shared_buffer.h"
+#include "platform/compat.h"
 
 #if defined(_WIN32)
 #include <windows.h>
+#include <strsafe.h>
 static void platform_thread_yield(void) {
     SwitchToThread();
 }
@@ -159,13 +160,45 @@ int shm_write(const unsigned char *data, size_t len) {
         errno = EINVAL;
         return -1;
     }
+    // Windows-only tracing helpers
+#if defined(_WIN32)
+    char trace_path[MAX_PATH] = {0};
+    int enable_trace = 0;
+    DWORD tlen =
+        GetEnvironmentVariableA("DRLMS_SHM_TRACE", trace_path, MAX_PATH);
+    if (tlen > 0 && tlen < MAX_PATH) {
+        trace_path[tlen] = '\0';
+        enable_trace = 1;
+    }
+    if (!enable_trace) {
+        char pid_buf[32];
+        snprintf(pid_buf, sizeof pid_buf, "drlms_shm_dump_%lu.txt",
+                 (unsigned long)GetCurrentProcessId());
+        if (GetTempPathA(MAX_PATH, trace_path) != 0) {
+            size_t path_len = strlen(trace_path);
+            if (path_len > 0 && trace_path[path_len - 1] != '\\' &&
+                path_len + 1 < MAX_PATH) {
+                trace_path[path_len] = '\\';
+                trace_path[path_len + 1] = '\0';
+                path_len++;
+            }
+            if (path_len + strlen(pid_buf) < MAX_PATH) {
+                (void)StringCchCatA(trace_path, MAX_PATH, pid_buf);
+                enable_trace = 1;
+            }
+        }
+    }
+#endif
     size_t offset = 0;
     uint32_t seq = 0;
+    const size_t max_payload =
+        (MAX_MSG_SIZE > sizeof(MsgHdr)) ? (MAX_MSG_SIZE - sizeof(MsgHdr)) : 0;
+    if (max_payload == 0) {
+        errno = EMSGSIZE;
+        return -1;
+    }
     while (offset < len) {
         size_t payload = (len - offset);
-        size_t max_payload = (MAX_MSG_SIZE > sizeof(MsgHdr))
-                                 ? (MAX_MSG_SIZE - sizeof(MsgHdr))
-                                 : 0;
         if (payload > max_payload)
             payload = max_payload;
         MsgHdr hdr;
@@ -178,6 +211,23 @@ int shm_write(const unsigned char *data, size_t len) {
         // 处理 EINTR 以避免过早终止信号处理
         platform_semaphore_wait(&shared->sem_empty);
         shared_lock();
+#if defined(_WIN32)
+        if (enable_trace && trace_path[0] != '\0') {
+            HANDLE dump =
+                CreateFileA(trace_path, FILE_APPEND_DATA, FILE_SHARE_READ, NULL,
+                            OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+            if (dump != INVALID_HANDLE_VALUE) {
+                DWORD written = 0;
+                char buf[128];
+                int bl = snprintf(
+                    buf, sizeof buf, "write idx=%d len=%u flags=%u seq=%u\r\n",
+                    shared->write_index, hdr.len, hdr.flags, hdr.seq);
+                if (bl > 0)
+                    WriteFile(dump, buf, (DWORD)bl, &written, NULL);
+                CloseHandle(dump);
+            }
+        }
+#endif
         memcpy(shared->buffer[shared->write_index], &hdr, sizeof(MsgHdr));
         memcpy(shared->buffer[shared->write_index] + sizeof(MsgHdr),
                data + offset, payload);
@@ -195,6 +245,10 @@ ssize_t shm_read(unsigned char *out, size_t out_size) {
         errno = EINVAL;
         return -1;
     }
+    if (!out || out_size == 0) {
+        errno = EINVAL;
+        return -1;
+    }
     size_t total = 0;
     MsgHdr hdr;
     for (;;) {
@@ -204,10 +258,8 @@ ssize_t shm_read(unsigned char *out, size_t out_size) {
         size_t payload = hdr.len;
         const unsigned char *src =
             shared->buffer[shared->read_index] + sizeof(MsgHdr);
-        size_t copy =
-            (total < out_size)
-                ? ((out_size - total) < payload ? (out_size - total) : payload)
-                : 0;
+        size_t space = (total < out_size) ? (out_size - total) : 0;
+        size_t copy = (payload < space) ? payload : space;
         if (copy > 0)
             memcpy(out + total, src, copy);
         total += payload;

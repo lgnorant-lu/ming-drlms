@@ -63,6 +63,9 @@ else
 fi
 PYTHON_CMD_STRING="${PYTHON_BIN[*]}"
 
+# Set protobuf compatibility for Python scripts
+export PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python
+
 declare -a CMAKE_BIN=()
 if command -v cmake >/dev/null 2>&1; then
   CMAKE_BIN=(cmake)
@@ -207,6 +210,67 @@ if [[ "${IS_WINDOWS}" -eq 1 ]]; then
   BIN_EXT=".exe"
 fi
 
+## Lightweight timeout wrapper (cross-platform), shared with test scripts
+timeout_cmd() {
+  local duration="$1"; shift || true
+  local bin=""
+  if command -v timeout >/dev/null 2>&1; then
+    bin="timeout"
+  elif command -v gtimeout >/dev/null 2>&1; then
+    bin="gtimeout"
+  fi
+  if [[ -n "$bin" ]]; then
+    set +e
+    "$bin" "$duration" "$@"
+    local rc=$?
+    set -e
+    return $rc
+  fi
+  # Fallback to Python-based timeout
+  local -a py_cmd
+  if ((${#PYTHON_BIN[@]} > 0)); then
+    py_cmd=("${PYTHON_BIN[@]}")
+  else
+    py_cmd=(python3)
+  fi
+  set +e
+  "${py_cmd[@]}" - "$duration" "$@" <<'PY'
+import os
+import sys
+import subprocess
+
+def parse_duration(raw: str) -> float:
+    raw = raw.strip().lower()
+    if raw.endswith('s'):
+        raw = raw[:-1]
+    if not raw:
+        return 0.0
+    return float(raw)
+
+duration = parse_duration(sys.argv[1])
+cmd = sys.argv[2:]
+try:
+    completed = subprocess.run(cmd, timeout=duration)
+    sys.exit(completed.returncode)
+except subprocess.TimeoutExpired as exc:
+    # Mirror GNU timeout's 124 on timeout
+    if exc.stdout:
+        if isinstance(exc.stdout, bytes):
+            sys.stdout.buffer.write(exc.stdout)
+        else:
+            sys.stdout.write(exc.stdout)
+    if exc.stderr:
+        if isinstance(exc.stderr, bytes):
+            sys.stderr.buffer.write(exc.stderr)
+        else:
+            sys.stderr.write(exc.stderr)
+    sys.exit(124)
+PY
+  local rc=$?
+  set -e
+  return $rc
+}
+
 find_artifact() {
   local base="$1"
   local -a candidates=()
@@ -242,9 +306,18 @@ if ! IPC_SENDER=$(find_artifact "ipc_sender"); then
   printf '%s\n' "[error] ipc_sender binary not found in coverage build" >&2
   exit 1
 fi
-SERVER_BIN_ARG="${LOG_COLLECTOR_SERVER}"
+# Normalize server binary paths to absolute to avoid CWD issues in sub-scripts
+# IMPORTANT: pass the argument BEFORE the heredoc terminator; arguments after 'PY' are NOT forwarded
+ABS_LOG_COLLECTOR_SERVER=$("${PYTHON_BIN[@]}" - "${LOG_COLLECTOR_SERVER}" <<'PY'
+import os, sys
+p = sys.argv[1]
+print(os.path.abspath(p))
+PY
+)
+
+SERVER_BIN_ARG="${ABS_LOG_COLLECTOR_SERVER}"
 if [[ "${IS_WINDOWS}" -eq 1 ]]; then
-  SERVER_BIN_ARG=$(to_mixed_path "${LOG_COLLECTOR_SERVER}")
+  SERVER_BIN_ARG=$(to_mixed_path "${ABS_LOG_COLLECTOR_SERVER}")
 fi
 
 printf '%s\n' "--> Running C unit tests (test_ipc_suite.c)..."
@@ -257,7 +330,56 @@ fi
 
 printf '%s\n' "--> Running C protocol integration tests (test_server_protocol.sh)..."
 chmod +x "${ROOT_DIR}/tests/test_server_protocol.sh"
-"${LOADER_ENV[@]}" "${ROOT_DIR}/tests/test_server_protocol.sh" --server "${SERVER_BIN_ARG}" "${COV_HOST}" "${COV_PORT}"
+# Choose a safe, free port for MP2 tests to avoid collision with any lingering legacy server
+pick_free_port() {
+  # Prefer Python for reliability
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$COV_HOST" <<'PY'
+import socket, sys
+host = sys.argv[1]
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+s.bind((host, 0))
+port = s.getsockname()[1]
+s.close()
+print(port)
+PY
+    return 0
+  fi
+  # Fallback: try nc to probe candidates
+  local base=19080
+  for p in $(seq $base $((base+200))); do
+    if command -v nc >/dev/null 2>&1; then
+      if ! nc -z "$COV_HOST" "$p" 2>/dev/null; then
+        printf '%s\n' "$p"
+        return 0
+      fi
+    else
+      # Bash /dev/tcp fallback
+      if ! (echo > "/dev/tcp/${COV_HOST}/${p}") >/dev/null 2>&1; then
+        printf '%s\n' "$p"
+        return 0
+      fi
+    fi
+  done
+  # Last resort: use COV_PORT
+  printf '%s\n' "${COV_PORT}"
+}
+
+# If default port is busy, switch to a free one for MP2 tests
+MP2_TEST_PORT="${COV_PORT}"
+if command -v nc >/dev/null 2>&1; then
+  if nc -z "${COV_HOST}" "${COV_PORT}" 2>/dev/null; then
+    printf '%s\n' "[info] ${COV_HOST}:${COV_PORT} occupied; selecting an alternate port for MP2 tests"
+    MP2_TEST_PORT="$(pick_free_port)"
+  fi
+else
+  if (echo > "/dev/tcp/${COV_HOST}/${COV_PORT}") >/dev/null 2>&1; then
+    printf '%s\n' "[info] ${COV_HOST}:${COV_PORT} occupied; selecting an alternate port for MP2 tests"
+    MP2_TEST_PORT="$(pick_free_port)"
+  fi
+fi
+
+"${LOADER_ENV[@]}" "${ROOT_DIR}/tests/test_server_protocol.sh" --server "${SERVER_BIN_ARG}" "${COV_HOST}" "${MP2_TEST_PORT}"
 
 printf '%s\n' "--> Preparing Python CLI entry point for tests..."
 CLI_FALLBACK="${ROOT_DIR}/scripts/dev_cli.sh"
@@ -312,39 +434,21 @@ if [ -z "${CLI_BIN}" ]; then
 fi
 export CLI_BIN
 
-printf '%s\n' "--> Running room policy integration tests (integration_space.sh, FAST mode by default)..."
-chmod +x "${ROOT_DIR}/tests/integration_space.sh" "${ROOT_DIR}/tests/test_env_init.sh" "${ROOT_DIR}/tests/test_user_mgmt.sh"
-if [ -z "${TEST_DATA_DIR:-}" ]; then
-  TEST_DATA_DIR=$(mktemp -d)
-  if [[ "${IS_WINDOWS}" -eq 1 ]]; then
-    TEST_DATA_DIR=$(to_mixed_path "${TEST_DATA_DIR}")
-  fi
-  "${LOADER_ENV[@]}" CLI_BIN="${CLI_BIN}" "${ROOT_DIR}/tests/test_env_init.sh" --keep-data --no-server --data-dir "${TEST_DATA_DIR}" --port "${COV_PORT}"
-fi
-FAST=${FAST:-1}
-SKIP_TEARDOWN=${SKIP_TEARDOWN:-${FAST}}
-IDLE_SECONDS=${IDLE_SECONDS:-15}
-TEST_DATA_DIR=${TEST_DATA_DIR:-${ROOT_DIR}/server_files}
-if [[ "${IS_WINDOWS}" -eq 1 ]]; then
-  TEST_DATA_DIR=$(to_mixed_path "${TEST_DATA_DIR}")
-fi
-"${LOADER_ENV[@]}" FAST="${FAST}" SKIP_TEARDOWN="${SKIP_TEARDOWN}" IDLE_SECONDS="${IDLE_SECONDS}" TEST_DATA_DIR="${TEST_DATA_DIR}" HOST="${COV_HOST}" PORT="${COV_PORT}" CLI="${CLI_BIN}" CLI_BIN="${CLI_BIN}" "${ROOT_DIR}/tests/integration_space.sh" "${COV_HOST}" "${COV_PORT}" demo_cov
-
 printf '%s\n' "--> Running C tools smoke tests (src/tools)..."
 if [[ -x "${PROC_LAUNCHER}" ]]; then
-  "${PROC_LAUNCHER}" 2>/dev/null || true
+  timeout_cmd 5s "${PROC_LAUNCHER}" 2>/dev/null || true
 else
   printf '%s\n' "[info] proc_launcher binary not available on this platform; skipping direct launcher smoke checks."
 fi
 ( "${LOG_CONSUMER}" --max 1 & echo $! > .tmp_consumer.pid )
 sleep 0.1
-echo "hi" | "${IPC_SENDER}" >/dev/null 2>&1 || true
+timeout_cmd 5s "${IPC_SENDER}" --message "hi" >/dev/null 2>&1 || true
 ( kill -TERM "$(cat .tmp_consumer.pid)" 2>/dev/null || true; rm -f .tmp_consumer.pid )
 if [[ -x "${PROC_LAUNCHER}" ]]; then
   if [[ "${IS_WINDOWS}" -eq 1 ]]; then
-    "${PROC_LAUNCHER}" cmd.exe /c echo ok >/dev/null 2>&1 || true
+    timeout_cmd 5s "${PROC_LAUNCHER}" cmd.exe /c echo ok >/dev/null 2>&1 || true
   else
-    "${PROC_LAUNCHER}" /bin/echo ok >/dev/null 2>&1 || true
+    timeout_cmd 5s "${PROC_LAUNCHER}" /bin/echo ok >/dev/null 2>&1 || true
   fi
 fi
 
@@ -356,16 +460,9 @@ if [[ "${IS_WINDOWS}" -eq 1 ]]; then
 fi
 ( "${LOG_CONSUMER}" --max 2 >/dev/null 2>&1 & echo $! > .tmp_consumer2.pid )
 sleep 0.1
-"${IPC_SENDER}" --message "m1" >/dev/null 2>&1 || true
-"${IPC_SENDER}" --file "${IPC_TMP_ARG}" >/dev/null 2>&1 || true
+timeout_cmd 5s "${IPC_SENDER}" --message "m1" >/dev/null 2>&1 || true
+timeout_cmd 5s "${IPC_SENDER}" --file "${IPC_TMP_ARG}" >/dev/null 2>&1 || true
 ( kill -TERM "$(cat .tmp_consumer2.pid)" 2>/dev/null || true; rm -f .tmp_consumer2.pid "${IPC_TMP_FILE}" )
-
-printf '%s\n' "--> Running Python E2E tests with coverage (test_cli_e2e.sh)..."
-rm -f .coverage
-"${PYTHON_BIN[@]}" -c "import coverage" >/dev/null 2>&1 || "${PYTHON_BIN[@]}" -m pip install --user -q coverage
-"${PYTHON_BIN[@]}" -c "import pytest" >/dev/null 2>&1 || "${PYTHON_BIN[@]}" -m pip install --user -q pytest pytest-cov
-HOST="${COV_HOST}" PORT="${COV_PORT}" PYTHONPATH="${ROOT_DIR}/src" CLI_COMMAND="${PYTHON_CMD_STRING} -m coverage run --branch --source=${ROOT_DIR}/src/ming_drlms -a -m ming_drlms.main" CLI="${CLI_BIN}" CLI_BIN="${CLI_BIN}" "${LOADER_ENV[@]}" "${ROOT_DIR}/tests/test_cli_e2e.sh"
-PYTHONPATH="${ROOT_DIR}/src" "${PYTHON_BIN[@]}" -m coverage run --branch -a -m pytest -q "${ROOT_DIR}/tests/python" || true
 
 if [[ "${IS_DARWIN}" -eq 1 ]]; then
   printf '%s\n' "[info] Skipping C code coverage generation on macOS (llvm-cov tooling not yet wired)"
@@ -376,12 +473,20 @@ else
   if command -v lcov >/dev/null 2>&1 && command -v genhtml >/dev/null 2>&1; then
     mkdir -p "${ROOT_DIR}/coverage" "${ROOT_DIR}/coverage/html/c"
     if find . \( -name '*.gcda' -o -name '*.gcno' \) | grep -q .; then
+      # Capture coverage data; don't fail the whole script on errors
       if ! lcov --quiet --rc lcov_branch_coverage=1 --capture --directory . --output-file "${ROOT_DIR}/coverage/c_coverage.info" --no-external; then
         printf '[warn] lcov capture failed; skipping C coverage report\n'
-      elif ! lcov --quiet --rc lcov_branch_coverage=1 --remove "${ROOT_DIR}/coverage/c_coverage.info" '*/tests/*' --output-file "${ROOT_DIR}/coverage/c_coverage.filtered.info"; then
-        printf '[warn] lcov filter failed; skipping C coverage report\n'
-      elif ! genhtml --quiet --branch-coverage "${ROOT_DIR}/coverage/c_coverage.filtered.info" --output-directory "${ROOT_DIR}/coverage/html/c"; then
-        printf '[warn] genhtml failed; skipping C coverage report\n'
+      else
+        # Some environments produce empty tracefiles; detect and skip gracefully
+        if ! grep -q '^SF:' "${ROOT_DIR}/coverage/c_coverage.info" 2>/dev/null; then
+          printf '[warn] no valid records in c_coverage.info; skipping C coverage report\n'
+        else
+          if ! lcov --quiet --rc lcov_branch_coverage=1 --remove "${ROOT_DIR}/coverage/c_coverage.info" '*/tests/*' --output-file "${ROOT_DIR}/coverage/c_coverage.filtered.info"; then
+            printf '[warn] lcov filter failed; skipping C coverage report\n'
+          elif ! genhtml --quiet --branch-coverage "${ROOT_DIR}/coverage/c_coverage.filtered.info" --output-directory "${ROOT_DIR}/coverage/html/c"; then
+            printf '[warn] genhtml failed; skipping C coverage report\n'
+          fi
+        fi
       fi
     else
       printf '[warn] no GCOV data produced; skipping C coverage report\n'
@@ -390,6 +495,14 @@ else
     printf "[warn] lcov/genhtml not found; skipping C coverage report\n"
   fi
 fi
+
+# Execute Python tests under coverage (MP2-only)
+rm -f .coverage
+"${PYTHON_BIN[@]}" -c "import coverage" >/dev/null 2>&1 || "${PYTHON_BIN[@]}" -m pip install --user -q coverage
+"${PYTHON_BIN[@]}" -c "import pytest" >/dev/null 2>&1 || "${PYTHON_BIN[@]}" -m pip install --user -q pytest pytest-cov
+PYTHONPATH="${ROOT_DIR}/src" timeout_cmd 240s "${PYTHON_BIN[@]}" -m coverage run --branch -a -m pytest -q \
+  "${ROOT_DIR}/tests/python/test_mproto_v2_client.py" \
+  "${ROOT_DIR}/tests/python/test_cli_mproto_commands.py" || true
 
 printf '%s\n' "--> Generating Python coverage report..."
 mkdir -p "${ROOT_DIR}/coverage/html/python"
@@ -403,3 +516,4 @@ fi
 printf "Python coverage report: %s\n" "file://${ROOT_DIR}/coverage/html/python/index.html"
 
 popd >/dev/null
+

@@ -34,9 +34,16 @@ def _dispatch_to_viewmodel(view_model: RoomsViewModel, message: dict):
         user = message.get("user")
         msg_text = message.get("message")
         event_id = message.get("event_id")
+        timestamp = message.get("timestamp")
 
         if room_name and user and msg_text is not None:
-            view_model.on_message_received(room_name, user, msg_text, event_id)
+            view_model.on_message_received(
+                room_name,
+                user,
+                msg_text,
+                event_id,
+                timestamp,
+            )
 
     elif msg_type == "user_join":
         # 处理用户加入
@@ -53,6 +60,12 @@ def _dispatch_to_viewmodel(view_model: RoomsViewModel, message: dict):
 
         if room_name and user:
             view_model.on_user_left(room_name, user)
+
+    elif msg_type == "ignite_request":
+        view_model.on_ignite_request(message)
+
+    elif msg_type == "ignite_established":
+        view_model.on_ignite_established(message)
 
 
 def view(i18n: dict, page: ft.Page, sess: Session, on_disconnect) -> ft.Container:
@@ -250,8 +263,8 @@ def view(i18n: dict, page: ft.Page, sess: Session, on_disconnect) -> ft.Containe
     def on_room_selected(room_id: str, room_name: str):
         """房间选择回调（Phase 2：使用ViewModel）"""
         print(f"DEBUG: Room selected: {room_id} - {room_name}", flush=True)
-        # Phase 2: 使用ViewModel的switch_room方法进行房间切换
-        view_model.switch_room(room_id, room_name)
+        # Phase 2: 使用ViewModel的异步房间切换，避免阻塞UI
+        view_model.request_room_switch(room_id, room_name)
 
     room_list.set_room_selected_callback(on_room_selected)
     print("DEBUG: Component communication setup completed", flush=True)

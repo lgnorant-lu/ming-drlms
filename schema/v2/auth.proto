@@ -1,0 +1,37 @@
+syntax = "proto3";
+package mingdrlms.v2;
+
+import "schema/v2/common.proto";
+
+// 阶段 1: 挑战
+message AuthChallengeRequest {
+  string username = 1;
+}
+
+message AuthChallengeResponse {
+  string nonce = 1; // 服务器发送的挑战
+}
+
+// 阶段 2: 认证
+message AuthRequest {
+  string username = 1;
+  string response = 2; // H(password_hash + nonce)
+}
+
+message AuthResponse {
+  string access_token = 1;  // 短期 JWT
+  string refresh_token = 2; // 长期 Opaque
+  int64 access_token_expires_in = 3; // (秒)
+}
+
+// 阶段 4: 刷新
+message RefreshTokenRequest {
+  string refresh_token = 1;
+}
+
+message RefreshTokenResponse {
+  string access_token = 1;
+  int64 access_token_expires_in = 2;
+}
+
+

@@ -63,6 +63,7 @@ static int reader_main(void) {
     read_buffer[bytes_read] = '\0';
     printf("Reader: Read simple message: '%s' (%zd bytes)\n", read_buffer,
            bytes_read);
+    fflush(stdout);
     assert(strcmp((char *)read_buffer, "hello-ipc-test") == 0);
     assert(bytes_read == (ssize_t)strlen("hello-ipc-test"));
     printf("Reader: Simple message integrity OK.\n\n");
@@ -75,7 +76,19 @@ static int reader_main(void) {
         return 1;
     }
     printf("Reader: Read large message (%zd bytes)\n", bytes_read);
-    assert(bytes_read == 2000);
+    fflush(stdout);
+    if (bytes_read != 2000) {
+        fprintf(stderr, "Reader WARNING expected 2000 bytes, got %zd\n",
+                bytes_read);
+        for (size_t i = 0; i < (size_t)bytes_read && i < 64; ++i) {
+            fprintf(stderr, "%02X ", read_buffer[i]);
+        }
+        fprintf(stderr, "\n");
+        fflush(stderr);
+    }
+    if (bytes_read != 2000) {
+        return 1;
+    }
     for (size_t i = 0; i < 2000u; ++i) {
         assert(read_buffer[i] == 'A');
     }
@@ -103,9 +116,10 @@ static int writer_main(void) {
 
     sleep_ms(200);
 
+    const size_t large_len = 2000;
     unsigned char large_msg[2000];
-    memset(large_msg, 'A', sizeof(large_msg));
-    printf("Writer: Writing large message (%zu bytes)\n", sizeof(large_msg));
+    memset(large_msg, 'A', large_len);
+    printf("Writer: Writing large message (%zu bytes)\n", large_len);
     if (shm_write(large_msg, sizeof(large_msg)) != 0) {
         perror("Writer: shm_write (large) failed");
         shm_cleanup();

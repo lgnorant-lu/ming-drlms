@@ -14,6 +14,7 @@ Changed history:
 from __future__ import annotations
 
 import flet as ft
+from datetime import datetime
 from typing import Dict, List, Optional, Callable, Union
 
 from ming_drlms.core.types import RoomInfo
@@ -21,6 +22,7 @@ from ming_drlms.core.types import RoomInfo
 from ..state import Session
 from ..ui.theme import pixel_text, spacing, panel, pixel_button
 from ..viewmodels.rooms_view_model import RoomsViewModel
+from ..utils.time_format import format_chat_timestamp
 
 
 class RoomList:
@@ -75,33 +77,9 @@ class RoomList:
         """加载默认房间（当服务器加载失败时使用）"""
         print("DEBUG: Loading default rooms", flush=True)
         defaults = [
-            RoomInfo(
-                name="general",
-                owner="system",
-                policy=0,
-                subscriber_count=0,
-                last_event_id=0,
-                created_at=0,
-                updated_at=0,
-            ),
-            RoomInfo(
-                name="dev",
-                owner="system",
-                policy=0,
-                subscriber_count=0,
-                last_event_id=0,
-                created_at=0,
-                updated_at=0,
-            ),
-            RoomInfo(
-                name="design",
-                owner="system",
-                policy=0,
-                subscriber_count=0,
-                last_event_id=0,
-                created_at=0,
-                updated_at=0,
-            ),
+            RoomInfo(name="general"),
+            RoomInfo(name="dev"),
+            RoomInfo(name="design"),
         ]
 
         for room in defaults:
@@ -266,6 +244,23 @@ class RoomList:
             return list(self.rooms)
         return []
 
+    def _policy_label(self, policy_code: int) -> str:
+        mapping = {
+            0: self.i18n.get("policy.retain", "Retain"),
+            1: self.i18n.get("policy.delegate", "Delegate"),
+            2: self.i18n.get("policy.teardown", "Ephemeral"),
+        }
+        return mapping.get(policy_code, self.i18n.get("policy.unknown", "Unknown"))
+
+    def _format_timestamp(self, epoch: int) -> str:
+        if not epoch:
+            return ""
+        try:
+            dt = datetime.fromtimestamp(epoch)
+            return format_chat_timestamp(dt)
+        except Exception:
+            return str(epoch)
+
     def _make_room_item(self, room: RoomInfo):
         """创建房间项"""
         is_selected = room.name == self.current_room_id
@@ -286,17 +281,30 @@ class RoomList:
         unread = self.sess.get_unread(room.name)
         unread_badge = pixel_text(f"🔔 {unread}", 9, "#d32f2f") if unread > 0 else None
 
-        # 房间信息显示
-        room_info = ft.Column(
-            [
-                pixel_text(room.name, 12, "primary"),
-                pixel_text(f"👥 {user_count} users", 10, "muted"),
-                pixel_text(f"Owner: {room.owner}", 9, "muted"),
-                *([unread_badge] if unread_badge else []),
-            ],
-            spacing=2,
-            tight=True,
-        )
+        instance_display = room.instance_count if room.instance_count else 1
+        capacity = room.max_capacity if room.max_capacity else "∞"
+        policy_label = self._policy_label(room.storage_policy or room.policy)
+
+        lines = [
+            pixel_text(room.name, 12, "primary"),
+            pixel_text(f"👥 {user_count} • Inst {instance_display}", 10, "muted"),
+            pixel_text(f"Policy: {policy_label} • Cap {capacity}", 9, "muted"),
+        ]
+
+        timestamp_label = self._format_timestamp(room.last_updated or room.updated_at)
+        if timestamp_label:
+            lines.append(
+                pixel_text(
+                    self.i18n.get("rooms.updated", "Updated") + f": {timestamp_label}",
+                    9,
+                    "muted",
+                )
+            )
+
+        if unread_badge:
+            lines.append(unread_badge)
+
+        room_info = ft.Column(lines, spacing=2, tight=True)
 
         return ft.Container(
             content=room_info,
@@ -346,15 +354,7 @@ class RoomList:
 
             # 创建新房间
             room_id = name.lower().replace(" ", "_")
-            new_room = RoomInfo(
-                name=room_id,
-                owner=self.sess.user,
-                policy=0,
-                subscriber_count=1,
-                last_event_id=0,
-                created_at=0,
-                updated_at=0,
-            )
+            new_room = RoomInfo(name=room_id, subscriber_count=1)
 
             self.sess.add_room(new_room)
             updated_rooms = [r for r in self._rooms_cache if r.name != new_room.name]

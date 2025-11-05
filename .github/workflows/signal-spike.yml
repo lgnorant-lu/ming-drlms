@@ -1,0 +1,71 @@
+name: Signal Spike
+
+on:
+  push:
+    branches: [ main, feature/** ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake make gcc g++ libssl-dev
+      - name: Configure
+        run: cmake -S . -B build -DENABLE_SIGNAL_SPIKE=ON
+      - name: Build
+        run: cmake --build build --target test_signal_spike -j2
+      - name: Run
+        run: |
+          ./build/src/tools/test_signal_spike | tee spike.log
+          grep -q "Signal E2E Loop OK" spike.log
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install deps
+        run: |
+          brew update
+          brew install cmake openssl@3
+      - name: Configure
+        env:
+          OPENSSL_ROOT_DIR: /usr/local/opt/openssl@3
+        run: cmake -S . -B build -DENABLE_SIGNAL_SPIKE=ON
+      - name: Build
+        run: cmake --build build --target test_signal_spike -j2
+      - name: Run
+        run: |
+          ./build/src/tools/test_signal_spike | tee spike.log
+          grep -q "Signal E2E Loop OK" spike.log
+
+  build-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          update: true
+          install: >-
+            base-devel
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-openssl
+      - name: Configure
+        run: cmake -S . -B build -G "Unix Makefiles" -DENABLE_SIGNAL_SPIKE=ON
+      - name: Build
+        run: cmake --build build --target test_signal_spike -j2
+      - name: Run
+        run: |
+          ./build/src/tools/test_signal_spike.exe | tee spike.log
+          grep -q "Signal E2E Loop OK" spike.log
+
+

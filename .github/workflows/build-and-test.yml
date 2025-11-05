@@ -47,13 +47,13 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential libssl-dev libargon2-dev netcat-openbsd lcov clang-format cppcheck
+          sudo apt-get install -y build-essential libssl-dev libargon2-dev netcat-openbsd lcov clang-format cppcheck protobuf-c-compiler libprotobuf-c-dev
 
       - name: Install Homebrew dependencies (macOS)
         if: matrix.os == 'macos-latest'
         run: |
           brew update
-          brew install cmake argon2 openssl@3 sqlite3 lcov
+          brew install cmake argon2 openssl@3 sqlite3 lcov protobuf-c
 
       - name: Configure macOS build environment
         if: matrix.os == 'macos-latest'
@@ -104,6 +104,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           & "$Env:VCPKG_ROOT\vcpkg.exe" install sqlite3:x64-windows argon2:x64-windows openssl:x64-windows
+          & "$Env:VCPKG_ROOT\vcpkg.exe" install protobuf-c:x64-windows
 
       - name: Install Python dependencies
         run: |
@@ -131,6 +132,66 @@ jobs:
             export PATH="/c/Program Files/CMake/bin:$PATH"
           fi
           bash scripts/run_coverage.sh
+
+      - name: Smoke Test M-Proto-v2 Handler
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        env:
+          DRLMS_ENABLE_MPROTO_V2: "1"
+          SMOKE_HOST: 127.0.0.1
+          SMOKE_PORT: 19090
+        run: |
+          set -euo pipefail
+          # Use coverage build dir from previous step
+          BIN_DIR="${GITHUB_WORKSPACE}/build/coverage"
+          # Find server executable robustly
+          find_server() {
+            local root="$1"
+            local -a candidates=(
+              "${root}/log_collector_server"
+              "${root}/RelWithDebInfo/log_collector_server"
+              "${root}/Debug/log_collector_server"
+              "${root}/Release/log_collector_server"
+            )
+            for c in "${candidates[@]}"; do
+              if [[ -x "$c" ]]; then echo "$c"; return 0; fi
+            done
+            return 1
+          }
+          SERVER=$(find_server "${BIN_DIR}") || { echo "[error] server not found"; exit 1; }
+          echo "Using server: ${SERVER}"
+          # Launch server in background, capture stdout/stderr
+          : > mp2_server.out
+          : > mp2_server.err
+          ( env DRLMS_ENABLE_MPROTO_V2=1 DRLMS_PORT="${SMOKE_PORT}" "${SERVER}" > mp2_server.out 2> mp2_server.err & echo $! > mp2_server.pid )
+          # Wait for server readiness
+          tries=50
+          until nc -z "${SMOKE_HOST}" "${SMOKE_PORT}" >/dev/null 2>&1; do
+            tries=$((tries-1))
+            if [[ ${tries} -le 0 ]]; then
+              echo "[error] server did not become ready"; cat mp2_server.out mp2_server.err || true; exit 1
+            fi
+            sleep 0.1
+          done
+          # Send a valid AUTH_CHALLENGE_REQUEST (msg_type=100)
+          python3 scripts/smoke_mp2_client.py --host "${SMOKE_HOST}" --port "${SMOKE_PORT}" --type 100 || true
+          sleep 0.2
+          if ! (grep -q "Received MSG_TYPE_AUTH_CHALLENGE_REQUEST" mp2_server.err || grep -q "Received MSG_TYPE_AUTH_CHALLENGE_REQUEST" mp2_server.out); then
+            echo "[error] stub log not observed for valid frame"; cat mp2_server.out mp2_server.err; exit 1
+          fi
+          # Optional: send bad magic and ensure no crash
+          before_lines=$(wc -l < mp2_server.err || echo 0)
+          python3 scripts/smoke_mp2_client.py --host "${SMOKE_HOST}" --port "${SMOKE_PORT}" --type 100 --bad-magic || true
+          sleep 0.2
+          after_lines=$(wc -l < mp2_server.err || echo 0)
+          if [[ -z "${after_lines}" || -z "${before_lines}" ]]; then after_lines=0; before_lines=0; fi
+          if ! ps -p $(cat mp2_server.pid) >/dev/null 2>&1; then
+            echo "[error] server crashed on bad magic"; cat mp2_server.out mp2_server.err; exit 1
+          fi
+          # Teardown
+          kill -TERM $(cat mp2_server.pid) >/dev/null 2>&1 || true
+          sleep 0.2
+          pkill -f log_collector_server >/dev/null 2>&1 || true
 
       - name: Upload coverage artifacts
         if: always()

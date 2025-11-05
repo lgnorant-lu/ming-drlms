@@ -29,7 +29,8 @@
 
 - C Server（`src/server/`）
   - 每连接一线程模型（thread-per-connection），超时与 keepalive，活动连接上限。
-  - 协议命令：LOGIN/LIST/UPLOAD/DOWNLOAD、SUB/UNSUB/HISTORY、PUBT/PUBF。
+  - **M-Proto-v2 协议**：二进制分帧 + Protobuf 消息（认证100-199、房间200-299、联邦300-399）
+  - **混合认证**：Challenge-Response + JWT AccessToken + Opaque RefreshToken
   - 房间（Room）与策略（retain/delegate/teardown）、事件持久化与历史回放。
 - libipc（`src/libipc/`）
   - System V SHM + `sem_full/sem_empty` + `pthread_rwlock` 的环形缓冲。
@@ -46,9 +47,10 @@
 
 ### Core Flows
 
-- Authentication（Argon2id + 透明升级）
-- Room Subscribe & History Replay（SUB/HISTORY → 扫描 events.log + 回放 `texts/<eid>.txt`）
-- Publish Text/File（PUBT/PUBF → 校验 SHA256 → 落盘 → 扇出 EVT|TEXT/FILE）
+- **M-Proto-v2 Authentication**（Challenge-Response + JWT + RefreshToken）
+- **Room Subscribe & History Replay**（MSG_TYPE_ROOM_SUB_REQUEST → SQLite 查询 + RoomEvent Protobuf 回放）
+- **Publish Text/File**（MSG_TYPE_ROOM_PUB_REQUEST → rooms_store_text → RoomEvent 扇出）
+- **Event Fanout**（RoomEvent Protobuf + MP2 分帧 → 所有订阅者）
 - LOG → IPC（shm_write，tools/consumer 可 tail）
 
 ---

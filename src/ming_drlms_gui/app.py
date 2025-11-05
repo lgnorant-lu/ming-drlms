@@ -113,7 +113,7 @@ def main(page: ft.Page):
                     # 使用相同的登录凭据认证事件监听socket
                     event_login_success = login(event_sock, user, pwd)
                     if event_login_success:
-                        sess.event_sock = event_sock
+                        sess.attach_event_socket(event_sock)
                         print(
                             "DEBUG: Event listener socket created and authenticated",
                             flush=True,
@@ -124,6 +124,7 @@ def main(page: ft.Page):
                             flush=True,
                         )
                         event_sock.close()
+                        sess.attach_event_socket(None)
                 except Exception as e:
                     print(
                         f"DEBUG: Failed to create event listener socket: {e}",

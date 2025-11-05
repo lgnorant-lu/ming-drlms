@@ -1,0 +1,63 @@
+syntax = "proto3";
+package mingdrlms.v2;
+
+import "schema/v2/room.proto";
+
+// S2S (Server-to-Server) Federation Protocol
+// 用于联邦服务器之间的 Pub/Sub 消息转发
+
+// S2S 发布请求 (MSG_TYPE_S2S_PUB_REQUEST = 300)
+// 当 Server-A 收到客户端的 PUB 请求后，识别到有远程订阅者在 Server-B，
+// 则 Server-A 作为客户端连接到 Server-B 并发送此消息
+message S2SPublishRequest {
+  string bearer_token = 1;        // REQ-2: 静态不记名令牌 (Static Bearer Token)
+  string room_name = 2;           // 房间名
+  string instance_id = 3;         // 房间实例 ID (hex UUID)
+  int64 event_id = 4;             // 原始事件 ID
+  string timestamp = 5;           // 原始时间戳 (RFC3339)
+  string sender_user = 6;         // 发送者用户名
+  string display_token = 7;       // 显示令牌 (用于匿名/点火/好友呈现)
+  bytes payload = 8;              // 消息载荷
+  string sha_hex = 9;             // 载荷 SHA256 哈希 (hex)
+  RoomEventKind event_kind = 10;  // 事件类型 (TEXT/FILE)
+  RoomFileMetadata file = 11;     // 当 event_kind=FILE 时带上文件元数据
+  bool ephemeral = 12;            // 事件是否为短暂存储
+}
+
+// S2S 发布响应
+message S2SPublishResponse {
+  int32 code = 1;                 // 0=成功, 非0=错误码
+  string message = 2;             // 响应消息
+  int64 forwarded_count = 3;      // 转发给本地订阅者的数量
+}
+
+// S2S 订阅注册请求 (未来扩展)
+// 用于 Server-B 向 Server-A 注册"我有用户订阅了 room X"
+message S2SSubscribeRequest {
+  string bearer_token = 1;
+  string room_name = 2;
+  string instance_id = 3;
+  string remote_server_id = 4;    // Server-B 的唯一标识
+  bool subscribe = 5;              // true=注册, false=注销
+}
+
+// S2S 订阅注册响应
+message S2SSubscribeResponse {
+  int32 code = 1;
+  string message = 2;
+  bool registered = 3;             // true=已注册, false=已注销
+}
+
+
+// S2S 心跳请求 (未来扩展)
+// message S2SHeartbeatRequest {
+//   string bearer_token = 1;
+//   string server_id = 2;
+//   int64 timestamp = 3;
+// }
+
+// S2S 心跳响应
+// message S2SHeartbeatResponse {
+//   int32 code = 1;
+//   int64 timestamp = 2;
+// }

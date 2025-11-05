@@ -164,35 +164,9 @@ make coverage
 2.  Compile all C source code with coverage instrumentation flags.
 3.  Run the C unit tests (`test_ipc_suite.c`).
 4.  Run the C integration tests (`test_server_protocol.sh`).
-5.  运行房间策略集成测试（默认 FAST=1，跳过 teardown）。
-6.  Run the C tools smoke tests to quickly produce `.gcda`.
-7.  Run the Python end-to-end tests (`test_cli_e2e.sh`) under the Python `coverage` tool and pytest-based CLI tests.
-8.  Process the raw coverage data and generate user-friendly HTML reports.
+5.  Run the C tools smoke tests to quickly produce `.gcda`.
+6.  Run the MP2 Python tests under coverage.
 
 ### 查看报告
 
-执行完成后，报告位于 `coverage/html/`。
-
-*   **C Code Coverage Report**:
-    *   Open `coverage/html/c/index.html` in your web browser to view the detailed, line-by-line coverage for the C source files.
-
-*   **Python Code Coverage Report**:
-    *   Open `coverage/html/python/index.html` in your web browser to view the detailed coverage for the Python CLI codebase.
-
-### 细节与建议
-
-- C Coverage now includes `src/server/`, `src/libipc/`, `src/agent/`, and `src/tools/` (e.g., `ipc_sender`, `proc_launcher`, `log_consumer`). Tools are exercised during coverage via smoke tests to produce `.gcda` quickly.
-- Branch coverage is enabled for C reports (`lcov --rc lcov_branch_coverage=1`, `genhtml --branch-coverage`).
-- If you need C reports locally, ensure lcov is installed:
-
-```bash
-sudo apt-get update && sudo apt-get install -y lcov
-```
-
-- Python coverage aggregates both E2E shell tests and pytest-based unit/integration tests under `tests/python/`. You can run extra Python tests and append to the same database:
-
-```bash
-PYTHONPATH=tools/cli/src python3 -m coverage run -a -m pytest -q tests/python
-```
-
-- Note: To avoid module shadowing by the `coverage/` directory, Makefile defers directory creation and runs `python3 -m coverage` from a temporary working directory.
+执行完成后，报告位于 `

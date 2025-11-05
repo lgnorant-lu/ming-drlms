@@ -1,0 +1,241 @@
+syntax = "proto3";
+package mingdrlms.v2;
+
+// Room level enums --------------------------------------------------------
+
+enum RoomPolicy {
+  ROOM_POLICY_RETAIN = 0;
+  ROOM_POLICY_DELEGATE = 1;
+  ROOM_POLICY_TEARDOWN = 2;
+}
+
+enum RoomStoragePolicy {
+  ROOM_STORAGE_PERSISTENT = 0;
+  ROOM_STORAGE_EPHEMERAL = 1;
+}
+
+enum RoomEventKind {
+  ROOM_EVENT_KIND_TEXT = 0;
+  ROOM_EVENT_KIND_FILE = 1;
+}
+
+// Shared structs ----------------------------------------------------------
+
+message RoomFileMetadata {
+  string filename = 1;
+  uint64 size_bytes = 2;
+  string sha256_hex = 3;
+  bool ephemeral = 4;
+  string timestamp = 5; // RFC3339
+}
+
+message RoomSummary {
+  string room_name = 1;
+  uint64 total_instances = 2;
+  uint64 total_subscribers = 3;
+  RoomStoragePolicy storage_policy = 4;
+  uint64 max_capacity = 5;
+  uint64 last_event_id = 6;
+  string owner = 7;
+  RoomPolicy policy = 8;
+  uint64 created_at_epoch = 9; // seconds
+  uint64 updated_at_epoch = 10; // seconds
+}
+
+// Core streaming messages -------------------------------------------------
+
+message RoomSubscribeRequest {
+  string room_name = 1;
+  string access_token = 2;
+  int64 since_id = 3;
+  uint32 replay_limit = 4; // 0 = unlimited replay during subscribe
+}
+
+message RoomPublishRequest {
+  string room_name = 1;
+  string access_token = 2;
+  bytes payload = 3;
+  bool ephemeral = 4;
+  string client_event_id = 5; // optional idempotency token
+}
+
+message RoomPublishResponse {
+  string room_name = 1;
+  int64 event_id = 2;
+  string client_event_id = 3;
+}
+
+message RoomEvent {
+  string room_name = 1;
+  int64 event_id = 2;
+  bytes payload = 3;
+  string display_token = 4;
+  RoomEventKind kind = 5;
+  RoomFileMetadata file = 6;
+  bool ephemeral = 7;
+  string sha256_hex = 8;
+  string timestamp = 9; // RFC3339
+  string instance_id = 10;
+}
+
+// Room metadata -----------------------------------------------------------
+
+message RoomInfoRequest {
+  string room_name = 1;
+  string access_token = 2;
+}
+
+message RoomInfoResponse {
+  string room_name = 1;
+  string owner = 2;
+  RoomPolicy policy = 3;
+  uint64 total_subscribers = 4;
+  uint64 total_instances = 5;
+  RoomStoragePolicy storage_policy = 6;
+  uint64 max_capacity = 7;
+  uint64 last_event_id = 8;
+  uint64 created_at_epoch = 9;
+  uint64 updated_at_epoch = 10;
+}
+
+message RoomListRequest {
+  string access_token = 1;
+  uint32 offset = 2;
+  uint32 limit = 3;
+  string prefix = 4;
+}
+
+message RoomListResponse {
+  repeated RoomSummary rooms = 1;
+  uint32 returned = 2;
+  uint64 total = 3;
+  bool has_more = 4;
+  uint32 offset = 5;
+}
+
+message RoomCreateRequest {
+  string room_name = 1;
+  string access_token = 2;
+  RoomStoragePolicy storage_policy = 3;
+  uint64 max_capacity = 4;
+  uint64 max_instances = 5;
+  uint32 max_ephemeral_events = 6;
+}
+
+message RoomCreateResponse {
+  string room_name = 1;
+  bool created = 2;
+  RoomStoragePolicy storage_policy = 3;
+}
+
+message RoomSetPolicyRequest {
+  string room_name = 1;
+  string access_token = 2;
+  RoomPolicy policy = 3;
+}
+
+message RoomSetPolicyResponse {
+  string room_name = 1;
+  RoomPolicy policy = 2;
+}
+
+message RoomSetStoragePolicyRequest {
+  string room_name = 1;
+  string access_token = 2;
+  RoomStoragePolicy storage_policy = 3;
+}
+
+message RoomSetStoragePolicyResponse {
+  string room_name = 1;
+  RoomStoragePolicy storage_policy = 2;
+}
+
+message RoomTransferRequest {
+  string room_name = 1;
+  string access_token = 2;
+  string new_owner = 3;
+}
+
+message RoomTransferResponse {
+  string room_name = 1;
+  string new_owner = 2;
+}
+
+// History ---------------------------------------------------------------
+
+message RoomHistoryRequest {
+  string room_name = 1;
+  string access_token = 2;
+  uint64 since_id = 3;
+  uint32 limit = 4;
+  bool include_text = 5;
+  bool include_files = 6;
+}
+
+message RoomHistoryChunk {
+  string room_name = 1;
+  repeated RoomEvent events = 2;
+  bool has_more = 3;
+  uint64 last_event_id = 4;
+}
+
+message RoomHistoryDone {
+  string room_name = 1;
+  uint64 last_event_id = 2;
+}
+
+// File uploads -----------------------------------------------------------
+
+message RoomFilePublishBegin {
+  string room_name = 1;
+  string access_token = 2;
+  string filename = 3;
+  uint64 size_bytes = 4;
+  string sha256_hex = 5;
+  bool ephemeral = 6;
+  string upload_id = 7;
+}
+
+message RoomFilePublishChunk {
+  string upload_id = 1;
+  bytes data = 2;
+  uint64 offset = 3;
+  bool last_chunk = 4;
+}
+
+message RoomFilePublishCommit {
+  string upload_id = 1;
+}
+
+message RoomFilePublishResult {
+  string upload_id = 1;
+  string room_name = 2;
+  int64 event_id = 3;
+  string filename = 4;
+}
+
+// File downloads ---------------------------------------------------------
+
+message RoomFileDownloadRequest {
+  string room_name = 1;
+  string access_token = 2;
+  int64 event_id = 3;
+}
+
+message RoomFileDownloadChunk {
+  string room_name = 1;
+  int64 event_id = 2;
+  string filename = 3;
+  uint64 size_bytes = 4;
+  string sha256_hex = 5;
+  bytes data = 6;
+  uint64 offset = 7;
+  bool last_chunk = 8;
+}
+
+message RoomFileDownloadDone {
+  string room_name = 1;
+  int64 event_id = 2;
+}
+
+

@@ -37,7 +37,7 @@ ming-drlms dev coverage run
 ming-drlms dev coverage show -
 ```
 说明：
-- `make coverage` 将运行：C 单元、协议集成、房间策略集成（`tests/integration_space.sh`，默认 FAST 模式）、工具 smoke、Python E2E 与 pytest 用例，并生成 C/Python 报告。
+- `make coverage` 将运行：C 单元、协议集成（MP2）、工具 smoke、MP2 Python 测试，并生成 C/Python 报告。
 - 若 CI 环境缺少 `nc/timeout` 等工具，脚本会尝试回退方案或缩短等待时间。
 
 ## CI/CD 工作流（CI/CD Workflows）

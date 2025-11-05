@@ -12,6 +12,8 @@ en_texts: Dict[str, str] = {
     "HELP.SERVER.UP": "Start server in background with health check.\n\nExamples:\n  ming-drlms server-up -p 8080 -d server_files --no-strict\n",
     "HELP.SERVER.DOWN": "Stop server via PID file; fallback to pkill.\n\nExamples:\n  ming-drlms server-down\n",
     "HELP.SERVER.STATUS": "Show server status and recent log tail.\n\nExamples:\n  ming-drlms server-status -p 8080\n",
+    # Auth
+    "HELP.AUTH.LOGIN": "Authenticate using M-Proto-v2 challenge/response and cache tokens locally.\n\nExamples:\n  ming-drlms login -u alice -H 127.0.0.1 -p 5000 --users-file server_files/users.txt\n  ming-drlms login -u bob --password-hash-file bob.hash\n",
     # User
     "HELP.USER.ADD": "Create a new user with Argon2id password (interactive or stdin).\n\nSecurity: avoid plain passwords in shell history; prefer stdin.\nExamples:\n  echo 'p@ss' | ming-drlms user add alice -d server_files -x\n",
     "HELP.USER.PASSWD": "Change password for an existing user (Argon2id).\n\nSecurity: avoid plain passwords in shell history; prefer stdin.\nExamples:\n  echo 'new' | ming-drlms user passwd alice -d server_files -x\n",
@@ -37,6 +39,8 @@ en_texts: Dict[str, str] = {
     " -H 127.0.0.1 -p 8080 -u alice -P password\n",
     # Room
     "HELP.ROOM.INFO": "Query room info (ROOMINFO).\n\nExamples:\n  ming-drlms space room info -r demo -H 127.0.0.1 -p 8080 -u alice -P password\n",
+    "HELP.ROOM.SUB": "Subscribe to a room via M-Proto-v2 and print events.\n\nExamples:\n  ming-drlms room sub -r demo -u alice -H 127.0.0.1 -p 5000 --limit 10\n  ming-drlms room sub -r demo --json\n",
+    "HELP.ROOM.PUB": "Publish a text or binary payload into a room using M-Proto-v2.\n\nExamples:\n  ming-drlms room pub -r demo --text 'hello world'\n  ming-drlms room pub -r demo --file payload.bin --ephemeral\n",
     "HELP.ROOM.SETPOLICY": "Set room policy (owner only).\n\nExamples:\n  ming-drlms space room set-policy -r demo --policy delegate -H 127.0.0.1 -p 8080 -u alice -P password\n",
     "HELP.ROOM.TRANSFER": "Transfer room ownership (owner only).\n\nExamples:\n  ming-drlms space room transfer -r demo -n bob -H 127.0.0.1 -p 8080 -u alice -P password\n",
     # Config

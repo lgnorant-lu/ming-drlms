@@ -108,6 +108,13 @@ def space_join(
                     else:
                         if txt:
                             _emit_payload(txt)
+                    # If the server indicates the room has been closed (teardown),
+                    # exit promptly instead of waiting for socket EOF.
+                    try:
+                        if txt.strip() == "ROOM|CLOSED":
+                            break
+                    except Exception:
+                        pass
                     if eid > since_id:
                         since_id = eid
                         set_last_event_id(state, room_key, eid)

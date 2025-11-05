@@ -166,7 +166,21 @@ terminate_pid() {
     if [[ "${IS_WINDOWS}" -eq 1 ]]; then
         taskkill //PID "$pid" //T //F >/dev/null 2>&1 || kill -TERM "$pid" 2>/dev/null || true
     else
+        # Try gentle termination first
         kill -TERM "$pid" 2>/dev/null || true
+        # Wait briefly for graceful shutdown
+        local _loops=30
+        while (( _loops > 0 )); do
+            if ! kill -0 "$pid" 2>/dev/null; then
+                break
+            fi
+            sleep 0.1
+            _loops=$((_loops - 1))
+        done
+        # Escalate if still alive
+        if kill -0 "$pid" 2>/dev/null; then
+            kill -KILL "$pid" 2>/dev/null || true
+        fi
     fi
     wait "$pid" 2>/dev/null || true
 }

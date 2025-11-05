@@ -27,7 +27,35 @@ typedef struct {
     unsigned long long last_event_id;
     time_t created_at;
     time_t updated_at;
+    int storage_policy_template;
+    int max_capacity_per_instance;
+    int max_instances;
+    size_t total_instances;
+    size_t total_subs;
+    int max_ephemeral_events;
 } SQLiteRoomInfo;
+
+#define SQLITE_FRIEND_NAME_MAX 64
+#define SQLITE_WORD_BANK_VERSION_MAX 64
+#define SQLITE_NOTE_MAX 512
+
+typedef struct {
+    long long id;
+    char user_a[65];
+    char user_b[65];
+    char generated_name[SQLITE_FRIEND_NAME_MAX + 1];
+    char word_bank_version[SQLITE_WORD_BANK_VERSION_MAX + 1];
+    time_t established_at;
+} SQLiteFriendshipRow;
+
+typedef struct {
+    long long friendship_id;
+    char owner[65];
+    char note[SQLITE_NOTE_MAX + 1];
+    time_t updated_at;
+} SQLiteFriendNoteRow;
+
+struct RoomInstance;
 
 /**
  * 初始化SQLite存储
@@ -52,7 +80,8 @@ int sqlite_storage_init(SQLiteStorage *storage, const char *db_path);
  * @return 0表示成功，-1表示失败
  */
 int sqlite_store_text(SQLiteStorage *storage, const char *room_name,
-                      const char *user, const char *timestamp,
+                      const char *user, const char *display_token,
+                      const char *instance_id, const char *timestamp,
                       const unsigned char *payload, size_t len,
                       const char *sha_hex, uint64_t *out_event_id);
 
@@ -73,7 +102,8 @@ int sqlite_store_text(SQLiteStorage *storage, const char *room_name,
  * @return 0表示成功，-1表示失败
  */
 int sqlite_store_file(SQLiteStorage *storage, const char *room_name,
-                      const char *user, const char *timestamp,
+                      const char *user, const char *display_token,
+                      const char *instance_id, const char *timestamp,
                       const char *filename, size_t size, const char *sha_hex,
                       const char *tmp_path, int *out_stored_as_blob,
                       uint64_t *out_event_id);
@@ -91,6 +121,7 @@ int sqlite_store_file(SQLiteStorage *storage, const char *room_name,
  */
 int sqlite_get_history(SQLiteStorage *storage, const char *room_name,
                        uint64_t since_id, size_t limit,
+                       struct RoomInstance *instance, const char *viewer_user,
                        int (*callback)(void *user_data,
                                        const unsigned char *data, size_t len),
                        void *user_data);
@@ -121,15 +152,63 @@ int sqlite_delete_latest_event_for_room(SQLiteStorage *storage,
                                         const char *room_name);
 
 int sqlite_list_rooms(SQLiteStorage *storage, size_t offset, size_t limit,
-                      SQLiteRoomInfo *out, size_t capacity,
-                      size_t *returned, size_t *total_count,
-                      int *has_more);
+                      SQLiteRoomInfo *out, size_t capacity, size_t *returned,
+                      size_t *total_count, int *has_more);
 
 int sqlite_get_room_info(SQLiteStorage *storage, const char *room_name,
                          SQLiteRoomInfo *out);
 
 int sqlite_upsert_room_owner(SQLiteStorage *storage, const char *room_name,
-                              const char *owner);
+                             const char *owner);
+
+int sqlite_upsert_room_instance(SQLiteStorage *storage, const char *instance_id,
+                                const char *room_name, int storage_policy,
+                                int max_capacity, int state,
+                                unsigned long long last_event_id);
+
+int sqlite_update_room_instance_state(SQLiteStorage *storage,
+                                      const char *instance_id, int state,
+                                      unsigned long long last_event_id);
+
+int sqlite_mark_room_instance_destroyed(SQLiteStorage *storage,
+                                        const char *instance_id);
+
+int sqlite_update_room_aggregates(SQLiteStorage *storage, const char *room_name,
+                                  size_t total_instances, size_t total_subs,
+                                  unsigned long long last_event_id);
+int sqlite_update_room_storage_policy(SQLiteStorage *storage,
+                                      const char *room_name,
+                                      int storage_policy_template,
+                                      int max_ephemeral_events);
+
+int sqlite_get_friendship(SQLiteStorage *storage, const char *user_a,
+                          const char *user_b, SQLiteFriendshipRow *out);
+int sqlite_upsert_friendship(SQLiteStorage *storage, const char *user_a,
+                             const char *user_b, const char *generated_name,
+                             const char *word_bank_version,
+                             SQLiteFriendshipRow *out);
+int sqlite_list_friendships_for_user(SQLiteStorage *storage, const char *user,
+                                     SQLiteFriendshipRow *out, size_t capacity,
+                                     size_t *returned);
+int sqlite_upsert_friend_note(SQLiteStorage *storage, long long friendship_id,
+                              const char *owner, const char *note);
+int sqlite_get_friend_note(SQLiteStorage *storage, long long friendship_id,
+                           const char *owner, SQLiteFriendNoteRow *out);
+
+/* -------------------- Auth (refresh tokens) -------------------- */
+int sqlite_insert_refresh_token(SQLiteStorage *storage, const char *user,
+                                const char *token, sqlite3_int64 expires_at);
+int sqlite_find_refresh_token(SQLiteStorage *storage, const char *token,
+                              char *out_user, size_t out_user_cap,
+                              sqlite3_int64 *out_expires_at);
+
+/* Path-based convenience wrappers that open/close the DB internally. */
+int sqlite_insert_refresh_token_path(const char *db_path, const char *user,
+                                     const char *token,
+                                     sqlite3_int64 expires_at);
+int sqlite_find_refresh_token_path(const char *db_path, const char *token,
+                                   char *out_user, size_t out_user_cap,
+                                   sqlite3_int64 *out_expires_at);
 
 /**
  * 清理SQLite存储资源

@@ -58,6 +58,7 @@ class RoomContent:
         # UI组件
         self.room_title = None
         self.tabs = None
+        self.ephemeral_banner = None
 
         # 子组件（独立的视图）
         self.chat_view = ChatView(i18n, view_model, page)
@@ -101,14 +102,41 @@ class RoomContent:
         user: str,
         message: str,
         event_id: Optional[int] = None,
+        timestamp: Optional[str] = None,
     ) -> None:
-        self.view_model.on_message_received(room_name, user, message, event_id)
+        self.view_model.on_message_received(
+            room_name, user, message, event_id, timestamp
+        )
 
     def _on_room_changed(self, room_id: Optional[str], room_name: Optional[str]):
         """处理房间切换（只更新标题）"""
+        if room_id == RoomsViewModel.HOME_ROOM_ID:
+            if self.room_title:
+                loading_text = self.i18n.get("rooms.loading", "加载中")
+                display_name = room_name or loading_text
+                self.room_title.value = f"💬 {display_name} ({loading_text})"
+            if self.ephemeral_banner:
+                self.ephemeral_banner.visible = False
+            if self.page:
+                self.page.update()
+            return
+
         if self.room_title:
             display_name = room_name or room_id or "Select a Room"
             self.room_title.value = f"💬 {display_name}"
+        if room_id and self.ephemeral_banner:
+            if self.session.is_room_ephemeral(room_id):
+                self.ephemeral_banner.visible = True
+                self.ephemeral_banner.content = pixel_text(
+                    self.i18n.get(
+                        "chat.ephemeral_banner",
+                        "⚠️ Messages here are not stored. History and files are disabled.",
+                    ),
+                    10,
+                    "#b26a00",
+                )
+            else:
+                self.ephemeral_banner.visible = False
             if self.page:
                 self.page.update()
 
@@ -116,6 +144,14 @@ class RoomContent:
         """构建容器UI（只负责Tab切换）"""
         # 房间标题
         self.room_title = pixel_text("💬 Select a Room", 14, "primary")
+
+        self.ephemeral_banner = ft.Container(
+            visible=False,
+            bgcolor="#fff3cd",
+            padding=spacing(0.5),
+            border_radius=6,
+            content=pixel_text("", 10, "#b26a00"),
+        )
 
         # 创建Tab，装载ChatView和FileView
         self.tabs = ft.Tabs(
@@ -137,6 +173,7 @@ class RoomContent:
             ft.Column(
                 [
                     self.room_title,
+                    self.ephemeral_banner,
                     ft.Divider(),
                     self.tabs,
                 ],

@@ -8,15 +8,6 @@ ming-drlms的核心共享库。
 # Re-export key primitives for convenience
 from .protocol import tcp_connect, recv_line, recv_exact, login  # noqa: F401
 from .file_transfer import list_files, upload_file, download_file  # noqa: F401
-from .room_protocol import (
-    subscribe_room,
-    get_room_info,
-    send_message,
-    get_history,
-    list_rooms,
-    get_available_rooms,
-    RoomListPage,
-)  # noqa: F401
 
 __all__ = [
     "tcp_connect",
@@ -26,11 +17,4 @@ __all__ = [
     "list_files",
     "upload_file",
     "download_file",
-    "subscribe_room",
-    "get_room_info",
-    "send_message",
-    "get_history",
-    "list_rooms",
-    "get_available_rooms",
-    "RoomListPage",
 ]

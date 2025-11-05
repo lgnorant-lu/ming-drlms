@@ -33,6 +33,14 @@ pkgroot/
 /tests/test_ipc
 /tests/test_ipc_suite
 
+# Local build outputs
+bin/
+build/
+
+# Generated protobuf-c sources (when using Makefile fallback)
+src/generated/*.pb-c.c
+src/generated/*.pb-c.h
+
 # Coverage files
 **/*.gcno
 **/*.gcda
@@ -71,4 +79,4 @@ nohup.out
 
 # Miscellaneous
 lgn/
-M3-Now.md
+.factory/

@@ -15,6 +15,9 @@ from __future__ import annotations
 
 import socket as _socket
 
+_last_protocol_version: int | None = None
+_last_server_version: str = ""
+
 
 def tcp_connect(host: str, port: int, timeout: float = 5.0) -> _socket.socket:
     """建立TCP连接
@@ -92,12 +95,31 @@ def login(sock: _socket.socket, user: str, password: str) -> bool:
     Returns:
         bool: 登录是否成功
     """
+    global _last_protocol_version, _last_server_version
     try:
         sock.sendall(f"LOGIN|{user}|{password}\n".encode())
         resp = recv_line(sock)
+        if resp.startswith("OK|LOGIN|"):
+            parts = resp.split("|")
+            if len(parts) >= 4:
+                try:
+                    _last_protocol_version = int(parts[2])
+                except ValueError:
+                    _last_protocol_version = None
+                _last_server_version = parts[3]
+            return True
+        if resp == "OK|WELCOME":
+            _last_protocol_version = None
+            _last_server_version = ""
         return resp.startswith("OK|") or resp == "OK"
     except Exception:
         return False
+
+
+def last_login_metadata() -> tuple[int | None, str]:
+    """返回最近一次登录握手的协议/服务器版本信息。"""
+
+    return _last_protocol_version, _last_server_version
 
 
 __all__ = [
@@ -105,4 +127,5 @@ __all__ = [
     "recv_line",
     "recv_exact",
     "login",
+    "last_login_metadata",
 ]

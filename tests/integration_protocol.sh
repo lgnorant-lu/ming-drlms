@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
+
+# Skip this script if running in MP2-only mode
+if [[ "${DRLMS_ENABLE_MPROTO_V2:-}" == "1" ]]; then
+    echo "SKIP: Integration protocol test skipped in MP2-only mode (legacy text protocol dependency)"
+    exit 0
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=tests/lib/socket_helpers.sh
 source "$SCRIPT_DIR/lib/socket_helpers.sh"

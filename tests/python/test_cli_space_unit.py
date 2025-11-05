@@ -1,5 +1,15 @@
 from __future__ import annotations
 
+import os
+import pytest
+
+# Skip this legacy text-protocol CLI unit module when MP2-only mode is enabled
+if os.getenv("DRLMS_ENABLE_MPROTO_V2") == "1":
+    pytest.skip(
+        "Skipped in MP2-only mode: legacy text protocol tests",
+        allow_module_level=True,
+    )
+
 import types
 from pathlib import Path
 

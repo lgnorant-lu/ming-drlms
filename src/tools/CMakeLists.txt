@@ -50,3 +50,23 @@ if(ENABLE_COVERAGE AND COVERAGE_LIBS)
 endif()
 
 target_link_libraries(ipc_sender PRIVATE ${IPC_SENDER_LIBS})
+
+# ------------------------------------------------------------
+# E2EE Spike (libsignal-protocol-c) - isolated PoC target
+# ------------------------------------------------------------
+option(ENABLE_SIGNAL_SPIKE "Build Signal Protocol spike (libsignal-protocol-c)" OFF)
+if(ENABLE_SIGNAL_SPIKE)
+    include(${PROJECT_SOURCE_DIR}/cmake/SignalFetch.cmake)
+
+    # Add the executable
+    add_executable(test_signal_spike test_signal_spike.c)
+
+    # Set include directories and linking
+    target_include_directories(test_signal_spike PRIVATE ${PROJECT_SOURCE_DIR}/src)
+
+    find_package(OpenSSL REQUIRED)
+    target_link_libraries(test_signal_spike PRIVATE
+        Signal::protocol
+        OpenSSL::Crypto
+    )
+endif()

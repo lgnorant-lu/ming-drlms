@@ -3,6 +3,13 @@
 # 提供可扩展的用户创建、验证和管理功能
 
 set -euo pipefail
+
+# Skip this script if running in MP2-only mode
+if [[ "${DRLMS_ENABLE_MPROTO_V2:-}" == "1" ]]; then
+    echo "SKIP: User management test skipped in MP2-only mode (legacy text protocol dependency)"
+    exit 0
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=tests/lib/socket_helpers.sh
 source "$SCRIPT_DIR/lib/socket_helpers.sh"
@@ -98,7 +105,7 @@ verify_user() {
         return 1
     fi
 
-    if [[ "$response" == *"OK|WELCOME"* ]]; then
+    if [[ "$response" == *"OK|LOGIN|"* || "$response" == *"OK|WELCOME"* ]]; then
         log_success "User $username verification passed"
         return 0
     fi

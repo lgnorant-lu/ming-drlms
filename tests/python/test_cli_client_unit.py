@@ -1,5 +1,15 @@
 from __future__ import annotations
 
+import os
+import pytest
+
+# Skip this legacy text-protocol CLI unit module when MP2-only mode is enabled
+if os.getenv("DRLMS_ENABLE_MPROTO_V2") == "1":
+    pytest.skip(
+        "Skipped in MP2-only mode: legacy text protocol tests",
+        allow_module_level=True,
+    )
+
 from pathlib import Path
 
 import pytest
@@ -61,7 +71,7 @@ def test_client_log_sends_and_quit(monkeypatch, capsys):
     # Dummy socket that returns two lines for LOGIN and LOG acks
     class DS:
         def __init__(self):
-            self.buf = list(b"OK|WELCOME\nOK\n")
+            self.buf = list(b"OK|LOGIN|5|test-server\nOK\n")
             self.sent = []
 
         def settimeout(self, *_):

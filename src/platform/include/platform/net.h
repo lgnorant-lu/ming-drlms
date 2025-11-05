@@ -18,6 +18,7 @@ typedef int platform_socket_t;
 int platform_net_initialize(void);
 int platform_net_cleanup(void);
 int platform_socket_close(platform_socket_t sock);
+int platform_socket_shutdown(platform_socket_t sock);
 void platform_net_set_last_error(int err_code);
 
 #ifdef __cplusplus

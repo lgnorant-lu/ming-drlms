@@ -7,3 +7,12 @@ max_conn: 128
 rate_up_bps: 0
 rate_down_bps: 0
 max_upload: 104857600
+federation:
+  enabled: true
+  server_id: server-a
+  bearer_token: changeme-secret-token-phase4
+  trusted_servers:
+    - server_id: server-b
+      host: localhost
+      port: 19091
+      bearer_token: changeme-secret-token-phase4

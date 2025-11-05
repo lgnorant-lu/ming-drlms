@@ -38,6 +38,17 @@ int platform_socket_close(platform_socket_t sock) {
     return 0;
 }
 
+int platform_socket_shutdown(platform_socket_t sock) {
+    if (sock == INVALID_SOCKET)
+        return 0;
+    int rc = shutdown(sock, SD_BOTH);
+    if (rc != 0) {
+        platform_win32_set_errno((DWORD)WSAGetLastError());
+        return -1;
+    }
+    return 0;
+}
+
 void platform_net_set_last_error(int err_code) {
     platform_win32_set_errno((unsigned long)err_code);
 }

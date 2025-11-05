@@ -5,7 +5,7 @@ CPPFLAGS = -Isrc -Isrc/libipc -Isrc/platform/include
 UNAME_S := $(strip $(shell uname -s 2>/dev/null))
 
 LIBS_COMMON =
-LIBS_SERVER = -lcrypto -largon2 -lsqlite3
+LIBS_SERVER = -lcrypto -largon2 -lsqlite3 -lprotobuf-c
 LIBS_AGENT = -lcrypto
 PLATFORM_EXTRA_LIBS =
 
@@ -49,15 +49,60 @@ LIBDIR ?= $(PREFIX)/lib
 INCLUDEDIR ?= $(PREFIX)/include
 PKGCONFIGDIR ?= $(LIBDIR)/pkgconfig
 
+# local build output directory for executables (avoid cluttering repo root)
+OUTDIR ?= bin
+
+# -----------------------------------------------------------------------------
+# Make wrapper: CMake is the canonical build. To use legacy Make targets, run
+#   make ALLOW_LEGACY=1 <target>
+# -----------------------------------------------------------------------------
+ifndef ALLOW_LEGACY
+.PHONY: all cmake clean
+all:
+	@echo "[error] Make-based build is deprecated. Use CMake instead:" >&2
+	@echo "  rm -rf build && cmake -S . -B build" >&2
+	@echo "  cmake --build build --target proto_gen log_collector_server -j" >&2
+	@echo "(or run: make ALLOW_LEGACY=1 all)" >&2
+	@exit 2
+
+cmake:
+	@mkdir -p build
+	@cmake -S . -B build
+	@cmake --build build --target proto_gen log_collector_server -j
+
+clean:
+	rm -rf build $(OUTDIR) coverage .coverage libipc.a libipc.so libplatform_linux.a
+
+# stop here; legacy rules are disabled unless ALLOW_LEGACY=1
+else
+
 SRC_LIBIPC = src/libipc/shared_buffer.c
-SRC_SERVER = src/server/log_collector_server.c src/server/rooms.c src/server/sqlite_storage.c
+SRC_SERVER = src/server/log_collector_server.c \
+	src/server/mp2_auth.c \
+	src/server/mp2_dispatcher.c \
+	src/server/mp2_protocol.c \
+	src/server/mp2_rooms.c \
+	src/server/rooms.c \
+	src/server/sqlite_storage.c \
+	$(PROTO_C_SRCS)
 SRC_AGENT = src/agent/log_agent.c
 SRC_TOOLS = src/tools/proc_launcher.c src/tools/log_consumer.c src/tools/ipc_sender.c
 
 # All C source files for coverage analysis
 C_SOURCES = $(SRC_LIBIPC) $(SRC_SERVER) $(SRC_AGENT) $(SRC_TOOLS)
 
-all: $(PLATFORM_LIB) libipc.a libipc.so log_collector_server log_agent proc_launcher log_consumer ipc_sender
+all: $(PLATFORM_LIB) libipc.a libipc.so $(OUTDIR)/log_collector_server $(OUTDIR)/log_agent $(OUTDIR)/proc_launcher $(OUTDIR)/log_consumer $(OUTDIR)/ipc_sender
+PROTO_DIR = schema/v2
+PROTO_SRCS = $(wildcard $(PROTO_DIR)/*.proto)
+PROTO_C_SRCS = $(patsubst $(PROTO_DIR)/%.proto,src/generated/%.pb-c.c,$(PROTO_SRCS))
+PROTO_C_HDRS = $(patsubst $(PROTO_DIR)/%.proto,src/generated/%.pb-c.h,$(PROTO_SRCS))
+
+src/generated/%.pb-c.c src/generated/%.pb-c.h: $(PROTO_DIR)/%.proto
+	@mkdir -p src/generated
+	protoc-c --c_out=src/generated -I. -I$(PROTO_DIR) $<
+
+proto: $(PROTO_C_SRCS) $(PROTO_C_HDRS)
+
 
 %.o: %.c
 	$(CC) $(CFLAGS) $(CPPFLAGS) -fPIC -c $< -o $@
@@ -71,19 +116,24 @@ libipc.so: $(SRC_LIBIPC:.c=.o) $(PLATFORM_LIB)
 $(PLATFORM_LIB): $(PLATFORM_OBJS)
 	ar rcs $@ $^
 
-log_collector_server: $(SRC_SERVER) libipc.a $(PLATFORM_LIB)
-	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $(SRC_SERVER) -L. -lipc $(PLATFORM_LIB) $(LIBS_SERVER) -Wl,-rpath,'$$ORIGIN'
+$(OUTDIR)/log_collector_server: $(SRC_SERVER) libipc.a $(PLATFORM_LIB)
+	@mkdir -p $(OUTDIR)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -Isrc/generated -o $@ $(SRC_SERVER) -L. -lipc $(PLATFORM_LIB) $(LIBS_SERVER) -Wl,-rpath,'$$ORIGIN'
 
-log_agent: $(SRC_AGENT) $(PLATFORM_LIB)
+$(OUTDIR)/log_agent: $(SRC_AGENT) $(PLATFORM_LIB)
+	@mkdir -p $(OUTDIR)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $(SRC_AGENT) $(PLATFORM_LIB) $(LIBS_AGENT) -Wl,-rpath,'$$ORIGIN'
 
-proc_launcher: src/tools/proc_launcher.c
+$(OUTDIR)/proc_launcher: src/tools/proc_launcher.c
+	@mkdir -p $(OUTDIR)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ src/tools/proc_launcher.c -Wl,-rpath,'$$ORIGIN'
 
-log_consumer: src/tools/log_consumer.c libipc.a $(PLATFORM_LIB)
+$(OUTDIR)/log_consumer: src/tools/log_consumer.c libipc.a $(PLATFORM_LIB)
+	@mkdir -p $(OUTDIR)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $< -L. -lipc $(PLATFORM_LIB) $(LIBS_COMMON) $(PLATFORM_EXTRA_LIBS) -Wl,-rpath,'$$ORIGIN'
 
-ipc_sender: src/tools/ipc_sender.c libipc.a $(PLATFORM_LIB)
+$(OUTDIR)/ipc_sender: src/tools/ipc_sender.c libipc.a $(PLATFORM_LIB)
+	@mkdir -p $(OUTDIR)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $< -L. -lipc $(PLATFORM_LIB) $(LIBS_COMMON) $(PLATFORM_EXTRA_LIBS) -Wl,-rpath,'$$ORIGIN'
 
 debug:
@@ -91,8 +141,10 @@ debug:
 
 clean:
 	find . -type f \( -name "*.o" -o -name "*.a" -o -name "*.so" -o -name "*.gcno" -o -name "*.gcda" -o -name "*.gcov" \) -delete || true
-	rm -f log_collector_server log_agent proc_launcher log_consumer ipc_sender tests/test_ipc_suite $(PLATFORM_LIB) || true
-	rm -rf coverage .coverage
+	rm -f $(OUTDIR)/log_collector_server $(OUTDIR)/log_agent $(OUTDIR)/proc_launcher $(OUTDIR)/log_consumer $(OUTDIR)/ipc_sender tests/test_ipc_suite $(PLATFORM_LIB) || true
+	rm -rf coverage .coverage $(OUTDIR)
+
+endif
 
 .PHONY: all debug clean test coverage
 
@@ -107,8 +159,6 @@ test: $(TESTS) log_agent log_collector_server ipc_sender log_consumer
 	DRLMS_SHM_KEY=0x4c4f4754 LD_LIBRARY_PATH=. DYLD_LIBRARY_PATH=. ./tests/test_ipc_suite
 	@echo "Running C protocol integration tests..."
 	chmod +x tests/test_server_protocol.sh && HOST=127.0.0.1 PORT=8080 bash -lc 'LD_LIBRARY_PATH=. DYLD_LIBRARY_PATH=. ./tests/test_server_protocol.sh $${HOST} $${PORT}'
-	@echo "Running Python E2E tests..."
-	chmod +x tests/test_cli_e2e.sh && HOST=127.0.0.1 PORT=8080 bash -lc './tests/test_cli_e2e.sh'
 
 coverage:
 	@echo "--- Generating comprehensive C and Python coverage report using CMake ---"

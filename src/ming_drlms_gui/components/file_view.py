@@ -36,6 +36,9 @@ class FileView:
 
         # 延迟初始化文件管理组件
         self.file_panel: Optional[FilePanel] = None
+        self._room_ready_unsub = None
+        self._current_room_id: Optional[str] = None
+        self._current_room_name: Optional[str] = None
 
         # 容器
         self.file_container = None
@@ -50,6 +53,9 @@ class FileView:
         """订阅ViewModel的事件"""
         # 订阅房间切换事件
         self.view_model.add_current_room_listener(self._on_room_changed)
+        self._room_ready_unsub = self.view_model.add_room_ready_listener(
+            self._on_room_ready
+        )
 
     def _create_components(self):
         """创建文件管理UI组件"""
@@ -76,6 +82,43 @@ class FileView:
             return
 
         print(f"DEBUG: FileView - Room changed to {room_id}", flush=True)
+        self._current_room_id = room_id
+        self._current_room_name = room_name
+
+        if room_id == RoomsViewModel.HOME_ROOM_ID:
+            loading = ft.Container(
+                content=pixel_text(
+                    self.i18n.get("files.loading_room", "正在加载房间文件..."),
+                    11,
+                    "muted",
+                ),
+                alignment=ft.alignment.center,
+                expand=True,
+            )
+            self.file_container.content = loading
+            if self.page:
+                self.page.update()
+            return
+
+        if self.view_model.session.is_room_ephemeral(room_id):
+            notice = ft.Container(
+                content=pixel_text(
+                    self.i18n.get(
+                        "files.ephemeral_disabled",
+                        "Ephemeral rooms do not support file sharing.",
+                    ),
+                    11,
+                    "muted",
+                ),
+                alignment=ft.alignment.center,
+                expand=True,
+                padding=20,
+            )
+            self.file_container.content = notice
+            self.file_panel = None
+            if self.page:
+                self.page.update()
+            return
 
         # 初始化或刷新文件面板
         if self.file_panel is None and self.page:
@@ -113,6 +156,29 @@ class FileView:
         # 触发UI更新
         if self.page:
             self.page.update()
+
+    def _on_room_ready(self, room_id: str, ready: bool) -> None:
+        if room_id != self._current_room_id:
+            return
+        if not self.file_container:
+            return
+        if not ready:
+            loading = ft.Container(
+                content=pixel_text(
+                    self.i18n.get("files.loading_room", "正在加载房间文件..."),
+                    11,
+                    "muted",
+                ),
+                alignment=ft.alignment.center,
+                expand=True,
+            )
+            self.file_container.content = loading
+            if self.page:
+                self.page.update()
+            return
+        if room_id == RoomsViewModel.HOME_ROOM_ID:
+            return
+        self._on_room_changed(room_id, self._current_room_name)
 
     def build(self) -> ft.Control:
         """构建并返回文件视图UI"""

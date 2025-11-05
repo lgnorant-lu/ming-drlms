@@ -62,17 +62,9 @@
 - `legacy_test`: 传统格式用户 (alice, bob)
 - `all`: 所有预定义用户
 
-### 3. 集成测试脚本 (`integration_space.sh`)
+### 3. 集成测试脚本
 
-**功能**：
-- 房间策略集成测试
-- 支持测试环境变量
-- 向后兼容性
-
-**环境变量支持**：
-- `TEST_HOST`: 测试主机
-- `TEST_PORT`: 测试端口
-- `TEST_DATA_DIR`: 测试数据目录
+（已改为 MP2 集成测试：参考 `tests/test_server_protocol.sh`）
 
 ## 测试流程
 
@@ -82,9 +74,9 @@
 # 1. 初始化测试环境
 ./tests/test_env_init.sh --keep-data
 
-# 2. 运行特定测试
+# 2. 运行 MP2 协议集成测试
 export TEST_DATA_DIR="/tmp/drlms_test_env_12345"
-./tests/integration_space.sh
+bash tests/test_server_protocol.sh
 
 # 3. 清理（可选）
 ./tests/test_user_mgmt.sh cleanup "$TEST_DATA_DIR"
