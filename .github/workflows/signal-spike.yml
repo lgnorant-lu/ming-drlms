@@ -21,8 +21,15 @@ jobs:
         run: cmake --build build --target test_signal_spike -j2
       - name: Run
         run: |
+          set -e
           ./build/test_signal_spike | tee spike.log
-          grep -q "Signal E2E Loop OK" spike.log
+          status=${PIPESTATUS[0]}
+          grep -Fq "Signal E2E Loop OK" spike.log
+          grep_status=$?
+          if [ "$status" -ne 0 ] || [ "$grep_status" -ne 0 ]; then
+            echo "Spike run failed: status=$status grep=$grep_status" >&2
+            exit 1
+          fi
 
   build-macos:
     runs-on: macos-latest
@@ -40,8 +47,15 @@ jobs:
         run: cmake --build build --target test_signal_spike -j2
       - name: Run
         run: |
+          set -e
           ./build/test_signal_spike | tee spike.log
-          grep -q "Signal E2E Loop OK" spike.log
+          status=${PIPESTATUS[0]}
+          grep -Fq "Signal E2E Loop OK" spike.log
+          grep_status=$?
+          if [ "$status" -ne 0 ] || [ "$grep_status" -ne 0 ]; then
+            echo "Spike run failed: status=$status grep=$grep_status" >&2
+            exit 1
+          fi
 
   build-windows:
     runs-on: windows-latest
@@ -65,7 +79,14 @@ jobs:
         run: cmake --build build --target test_signal_spike -j2
       - name: Run
         run: |
+          set -e
           ./build/test_signal_spike.exe | tee spike.log
-          grep -q "Signal E2E Loop OK" spike.log
+          status=${PIPESTATUS[0]}
+          grep -Fq "Signal E2E Loop OK" spike.log
+          grep_status=$?
+          if [ "$status" -ne 0 ] || [ "$grep_status" -ne 0 ]; then
+            echo "Spike run failed: status=$status grep=$grep_status" >&2
+            exit 1
+          fi
 
 
