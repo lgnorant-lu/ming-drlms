@@ -1054,8 +1054,8 @@ static int rooms_fetch_file_event_log(Room *room, uint64_t event_id,
             snprintf(out->timestamp, sizeof out->timestamp, "%s", ts);
         const char *display_emit = (display[0] != '\0') ? display : user;
         if (display_emit)
-            snprintf(out->display_token, sizeof out->display_token, "%s",
-                     display_emit);
+            snprintf(out->display_token, sizeof out->display_token, "%.*s",
+                     (int)sizeof out->display_token - 1, display_emit);
         out->event_id = event_id;
         out->size_bytes = sizev;
         out->ephemeral = 0;
@@ -1102,7 +1102,8 @@ int rooms_fetch_file_event(Room *room, RoomInstance *instance,
                                                : ev->user;
                 if (display_emit)
                     snprintf(out->display_token, sizeof out->display_token,
-                             "%s", display_emit);
+                             "%.*s", (int)sizeof out->display_token - 1,
+                             display_emit);
                 rooms_uuid_to_hex(&instance->instance_id, out->instance_id);
                 out->event_id = event_id;
                 out->size_bytes = ev->payload.file.size;

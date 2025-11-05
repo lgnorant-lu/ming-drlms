@@ -16,7 +16,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y cmake make gcc g++ libssl-dev
       - name: Configure
-        run: cmake -S . -B build -DENABLE_SIGNAL_SPIKE=ON
+        run: cmake -S . -B build -DENABLE_SIGNAL_SPIKE=ON -DBUILD_SERVER=OFF
       - name: Build
         run: cmake --build build --target test_signal_spike -j2
       - name: Run
@@ -35,7 +35,7 @@ jobs:
       - name: Configure
         env:
           OPENSSL_ROOT_DIR: /usr/local/opt/openssl@3
-        run: cmake -S . -B build -DENABLE_SIGNAL_SPIKE=ON
+        run: cmake -S . -B build -DENABLE_SIGNAL_SPIKE=ON -DBUILD_SERVER=OFF
       - name: Build
         run: cmake --build build --target test_signal_spike -j2
       - name: Run
@@ -60,7 +60,7 @@ jobs:
             mingw-w64-x86_64-cmake
             mingw-w64-x86_64-openssl
       - name: Configure
-        run: cmake -S . -B build -G "Unix Makefiles" -DENABLE_SIGNAL_SPIKE=ON
+        run: cmake -S . -B build -G "Unix Makefiles" -DENABLE_SIGNAL_SPIKE=ON -DBUILD_SERVER=OFF
       - name: Build
         run: cmake --build build --target test_signal_spike -j2
       - name: Run
