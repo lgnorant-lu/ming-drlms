@@ -109,6 +109,15 @@ void server_core_enable_tcp_keepalive(platform_socket_t fd, int enabled,
         (void)setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, &keepcnt,
                          sizeof(keepcnt));
 #endif
+#if !defined(TCP_KEEPIDLE)
+    (void)keepidle;
+#endif
+#if !defined(TCP_KEEPINTVL)
+    (void)keepintvl;
+#endif
+#if !defined(TCP_KEEPCNT)
+    (void)keepcnt;
+#endif
 #endif
 }
 

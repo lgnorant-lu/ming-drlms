@@ -21,7 +21,7 @@ jobs:
         run: cmake --build build --target test_signal_spike -j2
       - name: Run
         run: |
-          ./build/src/tools/test_signal_spike | tee spike.log
+          ./build/test_signal_spike | tee spike.log
           grep -q "Signal E2E Loop OK" spike.log
 
   build-macos:
@@ -40,7 +40,7 @@ jobs:
         run: cmake --build build --target test_signal_spike -j2
       - name: Run
         run: |
-          ./build/src/tools/test_signal_spike | tee spike.log
+          ./build/test_signal_spike | tee spike.log
           grep -q "Signal E2E Loop OK" spike.log
 
   build-windows:
@@ -65,7 +65,7 @@ jobs:
         run: cmake --build build --target test_signal_spike -j2
       - name: Run
         run: |
-          ./build/src/tools/test_signal_spike.exe | tee spike.log
+          ./build/test_signal_spike.exe | tee spike.log
           grep -q "Signal E2E Loop OK" spike.log
 
 

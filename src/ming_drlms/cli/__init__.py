@@ -115,7 +115,8 @@ def cli_login(
     )
     store_path = getattr(store, "_path", None)
     if store_path is not None:
-        print(f"[blue]token cached at[/blue] {store_path}")
+        # Use plain echo to avoid any potential line wrapping/styling side effects in tests
+        typer.echo(f"token cached at {store_path}")
 
 
 # Import and register top-level command groups
