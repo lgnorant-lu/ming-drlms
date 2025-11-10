@@ -82,15 +82,79 @@ long rooms_get_ignite_active_ttl(void) {
 void rooms_apply_policy_on_owner_offline_if_needed(Room *room,
                                                    long long rate_bps);
 // Instance management is implemented in rooms_instance.c; provide local
-// Instance management functions removed - moved to rooms_instance.c
-// to avoid unused function warnings in compilation
 // wrappers
+static inline int ensure_subscriber_capacity(RoomInstance *instance,
+                                             size_t min_cap) {
+    return rooms_instance_ensure_subscriber_capacity(instance, min_cap);
+}
+static inline void subscriber_refresh_display_token(Subscriber *sub) {
+    rooms_subscriber_refresh_display_token(sub);
+}
+static inline void subscriber_reset_state(Subscriber *sub) {
+    rooms_subscriber_reset(sub);
+}
+static inline int subscriber_generate_presence_token(RoomInstance *instance,
+                                                     Subscriber *sub) {
+    return rooms_subscriber_generate_presence_token(instance, sub);
+}
+static inline Subscriber *room_instance_find_subscriber_by_fd_locked(
+    RoomInstance *instance, platform_socket_t fd, size_t *out_index) {
+    return rooms_instance_find_sub_by_fd_locked(instance, fd, out_index);
+}
+static inline Subscriber *room_instance_find_subscriber_by_user_locked(
+    RoomInstance *instance, const char *user, size_t *out_index) {
+    return rooms_instance_find_sub_by_user_locked(instance, user, out_index);
+}
+static inline Subscriber *room_instance_find_subscriber_by_presence_locked(
+    RoomInstance *instance, const char *presence_token, size_t *out_index) {
+    return rooms_instance_find_sub_by_presence_locked(instance, presence_token,
+                                                      out_index);
+}
+static inline void
+room_instance_remove_subscriber_locked(RoomInstance *instance, size_t index) {
+    rooms_instance_remove_sub_locked(instance, index);
+}
+static inline void room_instance_prune_user_locked(RoomInstance *instance,
+                                                   const char *user) {
+    rooms_instance_prune_user_locked(instance, user);
+}
+static inline void
+room_instance_clear_ephemeral_events(RoomInstance *instance) {
+    rooms_instance_clear_ephemeral_events(instance);
+}
+static inline void room_instance_clear_ignite(RoomInstance *instance) {
+    rooms_instance_clear_ignite(instance);
+}
+static inline void room_instance_clear_friend_requests(RoomInstance *instance) {
+    rooms_instance_clear_friend_requests(instance);
+}
+static inline void room_instance_update_last_active(RoomInstance *instance) {
+    rooms_instance_update_last_active(instance);
+}
 /* moved to rooms_state.c */
 /* moved to rooms_state.c: rooms_for_each */
 // moved to rooms_sqlite_bridge.c (bridge sync helpers)
 /* moved to rooms_events.c: subscriber_can_view_plain */
 /* moved to rooms_social.c: room_instance_find_ignite_locked */
 // helpers removed (migrated to rooms_social.c where needed)
+static int subscriber_generate_presence_token(RoomInstance *instance,
+                                              Subscriber *sub);
+static void subscriber_refresh_display_token(Subscriber *sub);
+static Subscriber *room_instance_find_subscriber_by_fd_locked(
+    RoomInstance *instance, platform_socket_t fd, size_t *out_index);
+static Subscriber *room_instance_find_subscriber_by_user_locked(
+    RoomInstance *instance, const char *user, size_t *out_index);
+static Subscriber *room_instance_find_subscriber_by_presence_locked(
+    RoomInstance *instance, const char *presence_token, size_t *out_index);
+static void subscriber_reset_state(Subscriber *sub);
+// moved to rooms_instance.c
+
+/* moved to rooms_state.c: room_find_instance_by_uuid_locked */
+/* moved to rooms_state.c: room_select_instance_locked */
+/* moved to rooms_state.c: room_create_instance_locked */
+/* moved to rooms_state.c: room_update_aggregates_locked */
+static void room_instance_update_last_active(RoomInstance *instance);
+static int ensure_subscriber_capacity(RoomInstance *instance, size_t min_cap);
 
 // moved to rooms_instance.c
 

@@ -31,25 +31,31 @@ for file in "${STAGED_FILES[@]}"; do
   fi
 done
 
+# Handle C/C++ files with clang-format (optional tool)
 if [ ${#cf_files[@]} -gt 0 ]; then
   if command -v clang-format >/dev/null 2>&1; then
     echo "[pre-commit] Running clang-format..."
     if ! clang-format -i "${cf_files[@]}"; then
+      echo "[pre-commit] clang-format failed" >&2
       have_failed=1
     fi
   else
-    echo "[pre-commit] ERROR: clang-format not found in PATH" >&2
-    have_failed=1
+    echo "[pre-commit] WARNING: clang-format not found in PATH, skipping C/C++ formatting" >&2
+    # Don't fail the commit if clang-format is missing and there are C files
+    # This allows CI to work even without clang-format installed
   fi
 fi
 
+# Handle Python files with ruff (required tool)
 if [ ${#py_files[@]} -gt 0 ]; then
   if command -v ruff >/dev/null 2>&1; then
     echo "[pre-commit] Running ruff format + fix..."
     if ! ruff format -- "${py_files[@]}"; then
+      echo "[pre-commit] ruff format failed" >&2
       have_failed=1
     fi
     if ! ruff check --fix -- "${py_files[@]}"; then
+      echo "[pre-commit] ruff check failed" >&2
       have_failed=1
     fi
   else
@@ -64,13 +70,7 @@ if [ ${#STAGED_FILES[@]} -gt 0 ]; then
 fi
 
 if [ "$have_failed" -ne 0 ]; then
-  echo "[pre-commit] Formatting failed or tools missing. Aborting commit." >&2
-  exit 1
-fi
-
-exit 0
-if [ "$have_failed" -ne 0 ]; then
-  echo "[pre-commit] Formatting failed or tools missing. Aborting commit." >&2
+  echo "[pre-commit] Formatting failed. Aborting commit." >&2
   exit 1
 fi
 
