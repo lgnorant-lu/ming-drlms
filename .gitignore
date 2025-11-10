@@ -9,7 +9,7 @@
 # ==================================
 # Build & Packaging Output
 # ==================================
-build/
+build*/
 dist/
 pkgroot/
 *.deb

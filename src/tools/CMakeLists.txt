@@ -69,4 +69,9 @@ if(ENABLE_SIGNAL_SPIKE)
         Signal::protocol
         OpenSSL::Crypto
     )
+
+    # Add math library link for Linux to resolve ceil() function from libsignal-protocol-c
+    if(UNIX)
+        target_link_libraries(test_signal_spike PRIVATE m)
+    endif()
 endif()
