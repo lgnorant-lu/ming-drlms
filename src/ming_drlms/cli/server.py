@@ -86,6 +86,55 @@ def _cmake_build_config(build_dir: Path) -> str | None:
     return None
 
 
+def _locate_server_binary_within(build_dir: Path) -> Path | None:
+    suffixes = [".exe", ""] if os.name == "nt" else ["", ".exe"]
+    for suffix in suffixes:
+        candidate = build_dir / f"log_collector_server{suffix}"
+        if candidate.exists():
+            return candidate
+    for cfg in ("RelWithDebInfo", "Release", "Debug", "MinSizeRel"):
+        for suffix in suffixes:
+            candidate = build_dir / cfg / f"log_collector_server{suffix}"
+            if candidate.exists():
+                return candidate
+    return None
+
+
+def _configure_and_build_server(cmake_cmd: list[str], build_dir: Path) -> Path | None:
+    try:
+        build_dir.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+
+    configure_cmd = cmake_cmd + ["-S", str(ROOT), "-B", str(build_dir)]
+    configure_cmd += _cmake_configure_args()
+    configure_cmd.extend(["-DBUILD_SERVER=ON", "-DENABLE_SIGNAL_SPIKE=OFF"])
+    if subprocess.run(configure_cmd, check=False).returncode != 0:
+        return None
+
+    config = _cmake_build_config(build_dir)
+    build_cmd = cmake_cmd + [
+        "--build",
+        str(build_dir),
+        "--target",
+        "log_collector_server",
+    ]
+    if config:
+        build_cmd += ["--config", config]
+    if subprocess.run(build_cmd, check=False).returncode != 0:
+        return None
+
+    server_bin = _locate_server_binary_within(build_dir)
+    if server_bin and server_bin.exists():
+        os.environ["DRLMS_CMAKE_BUILD_DIR"] = str(build_dir)
+        return server_bin
+
+    fallback = find_binary("log_collector_server")
+    if fallback and fallback.exists():
+        return fallback
+    return None
+
+
 def _ensure_server_binary() -> Path | None:
     global BIN_SERVER
     server_bin = find_binary("log_collector_server")
@@ -95,52 +144,14 @@ def _ensure_server_binary() -> Path | None:
     cmake_cmd = _cmake_command()
     if not cmake_cmd:
         return None
-    build_dir = _default_build_dir()
-    try:
-        build_dir.mkdir(parents=True, exist_ok=True)
-    except Exception:
-        pass
-    cache = build_dir / "CMakeCache.txt"
-    needs_configure = True
-    if cache.exists():
-        try:
-            cache_text = cache.read_text(encoding="utf-8", errors="ignore")
-        except Exception:
-            cache_text = ""
+    primary_dir = _default_build_dir()
+    fallback_dir = (ROOT / "build" / "server_cli").resolve()
 
-        def _cache_value(key: str) -> str | None:
-            prefix = f"{key}:"
-            for line in cache_text.splitlines():
-                if line.startswith(prefix):
-                    parts = line.split("=", 1)
-                    if len(parts) == 2:
-                        return parts[1].strip()
-            return None
-
-        build_server_flag = _cache_value("BUILD_SERVER")
-        enable_spike_flag = _cache_value("ENABLE_SIGNAL_SPIKE")
-        needs_configure = not (build_server_flag == "ON" and enable_spike_flag != "ON")
-    if needs_configure:
-        configure_cmd = cmake_cmd + ["-S", str(ROOT), "-B", str(build_dir)]
-        configure_cmd += _cmake_configure_args()
-        configure_cmd.extend(["-DBUILD_SERVER=ON", "-DENABLE_SIGNAL_SPIKE=OFF"])
-        if subprocess.run(configure_cmd, check=False).returncode != 0:
-            return None
-    build_cmd = cmake_cmd + [
-        "--build",
-        str(build_dir),
-        "--target",
-        "log_collector_server",
-    ]
-    config = _cmake_build_config(build_dir)
-    if config:
-        build_cmd += ["--config", config]
-    if subprocess.run(build_cmd, check=False).returncode != 0:
-        return None
-    server_bin = find_binary("log_collector_server")
-    if server_bin and server_bin.exists():
-        BIN_SERVER = server_bin
-        return server_bin
+    for candidate_dir in (primary_dir, fallback_dir):
+        server_bin = _configure_and_build_server(cmake_cmd, candidate_dir)
+        if server_bin and server_bin.exists():
+            BIN_SERVER = server_bin
+            return server_bin
     return None
 
 
