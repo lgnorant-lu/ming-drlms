@@ -65,6 +65,9 @@ ExternalProject_Add(signal_protocol_ext
     LOG_BUILD ON
     LOG_INSTALL ON)
 
+file(MAKE_DIRECTORY "${SIGNAL_INSTALL_PREFIX}/include")
+file(MAKE_DIRECTORY "${SIGNAL_INSTALL_PREFIX}/lib")
+
 set(_signal_static_lib "${SIGNAL_INSTALL_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}signal-protocol-c${CMAKE_STATIC_LIBRARY_SUFFIX}")
 add_library(signal_protocol STATIC IMPORTED GLOBAL)
 add_dependencies(signal_protocol signal_protocol_ext)
