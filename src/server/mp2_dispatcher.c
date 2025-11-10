@@ -5,6 +5,7 @@
 #include "mp2_protocol.h"
 #include "mp2_rooms.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
