@@ -295,7 +295,7 @@ static inline size_t int32_size(int32_t v) {
  */
 static inline uint32_t zigzag32(int32_t v) {
     // Note:  Using unsigned types prevents undefined behavior
-    return ((uint32_t)v << 1) ^ ((uint32_t) - ((int32_t)v >> 31));
+    return ((uint32_t)v << 1) ^ -((uint32_t)v >> 31);
 }
 
 /**
@@ -352,7 +352,7 @@ static inline size_t uint64_size(uint64_t v) {
  */
 static inline uint64_t zigzag64(int64_t v) {
     // Note:  Using unsigned types prevents undefined behavior
-    return ((uint64_t)v << 1) ^ ((uint64_t) - ((int64_t)v >> 63));
+    return ((uint64_t)v << 1) ^ -((uint64_t)v >> 63);
 }
 
 /**
