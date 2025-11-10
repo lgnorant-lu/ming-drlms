@@ -101,9 +101,29 @@ def _ensure_server_binary() -> Path | None:
     except Exception:
         pass
     cache = build_dir / "CMakeCache.txt"
-    if not cache.exists():
+    needs_configure = True
+    if cache.exists():
+        try:
+            cache_text = cache.read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            cache_text = ""
+
+        def _cache_value(key: str) -> str | None:
+            prefix = f"{key}:"
+            for line in cache_text.splitlines():
+                if line.startswith(prefix):
+                    parts = line.split("=", 1)
+                    if len(parts) == 2:
+                        return parts[1].strip()
+            return None
+
+        build_server_flag = _cache_value("BUILD_SERVER")
+        enable_spike_flag = _cache_value("ENABLE_SIGNAL_SPIKE")
+        needs_configure = not (build_server_flag == "ON" and enable_spike_flag != "ON")
+    if needs_configure:
         configure_cmd = cmake_cmd + ["-S", str(ROOT), "-B", str(build_dir)]
         configure_cmd += _cmake_configure_args()
+        configure_cmd.extend(["-DBUILD_SERVER=ON", "-DENABLE_SIGNAL_SPIKE=OFF"])
         if subprocess.run(configure_cmd, check=False).returncode != 0:
             return None
     build_cmd = cmake_cmd + [
