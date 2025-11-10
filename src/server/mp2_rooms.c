@@ -838,23 +838,4 @@ int mp2_rooms_handle_history_request(platform_socket_t fd,
 
 // moved: send_room_history wrapper now provided by mp2_rooms_history.c
 
-#else /* HAVE_PROTOBUF_C */
-
-int mp2_rooms_handle_subscribe(platform_socket_t fd,
-                               const unsigned char *payload,
-                               uint32_t payload_len) {
-    (void)fd;
-    (void)payload;
-    (void)payload_len;
-    return -1;
-}
-
-int mp2_rooms_handle_publish(platform_socket_t fd, const unsigned char *payload,
-                             uint32_t payload_len) {
-    (void)fd;
-    (void)payload;
-    (void)payload_len;
-    return -1;
-}
-
 #endif /* HAVE_PROTOBUF_C */

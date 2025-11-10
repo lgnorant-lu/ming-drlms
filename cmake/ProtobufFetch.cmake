@@ -37,14 +37,18 @@ endif()
 
 # 2) Manual system lookup
 if(NOT PROTOBUF_C_FOUND)
+    # Handle Windows environment variables with parentheses properly
+    # CMake cannot directly parse ENV{ProgramFiles(x86)} due to parentheses
+    # So we use a different approach: try common paths without relying on problematic env vars
+    
     find_path(PROTOBUF_C_INCLUDE_DIR
         NAMES protobuf-c/protobuf-c.h
         HINTS
             /usr/include
             /usr/local/include
             /opt/homebrew/include
-            $ENV{ProgramFiles}/protobuf-c/include
-            $ENV{ProgramFiles(x86)}/protobuf-c/include)
+            # Skip problematic ProgramFiles paths - let vcpkg or pkg-config handle Windows detection
+    )
 
     find_library(PROTOBUF_C_LIBRARY
         NAMES protobuf-c libprotobuf-c
@@ -53,8 +57,8 @@ if(NOT PROTOBUF_C_FOUND)
             /usr/local/lib
             /usr/lib/x86_64-linux-gnu
             /opt/homebrew/lib
-            $ENV{ProgramFiles}/protobuf-c/lib
-            $ENV{ProgramFiles(x86)}/protobuf-c/lib)
+            # Skip problematic ProgramFiles paths - let vcpkg or pkg-config handle Windows detection
+    )
 
     if(PROTOBUF_C_INCLUDE_DIR AND PROTOBUF_C_LIBRARY)
         set(PROTOBUF_C_FOUND TRUE)
@@ -97,13 +101,19 @@ set(_protobuf_pregen_dir "${PROJECT_SOURCE_DIR}/src/generated/schema/v2")
 if(NOT PROTOBUF_C_FOUND AND EXISTS "${_protobuf_pregen_dir}/common.pb-c.c")
     set(PROTOBUF_C_FOUND TRUE)
     set(PROTOBUF_C_DETECTION_METHOD "pre-generated sources")
-    set(PROTOBUF_C_INCLUDE_DIRS "${PROJECT_SOURCE_DIR}/src")
+    # Include src, the generated directory, and the external protobuf-c directory to find headers
+    set(PROTOBUF_C_INCLUDE_DIRS 
+        "${PROJECT_SOURCE_DIR}/src"
+        "${PROJECT_SOURCE_DIR}/src/external"
+        "${PROJECT_SOURCE_DIR}/src/generated"
+        "${_protobuf_pregen_dir}")
     set(PROTOBUF_C_USE_PREGENSETS TRUE)
     set(PROTOBUF_C_SOURCES
         "${_protobuf_pregen_dir}/common.pb-c.c"
         "${_protobuf_pregen_dir}/auth.pb-c.c"
         "${_protobuf_pregen_dir}/room.pb-c.c"
-        "${_protobuf_pregen_dir}/federation.pb-c.c")
+        "${_protobuf_pregen_dir}/federation.pb-c.c"
+        "${PROJECT_SOURCE_DIR}/src/external/protobuf-c/protobuf-c.c")
     set(PROTOBUF_C_HEADERS
         "${_protobuf_pregen_dir}/common.pb-c.h"
         "${_protobuf_pregen_dir}/auth.pb-c.h"
