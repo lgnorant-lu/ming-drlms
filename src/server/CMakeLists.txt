@@ -33,6 +33,10 @@ set(SERVER_SOURCES
     federation_publish.c
 )
 
+# --- Enhanced Protobuf-C detection and fallback ---
+# Include the new ProtobufFetch module
+include(${CMAKE_SOURCE_DIR}/cmake/ProtobufFetch.cmake)
+
 # --- Protobuf-C code generation (Phase 1) ---
 find_program(PROTOC_C_EXECUTABLE protoc-c)
 set(PROTO_DIR ${PROJECT_SOURCE_DIR}/schema/v2)
@@ -51,17 +55,25 @@ set(PROTO_FILES
 
 set(GENERATED_SRC)
 set(GENERATED_HDR)
-if(PROTOBUF_C_FOUND)
+
+if(PROTOBUF_C_USE_PREGENSETS)
+    set(GENERATED_SRC ${PROTOBUF_C_SOURCES})
+    set(GENERATED_HDR ${PROTOBUF_C_HEADERS})
+    list(APPEND SERVER_SOURCES ${GENERATED_SRC})
+    list(APPEND SERVER_SOURCES mp2_rooms_sub_pub.c)
+    source_group("generated" FILES ${GENERATED_SRC} ${GENERATED_HDR})
+else()
     if(PROTOC_C_EXECUTABLE)
         foreach(PF ${PROTO_FILES})
             get_filename_component(PBN ${PF} NAME_WE)
             set(REL_SUBDIR schema/v2)
-            set(OUT_C ${GENERATED_DIR}/${REL_SUBDIR}/${PBN}.pb-c.c)
-            set(OUT_H ${GENERATED_DIR}/${REL_SUBDIR}/${PBN}.pb-c.h)
+            set(OUT_DIR ${GENERATED_DIR}/${REL_SUBDIR})
+            set(OUT_C ${OUT_DIR}/${PBN}.pb-c.c)
+            set(OUT_H ${OUT_DIR}/${PBN}.pb-c.h)
             add_custom_command(
                 OUTPUT ${OUT_C} ${OUT_H}
                 COMMAND ${CMAKE_COMMAND} -E echo "[proto_gen] ${PF} -> ${OUT_C}"
-                COMMAND ${CMAKE_COMMAND} -E make_directory ${GENERATED_DIR}/${REL_SUBDIR}
+                COMMAND ${CMAKE_COMMAND} -E make_directory ${OUT_DIR}
                 COMMAND ${PROTOC_C_EXECUTABLE} --c_out=${GENERATED_DIR} -I${PROJECT_SOURCE_DIR} -I${PROTO_DIR} ${PF}
                 DEPENDS ${PF}
                 BYPRODUCTS ${OUT_C} ${OUT_H}
@@ -71,20 +83,25 @@ if(PROTOBUF_C_FOUND)
             list(APPEND GENERATED_SRC ${OUT_C})
             list(APPEND GENERATED_HDR ${OUT_H})
         endforeach()
+        list(APPEND SERVER_SOURCES ${GENERATED_SRC})
+        list(APPEND SERVER_SOURCES mp2_rooms_sub_pub.c)
+        source_group("generated" FILES ${GENERATED_SRC} ${GENERATED_HDR})
     else()
-        message(WARNING "protoc-c not found; using pre-generated sources from src/generated")
-        foreach(PF ${PROTO_FILES})
-            get_filename_component(PBN ${PF} NAME_WE)
-            set(PRE_GEN_DIR ${PROJECT_SOURCE_DIR}/src/generated/schema/v2)
-            set(OUT_C ${PRE_GEN_DIR}/${PBN}.pb-c.c)
-            set(OUT_H ${PRE_GEN_DIR}/${PBN}.pb-c.h)
-            list(APPEND GENERATED_SRC ${OUT_C})
-            list(APPEND GENERATED_HDR ${OUT_H})
-        endforeach()
+        message(WARNING "protoc-c not found; falling back to bundled pre-generated protobuf sources")
+        set(PRE_GEN_DIR ${PROJECT_SOURCE_DIR}/src/generated/schema/v2)
+        if(EXISTS "${PRE_GEN_DIR}/common.pb-c.c")
+            foreach(PF ${PROTO_FILES})
+                get_filename_component(PBN ${PF} NAME_WE)
+                list(APPEND GENERATED_SRC ${PRE_GEN_DIR}/${PBN}.pb-c.c)
+                list(APPEND GENERATED_HDR ${PRE_GEN_DIR}/${PBN}.pb-c.h)
+            endforeach()
+            list(APPEND SERVER_SOURCES ${GENERATED_SRC})
+            list(APPEND SERVER_SOURCES mp2_rooms_sub_pub.c)
+            source_group("generated" FILES ${GENERATED_SRC} ${GENERATED_HDR})
+        else()
+            message(FATAL_ERROR "No pre-generated protobuf-c sources found at ${PRE_GEN_DIR}. Build cannot proceed.")
+        endif()
     endif()
-    list(APPEND SERVER_SOURCES ${GENERATED_SRC})
-    list(APPEND SERVER_SOURCES mp2_rooms_sub_pub.c)
-    source_group("generated" FILES ${GENERATED_SRC} ${GENERATED_HDR})
 endif()
 
 add_executable(log_collector_server ${SERVER_SOURCES})
@@ -93,9 +110,11 @@ target_include_directories(log_collector_server
     PRIVATE
         ${PROJECT_SOURCE_DIR}/src/libipc
         ${PROJECT_SOURCE_DIR}/src/platform/include
-        ${PROJECT_SOURCE_DIR}/src/generated
+        ${PROJECT_SOURCE_DIR}/src
         ${CMAKE_CURRENT_BINARY_DIR}
+        ${GENERATED_DIR}
         ${ARGON2_INCLUDE_DIRS}
+        ${PROTOBUF_C_INCLUDE_DIRS}
 )
 
 set(SERVER_LIBS
@@ -120,14 +139,12 @@ if(WIN32)
     list(APPEND SERVER_LIBS ws2_32 bcrypt)
 endif()
 
-# Link protobuf-c if available
+# Enhanced protobuf-c linking with fallback support
 if(PROTOBUF_C_FOUND)
-    list(APPEND SERVER_LIBS ${PROTOBUF_C_LIBRARIES})
-elseif(DEFINED PROTOBUF_C_LIBRARIES)
-    list(APPEND SERVER_LIBS ${PROTOBUF_C_LIBRARIES})
-elseif(NOT WIN32)
-    # Try best-effort link name; build may still succeed if unused in Phase 1
-    list(APPEND SERVER_LIBS protobuf-c)
+    if(PROTOBUF_C_LIBRARIES)
+        list(APPEND SERVER_LIBS ${PROTOBUF_C_LIBRARIES})
+        message(STATUS "Linking protobuf-c libraries: ${PROTOBUF_C_LIBRARIES}")
+    endif()
 endif()
 
 if(ENABLE_COVERAGE AND COVERAGE_LIBS)
@@ -136,8 +153,14 @@ endif()
 
 target_link_libraries(log_collector_server PRIVATE ${SERVER_LIBS})
 
-if(GENERATED_SRC)
+# Add build info logging
+if(PROTOC_C_EXECUTABLE AND NOT PROTOBUF_C_USE_PREGENSETS AND GENERATED_SRC)
     add_custom_target(proto_gen DEPENDS ${GENERATED_SRC} ${GENERATED_HDR})
     add_dependencies(log_collector_server proto_gen)
-    target_sources(log_collector_server PRIVATE ${GENERATED_SRC})
 endif()
+
+message(STATUS "Server build configuration summary:")
+message(STATUS "  protobuf-c found: ${PROTOBUF_C_FOUND}")
+message(STATUS "  Detection method: ${PROTOBUF_C_DETECTION_METHOD}")
+message(STATUS "  Include directories: ${PROTOBUF_C_INCLUDE_DIRS}")
+message(STATUS "  Library files: ${PROTOBUF_C_LIBRARIES}")
