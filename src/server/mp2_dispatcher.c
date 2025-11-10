@@ -138,6 +138,42 @@ int mp2_dispatcher_handle_frame(platform_socket_t fd, const mp2_frame_t *frame,
         return -1;
     }
 
+    // Log received message type for debugging
+    const char *msg_type_name = "UNKNOWN";
+    switch (frame->msg_type) {
+    case MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_AUTH_CHALLENGE_REQUEST:
+        msg_type_name = "MSG_TYPE_AUTH_CHALLENGE_REQUEST";
+        break;
+    case MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_AUTH_CHALLENGE_RESPONSE:
+        msg_type_name = "MSG_TYPE_AUTH_CHALLENGE_RESPONSE";
+        break;
+    case MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_AUTH_REQUEST:
+        msg_type_name = "MSG_TYPE_AUTH_REQUEST";
+        break;
+    case MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_AUTH_RESPONSE:
+        msg_type_name = "MSG_TYPE_AUTH_RESPONSE";
+        break;
+    case MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_REFRESH_TOKEN_REQUEST:
+        msg_type_name = "MSG_TYPE_REFRESH_TOKEN_REQUEST";
+        break;
+    case MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_REFRESH_TOKEN_RESPONSE:
+        msg_type_name = "MSG_TYPE_REFRESH_TOKEN_RESPONSE";
+        break;
+    case MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ROOM_SUB_REQUEST:
+        msg_type_name = "MSG_TYPE_ROOM_SUB_REQUEST";
+        break;
+    case MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ROOM_PUB_REQUEST:
+        msg_type_name = "MSG_TYPE_ROOM_PUB_REQUEST";
+        break;
+    case MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ROOM_EVENT:
+        msg_type_name = "MSG_TYPE_ROOM_EVENT";
+        break;
+    default:
+        // Keep as UNKNOWN for unrecognized message types
+        break;
+    }
+    fprintf(stderr, "Received %s\n", msg_type_name);
+
     mp2_auth_config_t auth_cfg = {
         .users = users,
         .users_count = users_count,
