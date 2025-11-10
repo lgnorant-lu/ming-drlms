@@ -956,7 +956,7 @@ int main(void) {
         printf("      Original: %s\n", plaintext_msg);
         printf("      Decrypted: %.*s\n", (int)signal_buffer_len(bob_plaintext),
                (char *)signal_buffer_data(bob_plaintext));
-        printf("\n✓ Signal E2EE Loop OK (full 1:1 Double Ratchet session)\n");
+        printf("\n✓ Signal E2E Loop OK (full 1:1 Double Ratchet session)\n");
         result = 0;
     } else {
         fprintf(stderr, "Decryption verification failed\n");

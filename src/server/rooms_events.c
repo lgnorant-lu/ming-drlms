@@ -199,7 +199,8 @@ void rooms_broadcast_system(Room *room, const char *message,
     for (int i = 0; i < n; ++i) {
         rooms_fanout_text(instances[i], room->name, &instances[i]->instance_id,
                           ts, sender, 0, (const unsigned char *)message,
-                          strlen(message), hx, rate_bps);
+                          strlen(message), hx, rate_bps,
+                          PLATFORM_INVALID_SOCKET);
     }
 }
 
@@ -280,7 +281,8 @@ int rooms_fanout_text(RoomInstance *instance, const char *room_name,
                       const InstanceUUID *instance_id, const char *ts,
                       const char *user, uint64_t event_id,
                       const unsigned char *payload, size_t len,
-                      const char *sha_hex, long long rate_bps) {
+                      const char *sha_hex, long long rate_bps,
+                      platform_socket_t exclude_fd) {
     if (!instance || !room_name || !ts || !user || !payload || !sha_hex)
         return -1;
     const InstanceUUID *uuid =
@@ -320,6 +322,8 @@ int rooms_fanout_text(RoomInstance *instance, const char *room_name,
     for (size_t i = 0; i < instance->subs_len; ++i) {
         Subscriber *recipient = &instance->subs[i];
         platform_socket_t fd = recipient->fd;
+        if (exclude_fd != PLATFORM_INVALID_SOCKET && fd == exclude_fd)
+            continue;
         const unsigned char *out_payload = payload;
         const char *out_sha = sha_hex;
         size_t out_len = len;

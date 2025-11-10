@@ -19,6 +19,14 @@
 #include <string.h>
 #include <time.h>
 
+extern RoomInstance *rooms_inst_find_by_fd(Room *room, platform_socket_t fd,
+                                           InstanceUUID *out_uuid);
+extern int rooms_inst_add_subscriber(Room *room, RoomInstance *instance,
+                                     platform_socket_t fd,
+                                     const char *username);
+extern int rooms_inst_remove_subscriber(Room *room, RoomInstance *instance,
+                                        platform_socket_t fd);
+
 #define DEFAULT_HISTORY_LIMIT 50
 #ifndef MAX_SQL_LENGTH
 #define MAX_SQL_LENGTH 4096
@@ -252,22 +260,16 @@ typedef struct {
 
 RoomInstance *rooms_find_instance_by_fd(Room *room, platform_socket_t fd,
                                         InstanceUUID *out_uuid) {
-    extern RoomInstance *rooms_inst_find_by_fd(Room *, platform_socket_t,
-                                               InstanceUUID *);
     return rooms_inst_find_by_fd(room, fd, out_uuid);
 }
 
 int rooms_add_subscriber(Room *room, RoomInstance *instance,
                          platform_socket_t fd, const char *username) {
-    extern int rooms_inst_add_subscriber(Room *, RoomInstance *,
-                                         platform_socket_t, const char *);
     return rooms_inst_add_subscriber(room, instance, fd, username);
 }
 
 int rooms_remove_subscriber(Room *room, RoomInstance *instance,
                             platform_socket_t fd) {
-    extern int rooms_inst_remove_subscriber(Room *, RoomInstance *,
-                                            platform_socket_t);
     int rc = rooms_inst_remove_subscriber(room, instance, fd);
     rooms_apply_policy_on_owner_offline_if_needed(room, 0 /*rate_bps*/);
     return rc;

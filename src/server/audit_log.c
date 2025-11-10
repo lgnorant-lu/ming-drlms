@@ -4,6 +4,10 @@
 #include <string.h>
 #include <limits.h>
 
+#ifndef PATH_MAX
+#define PATH_MAX 260
+#endif
+
 static char g_audit_path_local[PATH_MAX] = "";
 
 void audit_log_init(const char *audit_path) {

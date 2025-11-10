@@ -28,15 +28,15 @@ int send_mp2_frame(platform_socket_t fd, uint16_t msg_type,
     memcpy(header + 8, &payload_len_net, 4);
 
     // Send header
-    ssize_t sent = send(fd, (const char *)header, 12, 0);
+    int sent = send(fd, (const char *)header, 12, 0);
     if (sent != 12) {
         return -1;
     }
 
     // Send payload
     if (payload_len > 0) {
-        sent = send(fd, (const char *)payload, payload_len, 0);
-        if (sent != (ssize_t)payload_len) {
+        sent = send(fd, (const char *)payload, (int)payload_len, 0);
+        if (sent != (int)payload_len) {
             return -1;
         }
     }
@@ -47,7 +47,7 @@ int send_mp2_frame(platform_socket_t fd, uint16_t msg_type,
 int recv_mp2_frame(platform_socket_t fd, uint16_t *out_msg_type,
                    unsigned char **out_payload, uint32_t *out_payload_len) {
     unsigned char header[12];
-    ssize_t nread = recv(fd, (char *)header, 12, 0);
+    int nread = recv(fd, (char *)header, 12, 0);
     if (nread != 12) {
         return -1;
     }
@@ -90,8 +90,8 @@ int recv_mp2_frame(platform_socket_t fd, uint16_t *out_msg_type,
         return -1;
     }
 
-    nread = recv(fd, (char *)*out_payload, payload_len, 0);
-    if (nread != (ssize_t)payload_len) {
+    nread = recv(fd, (char *)*out_payload, (int)payload_len, 0);
+    if (nread != (int)payload_len) {
         free(*out_payload);
         *out_payload = NULL;
         return -1;

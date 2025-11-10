@@ -160,7 +160,7 @@ def load_config(path: Optional[Path]) -> CLIConfig:
         if default.exists():
             path = default
     if path and Path(path).exists():
-        with open(path, "r") as f:
+        with open(path, "r", encoding="utf-8") as f:
             y = yaml.safe_load(f) or {}
         cfg = _merge(cfg, y)
     cfg = _from_env(cfg)
@@ -198,5 +198,5 @@ def write_template(path: Path) -> None:
         },
     }
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         yaml.safe_dump(tpl, f, sort_keys=False)

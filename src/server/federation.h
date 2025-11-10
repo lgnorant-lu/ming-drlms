@@ -4,7 +4,15 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "platform/platform.h"
+
+#ifdef HAVE_PROTOBUF_C
 #include "generated/schema/v2/room.pb-c.h"
+#else
+typedef enum {
+    MINGDRLMS__V2__ROOM_EVENT_KIND__UNKNOWN = 0
+} Mingdrlms__V2__RoomEventKind;
+typedef struct _Mingdrlms__V2__RoomFileMetadata Mingdrlms__V2__RoomFileMetadata;
+#endif
 #include "rooms.h"
 
 // Federation configuration

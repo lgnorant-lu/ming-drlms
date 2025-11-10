@@ -46,6 +46,7 @@ static void rooms_state_zero_sha256_hex(char *out_hex, size_t out_sz) {
 
 // Externs from other modules we need to call without public headers
 extern void rooms_clear_all_subscribers(Room *room, int close_fds);
+extern int rooms_inst_remove_fd_from_room(Room *room, platform_socket_t fd);
 
 typedef struct RoomNode {
     char *name;
@@ -124,131 +125,102 @@ void rooms_for_each(void (*cb)(Room *room, const char *room_name, void *ctx),
     platform_mutex_unlock(&g_rooms_mu);
 }
 
-void rooms_handle_owner_disconnect(const char *owner,
-                                   platform_socket_t owner_fd,
-                                   long long rate_bps) {
-    if (!owner || !*owner)
+typedef struct {
+    const char *owner;
+    platform_socket_t owner_fd;
+    long long rate_bps;
+} RoomsOwnerDisconnectCtx;
+
+static void rooms_owner_disconnect_cb(Room *room, const char *room_name,
+                                      void *ud) {
+    RoomsOwnerDisconnectCtx *c = (RoomsOwnerDisconnectCtx *)ud;
+    if (!c || !room)
         return;
-    fprintf(stderr, "[owner_disconnect] owner=%s fd=%d\n", owner,
-            (int)owner_fd);
-    fflush(stderr);
-    typedef struct {
-        const char *owner;
-        platform_socket_t owner_fd;
-        long long rate_bps;
-    } Ctx;
-    Ctx ctx = {owner, owner_fd, rate_bps};
-    void cb(Room * room, const char *room_name, void *ud) {
-        Ctx *c = (Ctx *)ud;
-        int policy = 0;
-        char room_owner[64] = {0};
-        size_t subs = 0;
-        unsigned long long last_eid = 0;
-        time_t created = 0;
-        rooms_get_info(room, room_owner, sizeof room_owner, &policy, &subs,
-                       &last_eid, &created, NULL, NULL, NULL);
-        fprintf(
-            stderr,
+    int policy = 0;
+    char room_owner[64] = {0};
+    size_t subs = 0;
+    unsigned long long last_eid = 0;
+    time_t created = 0;
+    rooms_get_info(room, room_owner, sizeof room_owner, &policy, &subs,
+                   &last_eid, &created, NULL, NULL, NULL);
+    fprintf(stderr,
             "[owner_disconnect] checking room=%s owner=%s policy=%d subs=%zu\n",
             room_name, room_owner, policy, subs);
-        if (strcmp(room_owner, c->owner) != 0)
-            return;
-        int owns_session = 0;
-        platform_mutex_lock(&room->mu);
-        fprintf(stderr,
-                "[owner_disconnect] room=%s room.owner='%s' room.owner_fd=%d "
-                "disconnect_fd=%d\n",
-                room_name, room->owner, (int)room->owner_fd, (int)c->owner_fd);
-        fflush(stderr);
-        if (room->owner[0] != '\0' && strcmp(room->owner, c->owner) == 0) {
-            int owner_has_other_active_sub = 0;
-            for (RoomInstance *inst = room->instances;
-                 inst && !owner_has_other_active_sub; inst = inst->next) {
-                platform_mutex_lock(&inst->mu);
-                for (size_t i = 0; i < inst->subs_len; ++i) {
-                    if (inst->subs[i].user[0] != '\0' &&
-                        strcmp(inst->subs[i].user, c->owner) == 0 &&
-                        inst->subs[i].fd != c->owner_fd) {
-                        owner_has_other_active_sub = 1;
-                        break;
-                    }
+    if (strcmp(room_owner, c->owner) != 0)
+        return;
+    int owns_session = 0;
+    platform_mutex_lock(&room->mu);
+    fprintf(stderr,
+            "[owner_disconnect] room=%s room.owner='%s' room.owner_fd=%d "
+            "disconnect_fd=%d\n",
+            room_name, room->owner, (int)room->owner_fd, (int)c->owner_fd);
+    fflush(stderr);
+    if (room->owner[0] != '\0' && strcmp(room->owner, c->owner) == 0) {
+        int owner_has_other_active_sub = 0;
+        for (RoomInstance *inst = room->instances;
+             inst && !owner_has_other_active_sub; inst = inst->next) {
+            platform_mutex_lock(&inst->mu);
+            for (size_t i = 0; i < inst->subs_len; ++i) {
+                if (inst->subs[i].user[0] != '\0' &&
+                    strcmp(inst->subs[i].user, c->owner) == 0 &&
+                    inst->subs[i].fd != c->owner_fd) {
+                    owner_has_other_active_sub = 1;
+                    break;
                 }
-                platform_mutex_unlock(&inst->mu);
             }
-            if (!owner_has_other_active_sub) {
-                owns_session = 1;
-                if (room->owner_fd == c->owner_fd)
-                    room->owner_fd = PLATFORM_INVALID_SOCKET;
+            platform_mutex_unlock(&inst->mu);
+        }
+        if (!owner_has_other_active_sub) {
+            owns_session = 1;
+            if (room->owner_fd == c->owner_fd)
+                room->owner_fd = PLATFORM_INVALID_SOCKET;
+        }
+    }
+    platform_mutex_unlock(&room->mu);
+    fprintf(stderr, "[owner_disconnect] room=%s owns_session=%d policy=%d\n",
+            room_name, owns_session, policy);
+    if (!owns_session)
+        return;
+    if (policy == 0)
+        return;
+    if (policy == 1) {
+        char new_owner[64] = {0};
+        platform_socket_t new_owner_fd = PLATFORM_INVALID_SOCKET;
+        int found = 0;
+        int total_subs_checked = 0;
+        platform_mutex_lock(&room->mu);
+        for (RoomInstance *inst = room->instances; inst && !found;
+             inst = inst->next) {
+            platform_mutex_lock(&inst->mu);
+            fprintf(stderr, "[delegate] instance has %zu subscribers\n",
+                    inst->subs_len);
+            for (size_t i = 0; i < inst->subs_len; ++i) {
+                total_subs_checked++;
+                fprintf(stderr, "[delegate]   sub[%zu]: user='%s' fd=%d\n", i,
+                        inst->subs[i].user, (int)inst->subs[i].fd);
+                if (inst->subs[i].user[0] != '\0' &&
+                    strcmp(inst->subs[i].user, c->owner) != 0) {
+                    snprintf(new_owner, sizeof new_owner, "%s",
+                             inst->subs[i].user);
+                    new_owner_fd = inst->subs[i].fd;
+                    found = 1;
+                    break;
+                }
             }
+            platform_mutex_unlock(&inst->mu);
         }
         platform_mutex_unlock(&room->mu);
         fprintf(stderr,
-                "[owner_disconnect] room=%s owns_session=%d policy=%d\n",
-                room_name, owns_session, policy);
-        if (!owns_session)
-            return;
-        if (policy == 0)
-            return;
-        if (policy == 1) {
-            char new_owner[64] = {0};
-            platform_socket_t new_owner_fd = PLATFORM_INVALID_SOCKET;
-            int found = 0;
-            int total_subs_checked = 0;
-            platform_mutex_lock(&room->mu);
-            for (RoomInstance *inst = room->instances; inst && !found;
-                 inst = inst->next) {
-                platform_mutex_lock(&inst->mu);
-                fprintf(stderr, "[delegate] instance has %zu subscribers\n",
-                        inst->subs_len);
-                for (size_t i = 0; i < inst->subs_len; ++i) {
-                    total_subs_checked++;
-                    fprintf(stderr, "[delegate]   sub[%zu]: user='%s' fd=%d\n",
-                            i, inst->subs[i].user, (int)inst->subs[i].fd);
-                    if (inst->subs[i].user[0] != '\0' &&
-                        strcmp(inst->subs[i].user, c->owner) != 0) {
-                        snprintf(new_owner, sizeof new_owner, "%s",
-                                 inst->subs[i].user);
-                        new_owner_fd = inst->subs[i].fd;
-                        found = 1;
-                        break;
-                    }
-                }
-                platform_mutex_unlock(&inst->mu);
-            }
-            platform_mutex_unlock(&room->mu);
-            fprintf(stderr,
-                    "[delegate] room=%s old_owner=%s total_subs=%d found=%d "
-                    "new_owner=%s\n",
-                    room_name, c->owner, total_subs_checked, found,
-                    new_owner[0] ? new_owner : "<none>");
-            if (new_owner[0] != '\0') {
-                rooms_set_owner(room, room_name, new_owner, new_owner_fd);
-                char ts[64];
-                rfc3339_time_local(ts, sizeof ts);
-                char msg[128];
-                snprintf(msg, sizeof msg, "OWNER|CHANGED|%s", new_owner);
-                char hx[65];
-                rooms_state_zero_sha256_hex(hx, sizeof hx);
-                RoomInstance *instances_to_notify[16];
-                int num_instances = 0;
-                platform_mutex_lock(&room->mu);
-                for (RoomInstance *inst = room->instances;
-                     inst && num_instances < 16; inst = inst->next)
-                    instances_to_notify[num_instances++] = inst;
-                platform_mutex_unlock(&room->mu);
-                for (int i = 0; i < num_instances; i++) {
-                    rooms_fanout_text(instances_to_notify[i], room_name,
-                                      &instances_to_notify[i]->instance_id, ts,
-                                      "system", 0, (const unsigned char *)msg,
-                                      strlen(msg), hx, c->rate_bps);
-                }
-            }
-            return;
-        }
-        if (policy == 2) {
+                "[delegate] room=%s old_owner=%s total_subs=%d found=%d "
+                "new_owner=%s\n",
+                room_name, c->owner, total_subs_checked, found,
+                new_owner[0] ? new_owner : "<none>");
+        if (new_owner[0] != '\0') {
+            rooms_set_owner(room, room_name, new_owner, new_owner_fd);
             char ts[64];
             rfc3339_time_local(ts, sizeof ts);
-            const char *msg = "ROOM|CLOSED";
+            char msg[128];
+            snprintf(msg, sizeof msg, "OWNER|CHANGED|%s", new_owner);
             char hx[65];
             rooms_state_zero_sha256_hex(hx, sizeof hx);
             RoomInstance *instances_to_notify[16];
@@ -262,13 +234,47 @@ void rooms_handle_owner_disconnect(const char *owner,
                 rooms_fanout_text(instances_to_notify[i], room_name,
                                   &instances_to_notify[i]->instance_id, ts,
                                   "system", 0, (const unsigned char *)msg,
-                                  strlen(msg), hx, c->rate_bps);
+                                  strlen(msg), hx, c->rate_bps,
+                                  PLATFORM_INVALID_SOCKET);
             }
-            rooms_clear_all_subscribers(room, 1 /*close fds*/);
-            return;
         }
+        return;
     }
-    rooms_for_each(cb, &ctx);
+    if (policy == 2) {
+        char ts[64];
+        rfc3339_time_local(ts, sizeof ts);
+        const char *msg = "ROOM|CLOSED";
+        char hx[65];
+        rooms_state_zero_sha256_hex(hx, sizeof hx);
+        RoomInstance *instances_to_notify[16];
+        int num_instances = 0;
+        platform_mutex_lock(&room->mu);
+        for (RoomInstance *inst = room->instances; inst && num_instances < 16;
+             inst = inst->next)
+            instances_to_notify[num_instances++] = inst;
+        platform_mutex_unlock(&room->mu);
+        for (int i = 0; i < num_instances; i++) {
+            rooms_fanout_text(instances_to_notify[i], room_name,
+                              &instances_to_notify[i]->instance_id, ts,
+                              "system", 0, (const unsigned char *)msg,
+                              strlen(msg), hx, c->rate_bps,
+                              PLATFORM_INVALID_SOCKET);
+        }
+        rooms_clear_all_subscribers(room, 1 /*close fds*/);
+        return;
+    }
+}
+
+void rooms_handle_owner_disconnect(const char *owner,
+                                   platform_socket_t owner_fd,
+                                   long long rate_bps) {
+    if (!owner || !*owner)
+        return;
+    fprintf(stderr, "[owner_disconnect] owner=%s fd=%d\n", owner,
+            (int)owner_fd);
+    fflush(stderr);
+    RoomsOwnerDisconnectCtx ctx = {owner, owner_fd, rate_bps};
+    rooms_for_each(rooms_owner_disconnect_cb, &ctx);
 }
 
 int rooms_internal_iter_instances(int (*cb)(Room *room, RoomInstance *inst,
@@ -489,8 +495,6 @@ int rooms_get_user_by_fd(platform_socket_t fd, char *out_user, size_t out_cap) {
 }
 
 int rooms_remove_fd_from_all(platform_socket_t fd) {
-    extern int rooms_inst_remove_fd_from_room(Room * room,
-                                              platform_socket_t fd);
     platform_mutex_lock(&g_rooms_mu);
     RoomNode *cur = g_rooms;
     while (cur) {
@@ -955,7 +959,8 @@ void rooms_apply_policy_on_owner_offline_if_needed(Room *room,
                 rooms_fanout_text(instances_to_notify[i], room->name,
                                   &instances_to_notify[i]->instance_id, ts,
                                   "system", 0, (const unsigned char *)msg,
-                                  strlen(msg), hx, rate_bps);
+                                  strlen(msg), hx, rate_bps,
+                                  PLATFORM_INVALID_SOCKET);
             }
         }
         return;
@@ -974,7 +979,8 @@ void rooms_apply_policy_on_owner_offline_if_needed(Room *room,
             rooms_fanout_text(instances_to_notify[i], room->name,
                               &instances_to_notify[i]->instance_id, ts,
                               "system", 0, (const unsigned char *)msg,
-                              strlen(msg), hx, rate_bps);
+                              strlen(msg), hx, rate_bps,
+                              PLATFORM_INVALID_SOCKET);
         }
         rooms_clear_all_subscribers(room, 1 /*close fds*/);
         return;

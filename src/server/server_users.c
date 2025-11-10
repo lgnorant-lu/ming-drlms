@@ -13,10 +13,15 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 
+#ifndef PATH_MAX
+#define PATH_MAX 260
+#endif
+
 #if defined(_WIN32)
 #include <windows.h>
 #include <io.h>
 #include <direct.h>
+#include <process.h>
 #define getpid _getpid
 #else
 #include <unistd.h>

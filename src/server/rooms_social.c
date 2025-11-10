@@ -645,6 +645,52 @@ static int send_all(platform_socket_t fd, const void *buf, size_t len) {
     return 0;
 }
 
+typedef struct NoteBroadcastCtx {
+    const char *generated_name;
+    const char *note;
+    const char *user_a;
+    const char *user_b;
+    const char *ts;
+    int *delivered;
+} NoteBroadcastCtx;
+
+static void rooms_broadcast_note_update_cb(Room *room, const char *room_name,
+                                           void *ud) {
+    NoteBroadcastCtx *ctx = (NoteBroadcastCtx *)ud;
+    if (!ctx || !ctx->delivered)
+        return;
+    platform_mutex_lock(&room->mu);
+    for (RoomInstance *inst = room->instances; inst; inst = inst->next) {
+        platform_mutex_lock(&inst->mu);
+        char inst_hex[33];
+        rooms_uuid_to_hex(&inst->instance_id, inst_hex);
+        char evt_buf[512];
+        int evl = snprintf(evt_buf, sizeof evt_buf,
+                           "EVT|NOTE_UPDATED|%s|%s|%s|%s|%s\n", room_name,
+                           inst_hex, ctx->ts, ctx->generated_name, ctx->note);
+        if (evl > 0 && (size_t)evl < sizeof evt_buf) {
+            int pruned = 0;
+            for (size_t i = 0; i < inst->subs_len;) {
+                Subscriber *sub = &inst->subs[i];
+                if ((strcmp(sub->user, ctx->user_a) == 0) ||
+                    (strcmp(sub->user, ctx->user_b) == 0)) {
+                    if (send_all(sub->fd, evt_buf, (size_t)evl) != 0) {
+                        rooms_instance_remove_sub_locked(inst, i);
+                        pruned = 1;
+                        continue;
+                    }
+                    *ctx->delivered = 1;
+                }
+                ++i;
+            }
+            if (pruned)
+                room_update_aggregates_locked(room);
+        }
+        platform_mutex_unlock(&inst->mu);
+    }
+    platform_mutex_unlock(&room->mu);
+}
+
 int rooms_broadcast_note_update(const char *generated_name, const char *note,
                                 const char *user_a, const char *user_b) {
     if (!generated_name || !*generated_name || !user_a || !*user_a || !user_b ||
@@ -653,39 +699,14 @@ int rooms_broadcast_note_update(const char *generated_name, const char *note,
     char ts[64];
     rfc3339_time_local(ts, sizeof ts);
     int delivered = 0;
-    void cb(Room * room, const char *room_name, void *ud) {
-        (void)ud;
-        platform_mutex_lock(&room->mu);
-        for (RoomInstance *inst = room->instances; inst; inst = inst->next) {
-            platform_mutex_lock(&inst->mu);
-            char inst_hex[33];
-            rooms_uuid_to_hex(&inst->instance_id, inst_hex);
-            char evt_buf[512];
-            int evl = snprintf(evt_buf, sizeof evt_buf,
-                               "EVT|NOTE_UPDATED|%s|%s|%s|%s|%s\n", room_name,
-                               inst_hex, ts, generated_name, note);
-            if (evl > 0 && (size_t)evl < sizeof evt_buf) {
-                int pruned = 0;
-                for (size_t i = 0; i < inst->subs_len;) {
-                    Subscriber *sub = &inst->subs[i];
-                    if ((strcmp(sub->user, user_a) == 0) ||
-                        (strcmp(sub->user, user_b) == 0)) {
-                        if (send_all(sub->fd, evt_buf, (size_t)evl) != 0) {
-                            rooms_instance_remove_sub_locked(inst, i);
-                            pruned = 1;
-                            continue;
-                        }
-                        delivered = 1;
-                    }
-                    ++i;
-                }
-                if (pruned)
-                    room_update_aggregates_locked(room);
-            }
-            platform_mutex_unlock(&inst->mu);
-        }
-        platform_mutex_unlock(&room->mu);
-    }
-    rooms_for_each(cb, NULL);
+    NoteBroadcastCtx ctx = {
+        .generated_name = generated_name,
+        .note = note,
+        .user_a = user_a,
+        .user_b = user_b,
+        .ts = ts,
+        .delivered = &delivered,
+    };
+    rooms_for_each(rooms_broadcast_note_update_cb, &ctx);
     return delivered ? 0 : -1;
 }

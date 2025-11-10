@@ -4,6 +4,7 @@
 #include <string.h>
 #include <ctype.h>
 #include <time.h>
+#include <stdio.h>
 
 #include "mp2_protocol.h"
 #include "mp2_auth.h"
@@ -13,7 +14,6 @@
 #ifdef HAVE_PROTOBUF_C
 #include "generated/schema/v2/common.pb-c.h"
 #include "generated/schema/v2/room.pb-c.h"
-#include <stdio.h>
 #endif
 
 // Internal context used by publish helpers; layout matches original struct

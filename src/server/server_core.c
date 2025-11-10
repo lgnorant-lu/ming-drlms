@@ -26,6 +26,7 @@ platform_socket_t server_core_create_server_socket(int port) {
 #if defined(_WIN32)
     if (fd == INVALID_SOCKET) {
         platform_net_set_last_error(WSAGetLastError());
+        fprintf(stderr, "socket() failed, WSA error=%d\n", WSAGetLastError());
         perror("socket");
         return PLATFORM_INVALID_SOCKET;
     }
@@ -89,6 +90,9 @@ void server_core_enable_tcp_keepalive(platform_socket_t fd, int enabled,
 #if defined(_WIN32)
     (void)setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, (const char *)&opt,
                      sizeof(opt));
+    (void)keepidle;
+    (void)keepintvl;
+    (void)keepcnt;
     // Fine-grained keepalive tuning on Windows requires WSAIoctl with
     // SIO_KEEPALIVE_VALS. Keep defaults if unavailable; behavior is
     // best-effort.

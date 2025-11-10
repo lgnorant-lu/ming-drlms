@@ -193,7 +193,8 @@ int rooms_fanout_text(RoomInstance *instance, const char *room_name,
                       const InstanceUUID *instance_id, const char *ts,
                       const char *user, uint64_t event_id,
                       const unsigned char *payload, size_t len,
-                      const char *sha_hex, long long rate_bps);
+                      const char *sha_hex, long long rate_bps,
+                      platform_socket_t exclude_fd);
 
 // Store text event to disk (events log + payload file). Returns 0 and
 // out_event_id on success.

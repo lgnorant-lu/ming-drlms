@@ -40,7 +40,7 @@ endif()
 set(COVERAGE_LIBS "${COVERAGE_LIBS}" CACHE INTERNAL "Coverage runtime libraries" FORCE)
 
 if(MSVC)
-    add_compile_options(/W4 /WX /wd4996)
+    add_compile_options(/utf-8 /W4 /WX /wd4996)
 else()
     add_compile_options(-Wall -Wextra -Werror -Wno-deprecated-declarations)
 endif()

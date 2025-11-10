@@ -9,10 +9,12 @@
 // Accessors from rooms.c (not exposed via rooms.h)
 extern int rooms_is_sqlite_enabled(void);
 extern SQLiteStorage *rooms_get_sqlite_storage(void);
+extern void rooms_instance_destroy_unlink_locked(Room *room,
+                                                 RoomInstance *instance);
+#include <time.h>
 #if defined(_WIN32)
 #include <windows.h>
 #else
-#include <time.h>
 #include <unistd.h>
 #endif
 
@@ -22,7 +24,73 @@ static long g_gc_interval = 60;
 static platform_thread_t g_gc_thread;
 static void (*g_collect_cb)(void) = 0;
 
+typedef struct RoomsGcCtx {
+    time_t now;
+} RoomsGcCtx;
+
 static void sleep_microseconds(unsigned long long usec);
+
+static void rooms_gc_iter_room(Room *room, const char *room_name, void *pctx) {
+    RoomsGcCtx *c = (RoomsGcCtx *)pctx;
+    if (!c)
+        return;
+    (void)room_name;
+    platform_mutex_lock(&room->mu);
+    RoomInstance *inst = room->instances;
+    while (inst) {
+        RoomInstance *next = inst->next;
+        InstanceUUID uuid_copy = inst->instance_id;
+        platform_mutex_lock(&inst->mu);
+        IgniteExpiryNotice ignite_notices[8] = {0};
+        size_t ignite_notice_count =
+            rooms_instance_collect_expired_ignite_locked(
+                inst, c->now, ignite_notices,
+                sizeof ignite_notices / sizeof ignite_notices[0]);
+        size_t subs = inst->subs_len;
+        time_t last_active = inst->last_active;
+        int storage_policy = inst->storage_policy;
+        platform_mutex_unlock(&inst->mu);
+        if (ignite_notice_count > 0) {
+            char inst_hex_buf[33];
+            rooms_uuid_to_hex(&uuid_copy, inst_hex_buf);
+            char ts[64];
+            rfc3339_time_local(ts, sizeof ts);
+            for (size_t n = 0; n < ignite_notice_count; ++n) {
+                char evt_buf[256];
+                int evl =
+                    snprintf(evt_buf, sizeof evt_buf,
+                             "EVT|IGNITE_REJECTED|%s|%s|%s|%s\n", room_name,
+                             inst_hex_buf, ts, ignite_notices[n].request_id);
+                if (evl > 0 && (size_t)evl < sizeof evt_buf) {
+                    rooms_emit_to_presence(inst,
+                                           ignite_notices[n].presence_token,
+                                           evt_buf, (size_t)evl);
+                }
+            }
+        }
+        long ttl = rooms_gc_get_idle_ttl();
+        int should_destroy =
+            (subs == 0) && (storage_policy == 1 || ttl == 0 ||
+                            (ttl > 0 && (c->now - last_active) >= ttl));
+        if (should_destroy) {
+            rooms_instance_destroy_unlink_locked(room, inst);
+            if (rooms_is_sqlite_enabled()) {
+                char instance_hex[33];
+                rooms_uuid_to_hex(&uuid_copy, instance_hex);
+                (void)sqlite_mark_room_instance_destroyed(
+                    rooms_get_sqlite_storage(), instance_hex);
+            }
+        }
+        inst = next;
+    }
+    room_update_aggregates_locked(room);
+    if (rooms_is_sqlite_enabled()) {
+        (void)sqlite_update_room_aggregates(
+            rooms_get_sqlite_storage(), room->name, room->total_instances,
+            room->total_subs, room->last_event_id);
+    }
+    platform_mutex_unlock(&room->mu);
+}
 
 static void *rooms_gc_thread_main(void *arg) {
     (void)arg;
@@ -40,77 +108,10 @@ static void *rooms_gc_thread_main(void *arg) {
 }
 
 static void rooms_gc_collect_default(void) {
-    long ttl = rooms_gc_get_idle_ttl();
-    if (ttl < 0)
+    if (rooms_gc_get_idle_ttl() < 0)
         return;
-    time_t now = time(NULL);
-    struct Ctx {
-        time_t now;
-        long ttl;
-    } ctx = {now, ttl};
-    void each_room(Room * room, const char *room_name, void *pctx) {
-        (void)room_name;
-        struct Ctx *c = (struct Ctx *)pctx;
-        platform_mutex_lock(&room->mu);
-        RoomInstance *inst = room->instances;
-        while (inst) {
-            RoomInstance *next = inst->next;
-            InstanceUUID uuid_copy = inst->instance_id;
-            platform_mutex_lock(&inst->mu);
-            IgniteExpiryNotice ignite_notices[8] = {0};
-            size_t ignite_notice_count =
-                rooms_instance_collect_expired_ignite_locked(
-                    inst, c->now, ignite_notices,
-                    sizeof ignite_notices / sizeof ignite_notices[0]);
-            size_t subs = inst->subs_len;
-            time_t last_active = inst->last_active;
-            int storage_policy = inst->storage_policy;
-            platform_mutex_unlock(&inst->mu);
-            if (ignite_notice_count > 0) {
-                char inst_hex_buf[33];
-                rooms_uuid_to_hex(&uuid_copy, inst_hex_buf);
-                char ts[64];
-                rfc3339_time_local(ts, sizeof ts);
-                for (size_t n = 0; n < ignite_notice_count; ++n) {
-                    char evt_buf[256];
-                    int evl = snprintf(evt_buf, sizeof evt_buf,
-                                       "EVT|IGNITE_REJECTED|%s|%s|%s|%s\n",
-                                       room_name, inst_hex_buf, ts,
-                                       ignite_notices[n].request_id);
-                    if (evl > 0 && (size_t)evl < sizeof evt_buf) {
-                        rooms_emit_to_presence(inst,
-                                               ignite_notices[n].presence_token,
-                                               evt_buf, (size_t)evl);
-                    }
-                }
-            }
-            long _ttl = rooms_gc_get_idle_ttl();
-            int should_destroy =
-                (subs == 0) && (storage_policy == 1 || _ttl == 0 ||
-                                (_ttl > 0 && (c->now - last_active) >= _ttl));
-            if (should_destroy) {
-                // Unlink/destroy instance under room->mu
-                extern void rooms_instance_destroy_unlink_locked(
-                    Room * room, RoomInstance * instance);
-                rooms_instance_destroy_unlink_locked(room, inst);
-                if (rooms_is_sqlite_enabled()) {
-                    char instance_hex[33];
-                    rooms_uuid_to_hex(&uuid_copy, instance_hex);
-                    (void)sqlite_mark_room_instance_destroyed(
-                        rooms_get_sqlite_storage(), instance_hex);
-                }
-            }
-            inst = next;
-        }
-        room_update_aggregates_locked(room);
-        if (rooms_is_sqlite_enabled()) {
-            (void)sqlite_update_room_aggregates(
-                rooms_get_sqlite_storage(), room->name, room->total_instances,
-                room->total_subs, room->last_event_id);
-        }
-        platform_mutex_unlock(&room->mu);
-    }
-    rooms_for_each(each_room, &ctx);
+    RoomsGcCtx ctx = {time(NULL)};
+    rooms_for_each(rooms_gc_iter_room, &ctx);
 }
 
 int rooms_gc_start(long idle_ttl, long interval, void (*collect_cb)(void)) {

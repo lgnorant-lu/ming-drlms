@@ -7,6 +7,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if defined(_WIN32)
+#define fseeko _fseeki64
+#define ftello _ftelli64
+#endif
+
 #define MAX_SQL_LENGTH 4096
 #define MAX_BLOB_SIZE (10 * 1024 * 1024) // 10MB
 

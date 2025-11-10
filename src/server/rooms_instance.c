@@ -15,6 +15,8 @@ extern SQLiteStorage *rooms_get_sqlite_storage(void);
 extern void room_update_aggregates_locked(Room *room);
 extern void rfc3339_time_local(char *buf, size_t cap);
 extern void dummy_sha256_hex(char *out_hex, size_t out_sz);
+extern long rooms_get_ignite_pending_ttl(void);
+extern long rooms_get_ignite_active_ttl(void);
 
 void rooms_clear_all_subscribers(Room *room, int close_fds) {
     if (!room)
@@ -140,7 +142,7 @@ int rooms_inst_add_subscriber(Room *room, RoomInstance *instance,
     if (rooms_is_sqlite_enabled()) {
         (void)sqlite_upsert_room_instance(
             rooms_get_sqlite_storage(), NULL, room->name,
-            instance->storage_policy, room->max_capacity_per_instance,
+            instance->storage_policy, (int)room->max_capacity_per_instance,
             instance_state_snapshot, instance_last_event_snapshot);
         (void)sqlite_update_room_aggregates(
             rooms_get_sqlite_storage(), room->name, total_instances_snapshot,
@@ -224,7 +226,7 @@ int rooms_inst_remove_subscriber(Room *room, RoomInstance *instance,
         } else {
             (void)sqlite_upsert_room_instance(
                 rooms_get_sqlite_storage(), NULL, room->name,
-                instance_storage_policy_snapshot, max_capacity_snapshot,
+                instance_storage_policy_snapshot, (int)max_capacity_snapshot,
                 instance_state_snapshot, instance_last_event_snapshot);
         }
         (void)sqlite_update_room_aggregates(
@@ -290,8 +292,8 @@ int rooms_inst_remove_fd_from_room(Room *room, platform_socket_t fd) {
                 (void)sqlite_upsert_room_instance(
                     rooms_get_sqlite_storage(), NULL, room->name,
                     instance_storage_policy_snapshot,
-                    room->max_capacity_per_instance, instance_state_snapshot,
-                    instance_last_event_snapshot);
+                    (int)room->max_capacity_per_instance,
+                    instance_state_snapshot, instance_last_event_snapshot);
             }
         }
         inst = next;
@@ -656,8 +658,6 @@ size_t rooms_instance_collect_expired_ignite_locked(RoomInstance *instance,
     IgniteConnection *conn = instance->ignite_head;
     while (conn) {
         int expire = 0;
-        extern long rooms_get_ignite_pending_ttl(void);
-        extern long rooms_get_ignite_active_ttl(void);
         long pending_ttl = rooms_get_ignite_pending_ttl();
         long active_ttl = rooms_get_ignite_active_ttl();
         if (conn->state == 0 && pending_ttl > 0 &&

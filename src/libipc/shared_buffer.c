@@ -208,7 +208,7 @@ int shm_write(const unsigned char *data, size_t len) {
         if (offset + payload >= len)
             hdr.flags |= LAST_FLAG;
 
-        // 处理 EINTR 以避免过早终止信号处理
+        // Handle EINTR to avoid premature termination by signals
         platform_semaphore_wait(&shared->sem_empty);
         shared_lock();
 #if defined(_WIN32)
