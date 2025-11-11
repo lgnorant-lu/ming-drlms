@@ -447,4 +447,33 @@ ErrorResponse = _reflection.GeneratedProtocolMessageType(
 _sym_db.RegisterMessage(ErrorResponse)
 
 
+# 手动扩展枚举以兼容新增的 E2EE 消息类型
+_E2EE_MESSAGE_VALUES = (
+    ("MSG_TYPE_E2EE_GENERATE_KEYS_REQUEST", 500),
+    ("MSG_TYPE_E2EE_GENERATE_KEYS_RESPONSE", 501),
+    ("MSG_TYPE_E2EE_PREKEY_BUNDLE_REQUEST", 502),
+    ("MSG_TYPE_E2EE_PREKEY_BUNDLE_RESPONSE", 503),
+)
+
+for _name, _number in _E2EE_MESSAGE_VALUES:
+    if _name not in _MESSAGETYPE.values_by_name:
+        _value = _descriptor.EnumValueDescriptor(
+            name=_name,
+            index=len(_MESSAGETYPE.values),
+            number=_number,
+            serialized_options=None,
+            type=_MESSAGETYPE,
+            create_key=_descriptor._internal_create_key,
+        )
+        _MESSAGETYPE.values.append(_value)
+        _MESSAGETYPE.values_by_name[_name] = _value
+        _MESSAGETYPE.values_by_number[_number] = _value
+
+MessageType = enum_type_wrapper.EnumTypeWrapper(_MESSAGETYPE)
+MSG_TYPE_E2EE_GENERATE_KEYS_REQUEST = 500
+MSG_TYPE_E2EE_GENERATE_KEYS_RESPONSE = 501
+MSG_TYPE_E2EE_PREKEY_BUNDLE_REQUEST = 502
+MSG_TYPE_E2EE_PREKEY_BUNDLE_RESPONSE = 503
+
+
 # @@protoc_insertion_point(module_scope)

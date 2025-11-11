@@ -89,7 +89,7 @@ const ProtobufCMessageDescriptor mingdrlms__v2__error_response__descriptor = {
     NULL /* reserved[123] */
 };
 static const ProtobufCEnumValue
-    mingdrlms__v2__message_type__enum_values_by_number[37] = {
+    mingdrlms__v2__message_type__enum_values_by_number[41] = {
         {"MSG_TYPE_UNKNOWN", "MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_UNKNOWN",
          0},
         {"MSG_TYPE_AUTH_CHALLENGE_REQUEST",
@@ -169,15 +169,32 @@ static const ProtobufCEnumValue
          "MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_S2S_SUB_RESPONSE", 303},
         {"MSG_TYPE_ERROR_RESPONSE",
          "MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ERROR_RESPONSE", 400},
+        {"MSG_TYPE_E2EE_GENERATE_KEYS_REQUEST",
+         "MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_E2EE_GENERATE_KEYS_REQUEST",
+         500},
+        {"MSG_TYPE_E2EE_GENERATE_KEYS_RESPONSE",
+         "MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_E2EE_GENERATE_KEYS_RESPONSE",
+         501},
+        {"MSG_TYPE_E2EE_PREKEY_BUNDLE_REQUEST",
+         "MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_E2EE_PREKEY_BUNDLE_REQUEST",
+         502},
+        {"MSG_TYPE_E2EE_PREKEY_BUNDLE_RESPONSE",
+         "MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_E2EE_PREKEY_BUNDLE_RESPONSE",
+         503},
 };
 static const ProtobufCIntRange mingdrlms__v2__message_type__value_ranges[] = {
-    {0, 0}, {100, 1}, {200, 7}, {210, 10}, {300, 32}, {400, 36}, {0, 37}};
+    {0, 0},    {100, 1},  {200, 7},  {210, 10},
+    {300, 32}, {400, 36}, {500, 37}, {0, 41}};
 static const ProtobufCEnumValueIndex
-    mingdrlms__v2__message_type__enum_values_by_name[37] = {
+    mingdrlms__v2__message_type__enum_values_by_name[41] = {
         {"MSG_TYPE_AUTH_CHALLENGE_REQUEST", 1},
         {"MSG_TYPE_AUTH_CHALLENGE_RESPONSE", 2},
         {"MSG_TYPE_AUTH_REQUEST", 3},
         {"MSG_TYPE_AUTH_RESPONSE", 4},
+        {"MSG_TYPE_E2EE_GENERATE_KEYS_REQUEST", 37},
+        {"MSG_TYPE_E2EE_GENERATE_KEYS_RESPONSE", 38},
+        {"MSG_TYPE_E2EE_PREKEY_BUNDLE_REQUEST", 39},
+        {"MSG_TYPE_E2EE_PREKEY_BUNDLE_RESPONSE", 40},
         {"MSG_TYPE_ERROR_RESPONSE", 36},
         {"MSG_TYPE_REFRESH_TOKEN_REQUEST", 5},
         {"MSG_TYPE_REFRESH_TOKEN_RESPONSE", 6},
@@ -218,11 +235,11 @@ const ProtobufCEnumDescriptor mingdrlms__v2__message_type__descriptor = {
     "MessageType",
     "Mingdrlms__V2__MessageType",
     "mingdrlms.v2",
-    37,
+    41,
     mingdrlms__v2__message_type__enum_values_by_number,
-    37,
+    41,
     mingdrlms__v2__message_type__enum_values_by_name,
-    6,
+    7,
     mingdrlms__v2__message_type__value_ranges,
     NULL,
     NULL,

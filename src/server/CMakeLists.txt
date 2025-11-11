@@ -31,11 +31,15 @@ set(SERVER_SOURCES
     federation_transport.c
     federation_registry.c
     federation_publish.c
+    mp2_e2ee.c
+    e2ee_signal.c
+    sqlite_e2ee.c
 )
 
 # --- Enhanced Protobuf-C detection and fallback ---
 # Include the new ProtobufFetch module
 include(${CMAKE_SOURCE_DIR}/cmake/ProtobufFetch.cmake)
+include(${CMAKE_SOURCE_DIR}/cmake/SignalFetch.cmake)
 
 # --- Protobuf-C code generation (Phase 1) ---
 find_program(PROTOC_C_EXECUTABLE protoc-c)
@@ -51,6 +55,7 @@ set(PROTO_FILES
     ${PROTO_DIR}/auth.proto
     ${PROTO_DIR}/room.proto
     ${PROTO_DIR}/federation.proto
+    ${PROTO_DIR}/e2ee.proto
 )
 
 set(GENERATED_SRC)
@@ -152,10 +157,13 @@ target_include_directories(log_collector_server
         ${PROJECT_SOURCE_DIR}/src/libipc
         ${PROJECT_SOURCE_DIR}/src/platform/include
         ${PROJECT_SOURCE_DIR}/src
+        ${PROJECT_SOURCE_DIR}/src/generated
+        ${PROJECT_SOURCE_DIR}
         ${CMAKE_CURRENT_BINARY_DIR}
         ${GENERATED_DIR}
         ${ARGON2_INCLUDE_DIRS}
         ${PROTOBUF_C_INCLUDE_DIRS}
+        ${PROJECT_SOURCE_DIR}/src/external/protobuf-c/include
 )
 
 set(SERVER_LIBS
@@ -164,6 +172,7 @@ set(SERVER_LIBS
     ${ARGON2_LIBRARIES}
     OpenSSL::Crypto
     platform
+    Signal::protocol
 )
 
 if(HAVE_SYSTEM_SQLITE3)
@@ -173,7 +182,7 @@ else()
 endif()
 
 if(UNIX AND NOT APPLE)
-    list(APPEND SERVER_LIBS rt)
+    list(APPEND SERVER_LIBS rt m)
 endif()
 
 if(WIN32)

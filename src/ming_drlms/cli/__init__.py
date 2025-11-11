@@ -129,6 +129,7 @@ from . import demo as _demo  # noqa: E402
 from . import config as _config  # noqa: E402
 from . import server as _server  # noqa: E402  # registers server group & aliases
 from . import room as _room  # noqa: E402
+from . import e2ee as _e2ee  # noqa: E402
 
 app.add_typer(_client.client_app, name="client")
 app.add_typer(_config.config_app, name="config")
@@ -139,6 +140,7 @@ app.add_typer(_ipc.ipc_app, name="ipc")
 app.add_typer(_help.help_app, name="help")
 app.add_typer(_demo.demo_app, name="demo")
 app.add_typer(_server.server_app, name="server")
+app.add_typer(_e2ee.e2ee_app, name="e2ee")
 _server.register_top_level_aliases(app)
 
 

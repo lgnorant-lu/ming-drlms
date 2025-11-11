@@ -14,11 +14,15 @@ from ming_drlms.proto.schema.v2 import (
     auth_pb2 as _auth_pb2,
     room_pb2 as _room_pb2,
     common_pb2 as _common_pb2,
+    e2ee_pb2 as _e2ee_pb2,
 )
+from ming_drlms.proto.schema.v2 import message_types as _msg_types
 
 auth_pb2 = cast(Any, _auth_pb2)
 room_pb2 = cast(Any, _room_pb2)
 common_pb2 = cast(Any, _common_pb2)
+e2ee_pb2 = cast(Any, _e2ee_pb2)
+msg_types = cast(Any, _msg_types)
 
 from .mp2_transport import MP2Frame, read_frame, write_frame  # noqa: E402
 from .token_store import TokenRecord, TokenStore  # noqa: E402
@@ -54,6 +58,28 @@ class RoomEvent:
     instance_id: str | None = None
     timestamp: str | None = None
     file: RoomFileMeta | None = None
+
+
+@dataclass(slots=True)
+class E2EEGenerateKeysResult:
+    code: int
+    message: str
+    registration_id: int
+    pre_key_count: int
+
+
+@dataclass(slots=True)
+class E2EEPreKeyBundle:
+    code: int
+    message: str
+    identity_key: bytes | None
+    registration_id: int
+    device_id: int
+    pre_key_id: int
+    pre_key_public: bytes | None
+    signed_pre_key_id: int
+    signed_pre_key_public: bytes | None
+    signed_pre_key_signature: bytes | None
 
 
 class MP2Client:
@@ -318,6 +344,91 @@ class MP2Client:
 
         return _event_iter()
 
+    def e2ee_generate_keys(
+        self,
+        username: str,
+        target_user: str,
+        *,
+        force: bool = False,
+    ) -> E2EEGenerateKeysResult:
+        self.ensure_access_token(username)
+        self.connect()
+        sock = self._require_socket()
+
+        req = e2ee_pb2.E2EEGenerateKeysRequest()
+        req.user_name = target_user
+        req.force_regenerate = bool(force)
+        write_frame(
+            sock,
+            msg_types.MSG_TYPE_E2EE_GENERATE_KEYS_REQUEST,
+            req.SerializeToString(),
+        )
+
+        frame = read_frame(sock)
+        if frame.msg_type == msg_types.MSG_TYPE_E2EE_GENERATE_KEYS_RESPONSE:
+            resp = e2ee_pb2.E2EEGenerateKeysResponse()
+            resp.ParseFromString(frame.payload)
+            return E2EEGenerateKeysResult(
+                code=int(resp.code),
+                message=resp.message,
+                registration_id=int(resp.registration_id),
+                pre_key_count=int(resp.pre_key_count),
+            )
+        if frame.msg_type == common_pb2.MSG_TYPE_ERROR_RESPONSE:
+            err = common_pb2.ErrorResponse()
+            err.ParseFromString(frame.payload)
+            raise MP2Error(f"e2ee generate keys failed: {err.code}: {err.message}")
+        raise MP2Error(
+            f"unexpected msg_type={frame.msg_type} during e2ee generate keys"
+        )
+
+    def e2ee_fetch_prekey_bundle(
+        self,
+        username: str,
+        target_user: str,
+    ) -> E2EEPreKeyBundle:
+        self.ensure_access_token(username)
+        self.connect()
+        sock = self._require_socket()
+
+        req = e2ee_pb2.E2EEPreKeyBundleRequest()
+        req.user_name = target_user
+        write_frame(
+            sock,
+            msg_types.MSG_TYPE_E2EE_PREKEY_BUNDLE_REQUEST,
+            req.SerializeToString(),
+        )
+
+        frame = read_frame(sock)
+        if frame.msg_type == msg_types.MSG_TYPE_E2EE_PREKEY_BUNDLE_RESPONSE:
+            resp = e2ee_pb2.E2EEPreKeyBundleResponse()
+            resp.ParseFromString(frame.payload)
+            return E2EEPreKeyBundle(
+                code=int(resp.code),
+                message=resp.message,
+                identity_key=bytes(resp.identity_key) if resp.identity_key else None,
+                registration_id=int(resp.registration_id),
+                device_id=int(resp.device_id),
+                pre_key_id=int(resp.pre_key_id),
+                pre_key_public=bytes(resp.pre_key_public)
+                if resp.pre_key_public
+                else None,
+                signed_pre_key_id=int(resp.signed_pre_key_id),
+                signed_pre_key_public=bytes(resp.signed_pre_key_public)
+                if resp.signed_pre_key_public
+                else None,
+                signed_pre_key_signature=bytes(resp.signed_pre_key_signature)
+                if resp.signed_pre_key_signature
+                else None,
+            )
+        if frame.msg_type == common_pb2.MSG_TYPE_ERROR_RESPONSE:
+            err = common_pb2.ErrorResponse()
+            err.ParseFromString(frame.payload)
+            raise MP2Error(f"e2ee pre-key bundle failed: {err.code}: {err.message}")
+        raise MP2Error(
+            f"unexpected msg_type={frame.msg_type} during e2ee pre-key bundle"
+        )
+
     def _require_socket(self) -> socket.socket:
         if self._sock is None:
             raise RuntimeError("socket not connected")
@@ -393,5 +504,7 @@ __all__ = [
     "MP2Error",
     "AuthenticationError",
     "RoomEvent",
+    "E2EEGenerateKeysResult",
+    "E2EEPreKeyBundle",
     "login_flow",
 ]

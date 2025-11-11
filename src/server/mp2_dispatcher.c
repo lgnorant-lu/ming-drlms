@@ -2,6 +2,7 @@
 
 #include "federation.h"
 #include "mp2_auth.h"
+#include "mp2_e2ee.h"
 #include "mp2_protocol.h"
 #include "mp2_rooms.h"
 
@@ -169,6 +170,12 @@ int mp2_dispatcher_handle_frame(platform_socket_t fd, const mp2_frame_t *frame,
     case MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ROOM_EVENT:
         msg_type_name = "MSG_TYPE_ROOM_EVENT";
         break;
+    case MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_E2EE_GENERATE_KEYS_REQUEST:
+        msg_type_name = "MSG_TYPE_E2EE_GENERATE_KEYS_REQUEST";
+        break;
+    case MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_E2EE_PREKEY_BUNDLE_REQUEST:
+        msg_type_name = "MSG_TYPE_E2EE_PREKEY_BUNDLE_REQUEST";
+        break;
     default:
         // Keep as UNKNOWN for unrecognized message types
         break;
@@ -228,6 +235,12 @@ int mp2_dispatcher_handle_frame(platform_socket_t fd, const mp2_frame_t *frame,
     case MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ROOM_FILE_DOWNLOAD_REQUEST:
         return mp2_rooms_handle_file_download(fd, frame->payload,
                                               frame->payload_len);
+    case MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_E2EE_GENERATE_KEYS_REQUEST:
+        return mp2_e2ee_handle_generate_keys(fd, frame->payload,
+                                             frame->payload_len);
+    case MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_E2EE_PREKEY_BUNDLE_REQUEST:
+        return mp2_e2ee_handle_prekey_bundle(fd, frame->payload,
+                                             frame->payload_len);
     case MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_S2S_PUB_REQUEST:
         mp2_dispatcher_handle_s2s_publish(fd, frame);
         return 0;
