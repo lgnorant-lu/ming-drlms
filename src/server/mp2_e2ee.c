@@ -27,18 +27,18 @@ static void send_generate_keys_response(platform_socket_t fd, int code,
                                         uint32_t registration_id,
                                         uint32_t pre_key_count) {
     Mingdrlms__V2__E2EEGenerateKeysResponse resp =
-        MINGDRLMS__V2__E2EE_GENERATE_KEYS_RESPONSE__INIT;
+        MINGDRLMS__V2__E2_EEGENERATE_KEYS_RESPONSE__INIT;
     resp.code = code;
     resp.message = (char *)(message ? message : "");
     resp.registration_id = registration_id;
     resp.pre_key_count = pre_key_count;
     size_t packed =
-        mingdrlms__v2__e2ee_generate_keys_response__get_packed_size(&resp);
+        mingdrlms__v2__e2_eegenerate_keys_response__get_packed_size(&resp);
     unsigned char *buf = (unsigned char *)malloc(packed);
     if (!buf) {
         return;
     }
-    mingdrlms__v2__e2ee_generate_keys_response__pack(&resp, buf);
+    mingdrlms__v2__e2_eegenerate_keys_response__pack(&resp, buf);
     (void)mp2_protocol_send_frame(
         fd, MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_E2EE_GENERATE_KEYS_RESPONSE,
         buf, (uint32_t)packed);
@@ -49,7 +49,7 @@ static void send_prekey_bundle_response(platform_socket_t fd, int code,
                                         const char *message,
                                         const SQLiteE2EEPreKeyBundle *bundle) {
     Mingdrlms__V2__E2EEPreKeyBundleResponse resp =
-        MINGDRLMS__V2__E2EE_PRE_KEY_BUNDLE_RESPONSE__INIT;
+        MINGDRLMS__V2__E2_EEPRE_KEY_BUNDLE_RESPONSE__INIT;
     resp.code = code;
     resp.message = (char *)(message ? message : "");
     if (bundle && code == 0) {
@@ -68,12 +68,12 @@ static void send_prekey_bundle_response(platform_socket_t fd, int code,
             bundle->signed_pre_key.signature_len;
     }
     size_t packed =
-        mingdrlms__v2__e2ee_pre_key_bundle_response__get_packed_size(&resp);
+        mingdrlms__v2__e2_eepre_key_bundle_response__get_packed_size(&resp);
     unsigned char *buf = (unsigned char *)malloc(packed);
     if (!buf) {
         return;
     }
-    mingdrlms__v2__e2ee_pre_key_bundle_response__pack(&resp, buf);
+    mingdrlms__v2__e2_eepre_key_bundle_response__pack(&resp, buf);
     (void)mp2_protocol_send_frame(
         fd, MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_E2EE_PREKEY_BUNDLE_RESPONSE,
         buf, (uint32_t)packed);
@@ -141,10 +141,10 @@ int mp2_e2ee_handle_generate_keys(platform_socket_t fd, const uint8_t *payload,
         return -1;
     }
     Mingdrlms__V2__E2EEGenerateKeysRequest *req =
-        mingdrlms__v2__e2ee_generate_keys_request__unpack(NULL, len, payload);
+        mingdrlms__v2__e2_eegenerate_keys_request__unpack(NULL, len, payload);
     if (!req || !req->user_name || !*req->user_name) {
         if (req)
-            mingdrlms__v2__e2ee_generate_keys_request__free_unpacked(req, NULL);
+            mingdrlms__v2__e2_eegenerate_keys_request__free_unpacked(req, NULL);
         send_generate_keys_response(fd, 400, "invalid request", 0, 0);
         return -1;
     }
@@ -153,13 +153,13 @@ int mp2_e2ee_handle_generate_keys(platform_socket_t fd, const uint8_t *payload,
     if (identity_exists(storage, req->user_name, E2EE_DEVICE_ID) &&
         !req->force_regenerate) {
         send_generate_keys_response(fd, 1, "keys already exist", 0, 0);
-        mingdrlms__v2__e2ee_generate_keys_request__free_unpacked(req, NULL);
+        mingdrlms__v2__e2_eegenerate_keys_request__free_unpacked(req, NULL);
         return 0;
     }
 
     signal_context *ctx = e2ee_signal_get();
     if (!ctx) {
-        mingdrlms__v2__e2ee_generate_keys_request__free_unpacked(req, NULL);
+        mingdrlms__v2__e2_eegenerate_keys_request__free_unpacked(req, NULL);
         send_generate_keys_response(fd, 500, "signal context unavailable", 0,
                                     0);
         return -1;
@@ -359,7 +359,7 @@ cleanup:
         signal_protocol_key_helper_key_list_free(pre_keys_head);
     if (identity)
         SIGNAL_UNREF(identity);
-    mingdrlms__v2__e2ee_generate_keys_request__free_unpacked(req, NULL);
+    mingdrlms__v2__e2_eegenerate_keys_request__free_unpacked(req, NULL);
     return 0;
 }
 
@@ -370,10 +370,10 @@ int mp2_e2ee_handle_prekey_bundle(platform_socket_t fd, const uint8_t *payload,
         return -1;
     }
     Mingdrlms__V2__E2EEPreKeyBundleRequest *req =
-        mingdrlms__v2__e2ee_pre_key_bundle_request__unpack(NULL, len, payload);
+        mingdrlms__v2__e2_eepre_key_bundle_request__unpack(NULL, len, payload);
     if (!req || !req->user_name || !*req->user_name) {
         if (req)
-            mingdrlms__v2__e2ee_pre_key_bundle_request__free_unpacked(req,
+            mingdrlms__v2__e2_eepre_key_bundle_request__free_unpacked(req,
                                                                       NULL);
         send_prekey_bundle_response(fd, 400, "invalid request", NULL);
         return -1;
@@ -383,13 +383,13 @@ int mp2_e2ee_handle_prekey_bundle(platform_socket_t fd, const uint8_t *payload,
     SQLiteE2EEPreKeyBundle bundle = {0};
     if (sqlite_e2ee_get_prekey_bundle(storage, req->user_name, E2EE_DEVICE_ID,
                                       &bundle) != 0) {
-        mingdrlms__v2__e2ee_pre_key_bundle_request__free_unpacked(req, NULL);
+        mingdrlms__v2__e2_eepre_key_bundle_request__free_unpacked(req, NULL);
         send_prekey_bundle_response(fd, 404, "no bundle available", NULL);
         return -1;
     }
 
     send_prekey_bundle_response(fd, 0, "ok", &bundle);
     sqlite_e2ee_free_prekey_bundle(&bundle);
-    mingdrlms__v2__e2ee_pre_key_bundle_request__free_unpacked(req, NULL);
+    mingdrlms__v2__e2_eepre_key_bundle_request__free_unpacked(req, NULL);
     return 0;
 }

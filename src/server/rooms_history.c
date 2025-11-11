@@ -90,34 +90,6 @@ static int send_all(platform_socket_t fd, const void *buf, size_t len) {
     return 0;
 }
 
-static void dummy_sha256_hex(char *out_hex, size_t out_sz) {
-    const char *z =
-        "0000000000000000000000000000000000000000000000000000000000000000";
-    size_t n = strlen(z);
-    if (out_sz == 0)
-        return;
-    size_t c = (n < out_sz - 1) ? n : (out_sz - 1);
-    memcpy(out_hex, z, c);
-    out_hex[c] = '\0';
-}
-
-static int history_viewer_can_view_plain(RoomInstance *instance,
-                                         const char *viewer_user,
-                                         const char *sender_user) {
-    if (!sender_user || !*sender_user)
-        return 1;
-    if (!viewer_user || !*viewer_user)
-        return 0;
-    if (strcmp(viewer_user, sender_user) == 0)
-        return 1;
-    if (instance && rooms_ignite_is_active(instance, viewer_user, sender_user))
-        return 1;
-    if (rooms_is_sqlite_enabled() &&
-        rooms_friendship_lookup(viewer_user, sender_user, NULL) == 0)
-        return 1;
-    return 0;
-}
-
 typedef struct {
     platform_socket_t fd;
     long long rate_bps;
@@ -172,62 +144,34 @@ int rooms_history_send(RoomInstance *instance, const char *room_name,
                 const unsigned char *payload_out = ev->payload.text.data;
                 size_t payload_len_out = ev->payload.text.len;
                 const char *sha_out = ev->sha_hex;
-                unsigned char *redacted = NULL;
                 const char *display = (ev->display_token[0] != '\0')
                                           ? ev->display_token
                                           : ev->user;
-                if (!history_viewer_can_view_plain(instance, viewer_user,
-                                                   ev->user)) {
-                    if (payload_len_out > 0) {
-                        redacted = (unsigned char *)malloc(payload_len_out);
-                        if (redacted) {
-                            memset(redacted, '.', payload_len_out);
-                            payload_out = redacted;
-                        } else {
-                            payload_out = NULL;
-                            payload_len_out = 0;
-                        }
-                    } else {
-                        payload_out = NULL;
-                    }
-                    sha_out = "000000000000000000000000000000000000000000000000"
-                              "0000000000000000";
-                }
                 char hdr[512];
                 int hl = snprintf(
                     hdr, sizeof hdr, "EVT|TEXT|%s|%s|%s|%s|%llu|%zu|%s\n",
                     room_name, inst_hex_ptr, ev->timestamp, display,
                     ev->event_id, payload_len_out, sha_out);
                 if (hl < 0 || send_all(fd, hdr, (size_t)hl) != 0) {
-                    if (redacted)
-                        free(redacted);
                     platform_mutex_unlock(&instance->mu);
                     return -1;
                 }
                 if (payload_len_out > 0 && payload_out) {
                     if (send_all(fd, payload_out, payload_len_out) != 0) {
-                        if (redacted)
-                            free(redacted);
                         platform_mutex_unlock(&instance->mu);
                         return -1;
                     }
                     throttle_down(payload_len_out, rate_bps);
                     if (send_all(fd, "\n", 1) != 0) {
-                        if (redacted)
-                            free(redacted);
                         platform_mutex_unlock(&instance->mu);
                         return -1;
                     }
                 } else if (payload_len_out == 0) {
                     if (send_all(fd, "\n", 1) != 0) {
-                        if (redacted)
-                            free(redacted);
                         platform_mutex_unlock(&instance->mu);
                         return -1;
                     }
                 }
-                if (redacted)
-                    free(redacted);
             } else if (ev->type == EPHEMERAL_EVENT_FILE) {
                 const char *display = (ev->display_token[0] != '\0')
                                           ? ev->display_token
@@ -333,53 +277,33 @@ int rooms_history_send(RoomInstance *instance, const char *room_name,
             char hdr[512];
             const char *display_for_emit =
                 (display[0] != '\0') ? display : user;
-            char hash_buf[65];
-            const char *hash_emit = sha;
-            int can_view_plain =
-                history_viewer_can_view_plain(instance, viewer_user, user);
-            if (!can_view_plain) {
-                dummy_sha256_hex(hash_buf, sizeof hash_buf);
-                hash_emit = hash_buf;
-            }
             int hl =
                 snprintf(hdr, sizeof hdr, "EVT|TEXT|%s|%s|%s|%s|%llu|%zu|%s\n",
                          room_name, instance_for_emit, ts, display_for_emit,
-                         eid, emit_len, hash_emit);
+                         eid, emit_len, sha);
             if (hl < 0 || send_all(fd, hdr, (size_t)hl) != 0) {
                 fclose(f);
                 return -1;
             }
-            if (emit_len > 0) {
-                if (can_view_plain && actual_len && text_path[0] != '\0') {
-                    FILE *tf = fopen(text_path, "rb");
-                    if (tf) {
-                        char buf[1024];
-                        size_t n;
-                        while ((n = fread(buf, 1, sizeof buf, tf)) > 0) {
-                            if (send_all(fd, buf, n) != 0) {
-                                fclose(tf);
-                                fclose(f);
-                                return -1;
-                            }
-                            throttle_down(n, rate_bps);
-                        }
-                        fclose(tf);
-                    }
-                } else if (!can_view_plain) {
-                    unsigned char dots[256];
-                    memset(dots, '.', sizeof dots);
-                    size_t remaining = emit_len;
-                    while (remaining > 0) {
-                        size_t chunk =
-                            remaining < sizeof dots ? remaining : sizeof dots;
-                        if (send_all(fd, dots, chunk) != 0) {
+            if (emit_len > 0 && actual_len && text_path[0] != '\0') {
+                FILE *tf = fopen(text_path, "rb");
+                if (tf) {
+                    char buf[1024];
+                    size_t n;
+                    while ((n = fread(buf, 1, sizeof buf, tf)) > 0) {
+                        if (send_all(fd, buf, n) != 0) {
+                            fclose(tf);
                             fclose(f);
                             return -1;
                         }
-                        throttle_down(chunk, rate_bps);
-                        remaining -= chunk;
+                        throttle_down(n, rate_bps);
                     }
+                    fclose(tf);
                 }
+            }
+            if (send_all(fd, "\n", 1) != 0) {
+                fclose(f);
+                return -1;
             }
         } else if (strcmp(kind, "FILE") == 0) {
             const char *fp = strstr(line, "\"filename\":\"");
@@ -452,25 +376,9 @@ static int rooms_history_iterate_ephemeral(
         snprintf(event.display_token, sizeof event.display_token, "%s",
                  display);
         snprintf(event.sha256_hex, sizeof event.sha256_hex, "%s", ev->sha_hex);
-        unsigned char *redacted = NULL;
         if (ev->type == EPHEMERAL_EVENT_TEXT) {
             const unsigned char *payload_out = ev->payload.text.data;
             size_t payload_len_out = ev->payload.text.len;
-            int can_view_plain = 1;
-            if (instance)
-                can_view_plain = history_viewer_can_view_plain(
-                    instance, viewer_user, ev->user);
-            if (!can_view_plain && payload_len_out > 0) {
-                redacted = (unsigned char *)malloc(payload_len_out);
-                if (!redacted) {
-                    platform_mutex_unlock(&instance->mu);
-                    return -1;
-                }
-                memset(redacted, '.', payload_len_out);
-                payload_out = redacted;
-                payload_len_out = ev->payload.text.len;
-                dummy_sha256_hex(event.sha256_hex, sizeof event.sha256_hex);
-            }
             event.payload.data = payload_out;
             event.payload.len = payload_len_out;
         } else if (ev->type == EPHEMERAL_EVENT_FILE) {
@@ -479,8 +387,6 @@ static int rooms_history_iterate_ephemeral(
             event.file.size_bytes = ev->payload.file.size;
         }
         int cb_rc = cb(&event, user_data);
-        if (redacted)
-            free(redacted);
         if (cb_rc != 0) {
             last_event = ev->event_id;
             platform_mutex_unlock(&instance->mu);
@@ -594,25 +500,9 @@ static int rooms_history_iterate_sqlite(
                 }
                 memcpy(payload_buf, content, (size_t)emit_len);
             }
-            int can_view_plain = 1;
-            if (instance)
-                can_view_plain = history_viewer_can_view_plain(
-                    instance, viewer_user, user_name);
-            if (!can_view_plain && emit_len > 0) {
-                if (!payload_buf) {
-                    payload_buf = (unsigned char *)malloc((size_t)emit_len);
-                    if (!payload_buf) {
-                        sqlite3_finalize(stmt);
-                        platform_mutex_unlock(&st->mu);
-                        return -1;
-                    }
-                }
-                memset(payload_buf, '.', (size_t)emit_len);
-                dummy_sha256_hex(event.sha256_hex, sizeof event.sha256_hex);
-            } else if (can_view_plain && content_hash && *content_hash) {
+            if (content_hash && *content_hash)
                 snprintf(event.sha256_hex, sizeof event.sha256_hex, "%s",
                          content_hash);
-            }
             if (!payload_buf)
                 emit_len = 0;
             event.payload.data = payload_buf;
@@ -772,13 +662,7 @@ static int rooms_history_iterate_file(
                 }
             }
             unsigned char *payload_buf = NULL;
-            int can_view_plain = 1;
-            if (instance)
-                can_view_plain =
-                    history_viewer_can_view_plain(instance, viewer_user, user);
-            if (!can_view_plain)
-                dummy_sha256_hex(event.sha256_hex, sizeof event.sha256_hex);
-            else if (sha[0] != '\0')
+            if (sha[0] != '\0')
                 snprintf(event.sha256_hex, sizeof event.sha256_hex, "%.64s",
                          sha);
             if (emit_len > 0) {
@@ -787,7 +671,7 @@ static int rooms_history_iterate_file(
                     fclose(f);
                     return -1;
                 }
-                if (can_view_plain && text_path[0] != '\0') {
+                if (text_path[0] != '\0') {
                     FILE *tf = fopen(text_path, "rb");
                     if (!tf) {
                         memset(payload_buf, 0, emit_len);
@@ -799,7 +683,7 @@ static int rooms_history_iterate_file(
                         fclose(tf);
                     }
                 } else {
-                    memset(payload_buf, '.', emit_len);
+                    memset(payload_buf, 0, emit_len);
                 }
             }
             event.payload.data = payload_buf;

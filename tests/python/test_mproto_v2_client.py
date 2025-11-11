@@ -184,6 +184,11 @@ def test_publish_error_raises(client_with_socket):
         req.ParseFromString(frame.payload)
         assert req.room_name == "room-1"
         assert req.access_token == "valid-access"
+        assert req.payload.ciphertext == b"payload"
+        assert (
+            req.payload.type
+            == room_pb2.SignalCiphertextType.SIGNAL_CIPHERTEXT_TYPE_MESSAGE
+        )
         err = common_pb2.ErrorResponse()
         err.code = 403
         err.message = "publish blocked"
@@ -222,7 +227,10 @@ def test_subscribe_yields_events(client_with_socket):
         event = room_pb2.RoomEvent()
         event.room_name = "room-2"
         event.event_id = 42
-        event.payload = b"hello"
+        event.payload.type = (
+            room_pb2.SignalCiphertextType.SIGNAL_CIPHERTEXT_TYPE_MESSAGE
+        )
+        event.payload.ciphertext = b"hello"
         event.display_token = "display"
         write_frame(
             server_sock,
@@ -246,6 +254,10 @@ def test_subscribe_yields_events(client_with_socket):
     assert event.room_name == "room-2"
     assert event.event_id == 42
     assert event.payload == b"hello"
+    assert (
+        event.payload_type
+        == room_pb2.SignalCiphertextType.SIGNAL_CIPHERTEXT_TYPE_MESSAGE
+    )
     with pytest.raises(MP2Error):
         next(iterator)
     thread.join(timeout=1)

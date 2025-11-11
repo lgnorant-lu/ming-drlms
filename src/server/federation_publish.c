@@ -41,6 +41,10 @@ typedef Mingdrlms__V2__RoomEvent RoomEvent;
 #define s2s_subscribe_request__pack mingdrlms__v2__s2_ssubscribe_request__pack
 #define room_event__get_packed_size mingdrlms__v2__room_event__get_packed_size
 #define room_event__pack mingdrlms__v2__room_event__pack
+#define signal_encrypted_payload__unpack                                       \
+    mingdrlms__v2__signal_encrypted_payload__unpack
+#define signal_encrypted_payload__free_unpacked                                \
+    mingdrlms__v2__signal_encrypted_payload__free_unpacked
 #define s2s_subscribe_response__unpack                                         \
     mingdrlms__v2__s2_ssubscribe_response__unpack
 #define s2s_subscribe_response__free_unpacked                                  \
@@ -271,8 +275,18 @@ int federation_handle_s2s_publish(
     RoomEvent ev = ROOM_EVENT__INIT;
     ev.room_name = (char *)room_name;
     ev.event_id = (int64_t)event_id;
-    ev.payload.data = (uint8_t *)payload;
-    ev.payload.len = payload_len;
+    Mingdrlms__V2__SignalEncryptedPayload *payload_msg = NULL;
+    if (event_kind == MINGDRLMS__V2__ROOM_EVENT_KIND__ROOM_EVENT_KIND_TEXT &&
+        payload && payload_len > 0) {
+        payload_msg =
+            signal_encrypted_payload__unpack(NULL, payload_len, payload);
+        if (!payload_msg) {
+            fprintf(stderr,
+                    "[federation] Failed to unpack SignalEncryptedPayload\n");
+            return -1;
+        }
+        ev.payload = payload_msg;
+    }
     if (display_token && display_token[0] != '\0') {
         ev.display_token = (char *)display_token;
     } else if (sender_user && sender_user[0] != '\0') {
@@ -305,6 +319,8 @@ int federation_handle_s2s_publish(
     unsigned char *ev_buf = (unsigned char *)malloc(ev_sz);
     if (!ev_buf) {
         fprintf(stderr, "[federation] Failed to allocate room event buffer\n");
+        if (payload_msg)
+            signal_encrypted_payload__free_unpacked(payload_msg, NULL);
         return -1;
     }
     room_event__pack(&ev, ev_buf);
@@ -314,6 +330,8 @@ int federation_handle_s2s_publish(
     if (!frame) {
         fprintf(stderr, "[federation] Failed to allocate MP2 frame buffer\n");
         free(ev_buf);
+        if (payload_msg)
+            signal_encrypted_payload__free_unpacked(payload_msg, NULL);
         return -1;
     }
 
@@ -331,6 +349,8 @@ int federation_handle_s2s_publish(
         rooms_emit_to_all(instance, (const char *)frame, frame_len, NULL);
     free(frame);
     free(ev_buf);
+    if (payload_msg)
+        signal_encrypted_payload__free_unpacked(payload_msg, NULL);
 
     if (emit_rc != 0) {
         fprintf(stderr,

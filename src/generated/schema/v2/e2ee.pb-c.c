@@ -7,206 +7,302 @@
 #endif
 
 #include "schema/v2/e2ee.pb-c.h"
-
-void mingdrlms__v2__e2ee_generate_keys_request__init(
+void mingdrlms__v2__e2_eegenerate_keys_request__init(
     Mingdrlms__V2__E2EEGenerateKeysRequest *message) {
     static const Mingdrlms__V2__E2EEGenerateKeysRequest init_value =
-        MINGDRLMS__V2__E2EE_GENERATE_KEYS_REQUEST__INIT;
+        MINGDRLMS__V2__E2_EEGENERATE_KEYS_REQUEST__INIT;
     *message = init_value;
 }
-
-size_t mingdrlms__v2__e2ee_generate_keys_request__get_packed_size(
+size_t mingdrlms__v2__e2_eegenerate_keys_request__get_packed_size(
     const Mingdrlms__V2__E2EEGenerateKeysRequest *message) {
     assert(message->base.descriptor ==
-           &mingdrlms__v2__e2ee_generate_keys_request__descriptor);
+           &mingdrlms__v2__e2_eegenerate_keys_request__descriptor);
     return protobuf_c_message_get_packed_size(
         (const ProtobufCMessage *)(message));
 }
-
-size_t mingdrlms__v2__e2ee_generate_keys_request__pack(
+size_t mingdrlms__v2__e2_eegenerate_keys_request__pack(
     const Mingdrlms__V2__E2EEGenerateKeysRequest *message, uint8_t *out) {
     assert(message->base.descriptor ==
-           &mingdrlms__v2__e2ee_generate_keys_request__descriptor);
+           &mingdrlms__v2__e2_eegenerate_keys_request__descriptor);
     return protobuf_c_message_pack((const ProtobufCMessage *)message, out);
 }
-
-size_t mingdrlms__v2__e2ee_generate_keys_request__pack_to_buffer(
+size_t mingdrlms__v2__e2_eegenerate_keys_request__pack_to_buffer(
     const Mingdrlms__V2__E2EEGenerateKeysRequest *message,
     ProtobufCBuffer *buffer) {
     assert(message->base.descriptor ==
-           &mingdrlms__v2__e2ee_generate_keys_request__descriptor);
+           &mingdrlms__v2__e2_eegenerate_keys_request__descriptor);
     return protobuf_c_message_pack_to_buffer((const ProtobufCMessage *)message,
                                              buffer);
 }
-
 Mingdrlms__V2__E2EEGenerateKeysRequest *
-mingdrlms__v2__e2ee_generate_keys_request__unpack(ProtobufCAllocator *allocator,
+mingdrlms__v2__e2_eegenerate_keys_request__unpack(ProtobufCAllocator *allocator,
                                                   size_t len,
                                                   const uint8_t *data) {
     return (Mingdrlms__V2__E2EEGenerateKeysRequest *)protobuf_c_message_unpack(
-        &mingdrlms__v2__e2ee_generate_keys_request__descriptor, allocator, len,
+        &mingdrlms__v2__e2_eegenerate_keys_request__descriptor, allocator, len,
         data);
 }
-
-void mingdrlms__v2__e2ee_generate_keys_request__free_unpacked(
+void mingdrlms__v2__e2_eegenerate_keys_request__free_unpacked(
     Mingdrlms__V2__E2EEGenerateKeysRequest *message,
     ProtobufCAllocator *allocator) {
     if (!message)
         return;
     assert(message->base.descriptor ==
-           &mingdrlms__v2__e2ee_generate_keys_request__descriptor);
+           &mingdrlms__v2__e2_eegenerate_keys_request__descriptor);
     protobuf_c_message_free_unpacked((ProtobufCMessage *)message, allocator);
 }
-
-void mingdrlms__v2__e2ee_generate_keys_response__init(
+void mingdrlms__v2__e2_eegenerate_keys_response__init(
     Mingdrlms__V2__E2EEGenerateKeysResponse *message) {
     static const Mingdrlms__V2__E2EEGenerateKeysResponse init_value =
-        MINGDRLMS__V2__E2EE_GENERATE_KEYS_RESPONSE__INIT;
+        MINGDRLMS__V2__E2_EEGENERATE_KEYS_RESPONSE__INIT;
     *message = init_value;
 }
-
-size_t mingdrlms__v2__e2ee_generate_keys_response__get_packed_size(
+size_t mingdrlms__v2__e2_eegenerate_keys_response__get_packed_size(
     const Mingdrlms__V2__E2EEGenerateKeysResponse *message) {
     assert(message->base.descriptor ==
-           &mingdrlms__v2__e2ee_generate_keys_response__descriptor);
+           &mingdrlms__v2__e2_eegenerate_keys_response__descriptor);
     return protobuf_c_message_get_packed_size(
         (const ProtobufCMessage *)(message));
 }
-
-size_t mingdrlms__v2__e2ee_generate_keys_response__pack(
+size_t mingdrlms__v2__e2_eegenerate_keys_response__pack(
     const Mingdrlms__V2__E2EEGenerateKeysResponse *message, uint8_t *out) {
     assert(message->base.descriptor ==
-           &mingdrlms__v2__e2ee_generate_keys_response__descriptor);
+           &mingdrlms__v2__e2_eegenerate_keys_response__descriptor);
     return protobuf_c_message_pack((const ProtobufCMessage *)message, out);
 }
-
-size_t mingdrlms__v2__e2ee_generate_keys_response__pack_to_buffer(
+size_t mingdrlms__v2__e2_eegenerate_keys_response__pack_to_buffer(
     const Mingdrlms__V2__E2EEGenerateKeysResponse *message,
     ProtobufCBuffer *buffer) {
     assert(message->base.descriptor ==
-           &mingdrlms__v2__e2ee_generate_keys_response__descriptor);
+           &mingdrlms__v2__e2_eegenerate_keys_response__descriptor);
     return protobuf_c_message_pack_to_buffer((const ProtobufCMessage *)message,
                                              buffer);
 }
-
 Mingdrlms__V2__E2EEGenerateKeysResponse *
-mingdrlms__v2__e2ee_generate_keys_response__unpack(
+mingdrlms__v2__e2_eegenerate_keys_response__unpack(
     ProtobufCAllocator *allocator, size_t len, const uint8_t *data) {
     return (Mingdrlms__V2__E2EEGenerateKeysResponse *)protobuf_c_message_unpack(
-        &mingdrlms__v2__e2ee_generate_keys_response__descriptor, allocator, len,
+        &mingdrlms__v2__e2_eegenerate_keys_response__descriptor, allocator, len,
         data);
 }
-
-void mingdrlms__v2__e2ee_generate_keys_response__free_unpacked(
+void mingdrlms__v2__e2_eegenerate_keys_response__free_unpacked(
     Mingdrlms__V2__E2EEGenerateKeysResponse *message,
     ProtobufCAllocator *allocator) {
     if (!message)
         return;
     assert(message->base.descriptor ==
-           &mingdrlms__v2__e2ee_generate_keys_response__descriptor);
+           &mingdrlms__v2__e2_eegenerate_keys_response__descriptor);
     protobuf_c_message_free_unpacked((ProtobufCMessage *)message, allocator);
 }
-
-void mingdrlms__v2__e2ee_pre_key_bundle_request__init(
+void mingdrlms__v2__e2_eepre_key_bundle_request__init(
     Mingdrlms__V2__E2EEPreKeyBundleRequest *message) {
     static const Mingdrlms__V2__E2EEPreKeyBundleRequest init_value =
-        MINGDRLMS__V2__E2EE_PRE_KEY_BUNDLE_REQUEST__INIT;
+        MINGDRLMS__V2__E2_EEPRE_KEY_BUNDLE_REQUEST__INIT;
     *message = init_value;
 }
-
-size_t mingdrlms__v2__e2ee_pre_key_bundle_request__get_packed_size(
+size_t mingdrlms__v2__e2_eepre_key_bundle_request__get_packed_size(
     const Mingdrlms__V2__E2EEPreKeyBundleRequest *message) {
     assert(message->base.descriptor ==
-           &mingdrlms__v2__e2ee_pre_key_bundle_request__descriptor);
+           &mingdrlms__v2__e2_eepre_key_bundle_request__descriptor);
     return protobuf_c_message_get_packed_size(
         (const ProtobufCMessage *)(message));
 }
-
-size_t mingdrlms__v2__e2ee_pre_key_bundle_request__pack(
+size_t mingdrlms__v2__e2_eepre_key_bundle_request__pack(
     const Mingdrlms__V2__E2EEPreKeyBundleRequest *message, uint8_t *out) {
     assert(message->base.descriptor ==
-           &mingdrlms__v2__e2ee_pre_key_bundle_request__descriptor);
+           &mingdrlms__v2__e2_eepre_key_bundle_request__descriptor);
     return protobuf_c_message_pack((const ProtobufCMessage *)message, out);
 }
-
-size_t mingdrlms__v2__e2ee_pre_key_bundle_request__pack_to_buffer(
+size_t mingdrlms__v2__e2_eepre_key_bundle_request__pack_to_buffer(
     const Mingdrlms__V2__E2EEPreKeyBundleRequest *message,
     ProtobufCBuffer *buffer) {
     assert(message->base.descriptor ==
-           &mingdrlms__v2__e2ee_pre_key_bundle_request__descriptor);
+           &mingdrlms__v2__e2_eepre_key_bundle_request__descriptor);
     return protobuf_c_message_pack_to_buffer((const ProtobufCMessage *)message,
                                              buffer);
 }
-
 Mingdrlms__V2__E2EEPreKeyBundleRequest *
-mingdrlms__v2__e2ee_pre_key_bundle_request__unpack(
+mingdrlms__v2__e2_eepre_key_bundle_request__unpack(
     ProtobufCAllocator *allocator, size_t len, const uint8_t *data) {
     return (Mingdrlms__V2__E2EEPreKeyBundleRequest *)protobuf_c_message_unpack(
-        &mingdrlms__v2__e2ee_pre_key_bundle_request__descriptor, allocator, len,
+        &mingdrlms__v2__e2_eepre_key_bundle_request__descriptor, allocator, len,
         data);
 }
-
-void mingdrlms__v2__e2ee_pre_key_bundle_request__free_unpacked(
+void mingdrlms__v2__e2_eepre_key_bundle_request__free_unpacked(
     Mingdrlms__V2__E2EEPreKeyBundleRequest *message,
     ProtobufCAllocator *allocator) {
     if (!message)
         return;
     assert(message->base.descriptor ==
-           &mingdrlms__v2__e2ee_pre_key_bundle_request__descriptor);
+           &mingdrlms__v2__e2_eepre_key_bundle_request__descriptor);
     protobuf_c_message_free_unpacked((ProtobufCMessage *)message, allocator);
 }
-
-void mingdrlms__v2__e2ee_pre_key_bundle_response__init(
+void mingdrlms__v2__e2_eepre_key_bundle_response__init(
     Mingdrlms__V2__E2EEPreKeyBundleResponse *message) {
     static const Mingdrlms__V2__E2EEPreKeyBundleResponse init_value =
-        MINGDRLMS__V2__E2EE_PRE_KEY_BUNDLE_RESPONSE__INIT;
+        MINGDRLMS__V2__E2_EEPRE_KEY_BUNDLE_RESPONSE__INIT;
     *message = init_value;
 }
-
-size_t mingdrlms__v2__e2ee_pre_key_bundle_response__get_packed_size(
+size_t mingdrlms__v2__e2_eepre_key_bundle_response__get_packed_size(
     const Mingdrlms__V2__E2EEPreKeyBundleResponse *message) {
     assert(message->base.descriptor ==
-           &mingdrlms__v2__e2ee_pre_key_bundle_response__descriptor);
+           &mingdrlms__v2__e2_eepre_key_bundle_response__descriptor);
     return protobuf_c_message_get_packed_size(
         (const ProtobufCMessage *)(message));
 }
-
-size_t mingdrlms__v2__e2ee_pre_key_bundle_response__pack(
+size_t mingdrlms__v2__e2_eepre_key_bundle_response__pack(
     const Mingdrlms__V2__E2EEPreKeyBundleResponse *message, uint8_t *out) {
     assert(message->base.descriptor ==
-           &mingdrlms__v2__e2ee_pre_key_bundle_response__descriptor);
+           &mingdrlms__v2__e2_eepre_key_bundle_response__descriptor);
     return protobuf_c_message_pack((const ProtobufCMessage *)message, out);
 }
-
-size_t mingdrlms__v2__e2ee_pre_key_bundle_response__pack_to_buffer(
+size_t mingdrlms__v2__e2_eepre_key_bundle_response__pack_to_buffer(
     const Mingdrlms__V2__E2EEPreKeyBundleResponse *message,
     ProtobufCBuffer *buffer) {
     assert(message->base.descriptor ==
-           &mingdrlms__v2__e2ee_pre_key_bundle_response__descriptor);
+           &mingdrlms__v2__e2_eepre_key_bundle_response__descriptor);
     return protobuf_c_message_pack_to_buffer((const ProtobufCMessage *)message,
                                              buffer);
 }
-
 Mingdrlms__V2__E2EEPreKeyBundleResponse *
-mingdrlms__v2__e2ee_pre_key_bundle_response__unpack(
+mingdrlms__v2__e2_eepre_key_bundle_response__unpack(
     ProtobufCAllocator *allocator, size_t len, const uint8_t *data) {
     return (Mingdrlms__V2__E2EEPreKeyBundleResponse *)protobuf_c_message_unpack(
-        &mingdrlms__v2__e2ee_pre_key_bundle_response__descriptor, allocator,
+        &mingdrlms__v2__e2_eepre_key_bundle_response__descriptor, allocator,
         len, data);
 }
-
-void mingdrlms__v2__e2ee_pre_key_bundle_response__free_unpacked(
+void mingdrlms__v2__e2_eepre_key_bundle_response__free_unpacked(
     Mingdrlms__V2__E2EEPreKeyBundleResponse *message,
     ProtobufCAllocator *allocator) {
     if (!message)
         return;
     assert(message->base.descriptor ==
-           &mingdrlms__v2__e2ee_pre_key_bundle_response__descriptor);
+           &mingdrlms__v2__e2_eepre_key_bundle_response__descriptor);
     protobuf_c_message_free_unpacked((ProtobufCMessage *)message, allocator);
 }
-
+void mingdrlms__v2__signal_key_pair__init(
+    Mingdrlms__V2__SignalKeyPair *message) {
+    static const Mingdrlms__V2__SignalKeyPair init_value =
+        MINGDRLMS__V2__SIGNAL_KEY_PAIR__INIT;
+    *message = init_value;
+}
+size_t mingdrlms__v2__signal_key_pair__get_packed_size(
+    const Mingdrlms__V2__SignalKeyPair *message) {
+    assert(message->base.descriptor ==
+           &mingdrlms__v2__signal_key_pair__descriptor);
+    return protobuf_c_message_get_packed_size(
+        (const ProtobufCMessage *)(message));
+}
+size_t mingdrlms__v2__signal_key_pair__pack(
+    const Mingdrlms__V2__SignalKeyPair *message, uint8_t *out) {
+    assert(message->base.descriptor ==
+           &mingdrlms__v2__signal_key_pair__descriptor);
+    return protobuf_c_message_pack((const ProtobufCMessage *)message, out);
+}
+size_t mingdrlms__v2__signal_key_pair__pack_to_buffer(
+    const Mingdrlms__V2__SignalKeyPair *message, ProtobufCBuffer *buffer) {
+    assert(message->base.descriptor ==
+           &mingdrlms__v2__signal_key_pair__descriptor);
+    return protobuf_c_message_pack_to_buffer((const ProtobufCMessage *)message,
+                                             buffer);
+}
+Mingdrlms__V2__SignalKeyPair *
+mingdrlms__v2__signal_key_pair__unpack(ProtobufCAllocator *allocator,
+                                       size_t len, const uint8_t *data) {
+    return (Mingdrlms__V2__SignalKeyPair *)protobuf_c_message_unpack(
+        &mingdrlms__v2__signal_key_pair__descriptor, allocator, len, data);
+}
+void mingdrlms__v2__signal_key_pair__free_unpacked(
+    Mingdrlms__V2__SignalKeyPair *message, ProtobufCAllocator *allocator) {
+    if (!message)
+        return;
+    assert(message->base.descriptor ==
+           &mingdrlms__v2__signal_key_pair__descriptor);
+    protobuf_c_message_free_unpacked((ProtobufCMessage *)message, allocator);
+}
+void mingdrlms__v2__signal_pre_key__init(Mingdrlms__V2__SignalPreKey *message) {
+    static const Mingdrlms__V2__SignalPreKey init_value =
+        MINGDRLMS__V2__SIGNAL_PRE_KEY__INIT;
+    *message = init_value;
+}
+size_t mingdrlms__v2__signal_pre_key__get_packed_size(
+    const Mingdrlms__V2__SignalPreKey *message) {
+    assert(message->base.descriptor ==
+           &mingdrlms__v2__signal_pre_key__descriptor);
+    return protobuf_c_message_get_packed_size(
+        (const ProtobufCMessage *)(message));
+}
+size_t
+mingdrlms__v2__signal_pre_key__pack(const Mingdrlms__V2__SignalPreKey *message,
+                                    uint8_t *out) {
+    assert(message->base.descriptor ==
+           &mingdrlms__v2__signal_pre_key__descriptor);
+    return protobuf_c_message_pack((const ProtobufCMessage *)message, out);
+}
+size_t mingdrlms__v2__signal_pre_key__pack_to_buffer(
+    const Mingdrlms__V2__SignalPreKey *message, ProtobufCBuffer *buffer) {
+    assert(message->base.descriptor ==
+           &mingdrlms__v2__signal_pre_key__descriptor);
+    return protobuf_c_message_pack_to_buffer((const ProtobufCMessage *)message,
+                                             buffer);
+}
+Mingdrlms__V2__SignalPreKey *
+mingdrlms__v2__signal_pre_key__unpack(ProtobufCAllocator *allocator, size_t len,
+                                      const uint8_t *data) {
+    return (Mingdrlms__V2__SignalPreKey *)protobuf_c_message_unpack(
+        &mingdrlms__v2__signal_pre_key__descriptor, allocator, len, data);
+}
+void mingdrlms__v2__signal_pre_key__free_unpacked(
+    Mingdrlms__V2__SignalPreKey *message, ProtobufCAllocator *allocator) {
+    if (!message)
+        return;
+    assert(message->base.descriptor ==
+           &mingdrlms__v2__signal_pre_key__descriptor);
+    protobuf_c_message_free_unpacked((ProtobufCMessage *)message, allocator);
+}
+void mingdrlms__v2__signal_signed_pre_key__init(
+    Mingdrlms__V2__SignalSignedPreKey *message) {
+    static const Mingdrlms__V2__SignalSignedPreKey init_value =
+        MINGDRLMS__V2__SIGNAL_SIGNED_PRE_KEY__INIT;
+    *message = init_value;
+}
+size_t mingdrlms__v2__signal_signed_pre_key__get_packed_size(
+    const Mingdrlms__V2__SignalSignedPreKey *message) {
+    assert(message->base.descriptor ==
+           &mingdrlms__v2__signal_signed_pre_key__descriptor);
+    return protobuf_c_message_get_packed_size(
+        (const ProtobufCMessage *)(message));
+}
+size_t mingdrlms__v2__signal_signed_pre_key__pack(
+    const Mingdrlms__V2__SignalSignedPreKey *message, uint8_t *out) {
+    assert(message->base.descriptor ==
+           &mingdrlms__v2__signal_signed_pre_key__descriptor);
+    return protobuf_c_message_pack((const ProtobufCMessage *)message, out);
+}
+size_t mingdrlms__v2__signal_signed_pre_key__pack_to_buffer(
+    const Mingdrlms__V2__SignalSignedPreKey *message, ProtobufCBuffer *buffer) {
+    assert(message->base.descriptor ==
+           &mingdrlms__v2__signal_signed_pre_key__descriptor);
+    return protobuf_c_message_pack_to_buffer((const ProtobufCMessage *)message,
+                                             buffer);
+}
+Mingdrlms__V2__SignalSignedPreKey *
+mingdrlms__v2__signal_signed_pre_key__unpack(ProtobufCAllocator *allocator,
+                                             size_t len, const uint8_t *data) {
+    return (Mingdrlms__V2__SignalSignedPreKey *)protobuf_c_message_unpack(
+        &mingdrlms__v2__signal_signed_pre_key__descriptor, allocator, len,
+        data);
+}
+void mingdrlms__v2__signal_signed_pre_key__free_unpacked(
+    Mingdrlms__V2__SignalSignedPreKey *message, ProtobufCAllocator *allocator) {
+    if (!message)
+        return;
+    assert(message->base.descriptor ==
+           &mingdrlms__v2__signal_signed_pre_key__descriptor);
+    protobuf_c_message_free_unpacked((ProtobufCMessage *)message, allocator);
+}
 static const ProtobufCFieldDescriptor
-    mingdrlms__v2__e2ee_generate_keys_request__field_descriptors[2] = {
+    mingdrlms__v2__e2_eegenerate_keys_request__field_descriptors[2] = {
         {
             "user_name", 1, PROTOBUF_C_LABEL_NONE, PROTOBUF_C_TYPE_STRING,
             0, /* quantifier_offset */
@@ -223,15 +319,15 @@ static const ProtobufCFieldDescriptor
         },
 };
 static const unsigned
-    mingdrlms__v2__e2ee_generate_keys_request__field_indices_by_name[2] = {
-        1, /* field[0] = force_regenerate */
-        0, /* field[1] = user_name */
+    mingdrlms__v2__e2_eegenerate_keys_request__field_indices_by_name[] = {
+        1, /* field[1] = force_regenerate */
+        0, /* field[0] = user_name */
 };
 static const ProtobufCIntRange
-    mingdrlms__v2__e2ee_generate_keys_request__number_ranges[2] = {{1, 0},
-                                                                   {0, 2}};
+    mingdrlms__v2__e2_eegenerate_keys_request__number_ranges[1 + 1] = {{1, 0},
+                                                                       {0, 2}};
 const ProtobufCMessageDescriptor
-    mingdrlms__v2__e2ee_generate_keys_request__descriptor = {
+    mingdrlms__v2__e2_eegenerate_keys_request__descriptor = {
         PROTOBUF_C__MESSAGE_DESCRIPTOR_MAGIC,
         "mingdrlms.v2.E2EEGenerateKeysRequest",
         "E2EEGenerateKeysRequest",
@@ -239,18 +335,17 @@ const ProtobufCMessageDescriptor
         "mingdrlms.v2",
         sizeof(Mingdrlms__V2__E2EEGenerateKeysRequest),
         2,
-        mingdrlms__v2__e2ee_generate_keys_request__field_descriptors,
-        mingdrlms__v2__e2ee_generate_keys_request__field_indices_by_name,
+        mingdrlms__v2__e2_eegenerate_keys_request__field_descriptors,
+        mingdrlms__v2__e2_eegenerate_keys_request__field_indices_by_name,
         1,
-        mingdrlms__v2__e2ee_generate_keys_request__number_ranges,
-        (ProtobufCMessageInit)mingdrlms__v2__e2ee_generate_keys_request__init,
+        mingdrlms__v2__e2_eegenerate_keys_request__number_ranges,
+        (ProtobufCMessageInit)mingdrlms__v2__e2_eegenerate_keys_request__init,
         NULL,
         NULL,
         NULL /* reserved[123] */
 };
-
 static const ProtobufCFieldDescriptor
-    mingdrlms__v2__e2ee_generate_keys_response__field_descriptors[4] = {
+    mingdrlms__v2__e2_eegenerate_keys_response__field_descriptors[8] = {
         {
             "code", 1, PROTOBUF_C_LABEL_NONE, PROTOBUF_C_TYPE_INT32,
             0, /* quantifier_offset */
@@ -279,38 +374,70 @@ static const ProtobufCFieldDescriptor
             NULL, NULL, 0, /* flags */
             0, NULL, NULL  /* reserved1,reserved2, etc */
         },
+        {
+            "identity_key", 5, PROTOBUF_C_LABEL_NONE, PROTOBUF_C_TYPE_MESSAGE,
+            0, /* quantifier_offset */
+            offsetof(Mingdrlms__V2__E2EEGenerateKeysResponse, identity_key),
+            &mingdrlms__v2__signal_key_pair__descriptor, NULL, 0, /* flags */
+            0, NULL, NULL /* reserved1,reserved2, etc */
+        },
+        {
+            "device_id", 6, PROTOBUF_C_LABEL_NONE, PROTOBUF_C_TYPE_UINT32,
+            0, /* quantifier_offset */
+            offsetof(Mingdrlms__V2__E2EEGenerateKeysResponse, device_id), NULL,
+            NULL, 0,      /* flags */
+            0, NULL, NULL /* reserved1,reserved2, etc */
+        },
+        {
+            "pre_keys", 7, PROTOBUF_C_LABEL_REPEATED, PROTOBUF_C_TYPE_MESSAGE,
+            offsetof(Mingdrlms__V2__E2EEGenerateKeysResponse, n_pre_keys),
+            offsetof(Mingdrlms__V2__E2EEGenerateKeysResponse, pre_keys),
+            &mingdrlms__v2__signal_pre_key__descriptor, NULL, 0, /* flags */
+            0, NULL, NULL /* reserved1,reserved2, etc */
+        },
+        {
+            "signed_pre_key", 8, PROTOBUF_C_LABEL_NONE, PROTOBUF_C_TYPE_MESSAGE,
+            0, /* quantifier_offset */
+            offsetof(Mingdrlms__V2__E2EEGenerateKeysResponse, signed_pre_key),
+            &mingdrlms__v2__signal_signed_pre_key__descriptor, NULL,
+            0,            /* flags */
+            0, NULL, NULL /* reserved1,reserved2, etc */
+        },
 };
 static const unsigned
-    mingdrlms__v2__e2ee_generate_keys_response__field_indices_by_name[4] = {
+    mingdrlms__v2__e2_eegenerate_keys_response__field_indices_by_name[] = {
         0, /* field[0] = code */
+        5, /* field[5] = device_id */
+        4, /* field[4] = identity_key */
         1, /* field[1] = message */
-        3, /* field[2] = pre_key_count */
-        2, /* field[3] = registration_id */
+        3, /* field[3] = pre_key_count */
+        6, /* field[6] = pre_keys */
+        2, /* field[2] = registration_id */
+        7, /* field[7] = signed_pre_key */
 };
 static const ProtobufCIntRange
-    mingdrlms__v2__e2ee_generate_keys_response__number_ranges[2] = {{1, 0},
-                                                                    {0, 4}};
+    mingdrlms__v2__e2_eegenerate_keys_response__number_ranges[1 + 1] = {{1, 0},
+                                                                        {0, 8}};
 const ProtobufCMessageDescriptor
-    mingdrlms__v2__e2ee_generate_keys_response__descriptor = {
+    mingdrlms__v2__e2_eegenerate_keys_response__descriptor = {
         PROTOBUF_C__MESSAGE_DESCRIPTOR_MAGIC,
         "mingdrlms.v2.E2EEGenerateKeysResponse",
         "E2EEGenerateKeysResponse",
         "Mingdrlms__V2__E2EEGenerateKeysResponse",
         "mingdrlms.v2",
         sizeof(Mingdrlms__V2__E2EEGenerateKeysResponse),
-        4,
-        mingdrlms__v2__e2ee_generate_keys_response__field_descriptors,
-        mingdrlms__v2__e2ee_generate_keys_response__field_indices_by_name,
+        8,
+        mingdrlms__v2__e2_eegenerate_keys_response__field_descriptors,
+        mingdrlms__v2__e2_eegenerate_keys_response__field_indices_by_name,
         1,
-        mingdrlms__v2__e2ee_generate_keys_response__number_ranges,
-        (ProtobufCMessageInit)mingdrlms__v2__e2ee_generate_keys_response__init,
+        mingdrlms__v2__e2_eegenerate_keys_response__number_ranges,
+        (ProtobufCMessageInit)mingdrlms__v2__e2_eegenerate_keys_response__init,
         NULL,
         NULL,
         NULL /* reserved[123] */
 };
-
 static const ProtobufCFieldDescriptor
-    mingdrlms__v2__e2ee_pre_key_bundle_request__field_descriptors[1] = {
+    mingdrlms__v2__e2_eepre_key_bundle_request__field_descriptors[1] = {
         {
             "user_name", 1, PROTOBUF_C_LABEL_NONE, PROTOBUF_C_TYPE_STRING,
             0, /* quantifier_offset */
@@ -320,14 +447,14 @@ static const ProtobufCFieldDescriptor
         },
 };
 static const unsigned
-    mingdrlms__v2__e2ee_pre_key_bundle_request__field_indices_by_name[1] = {
+    mingdrlms__v2__e2_eepre_key_bundle_request__field_indices_by_name[] = {
         0, /* field[0] = user_name */
 };
 static const ProtobufCIntRange
-    mingdrlms__v2__e2ee_pre_key_bundle_request__number_ranges[2] = {{1, 0},
-                                                                    {0, 1}};
+    mingdrlms__v2__e2_eepre_key_bundle_request__number_ranges[1 + 1] = {{1, 0},
+                                                                        {0, 1}};
 const ProtobufCMessageDescriptor
-    mingdrlms__v2__e2ee_pre_key_bundle_request__descriptor = {
+    mingdrlms__v2__e2_eepre_key_bundle_request__descriptor = {
         PROTOBUF_C__MESSAGE_DESCRIPTOR_MAGIC,
         "mingdrlms.v2.E2EEPreKeyBundleRequest",
         "E2EEPreKeyBundleRequest",
@@ -335,18 +462,17 @@ const ProtobufCMessageDescriptor
         "mingdrlms.v2",
         sizeof(Mingdrlms__V2__E2EEPreKeyBundleRequest),
         1,
-        mingdrlms__v2__e2ee_pre_key_bundle_request__field_descriptors,
-        mingdrlms__v2__e2ee_pre_key_bundle_request__field_indices_by_name,
+        mingdrlms__v2__e2_eepre_key_bundle_request__field_descriptors,
+        mingdrlms__v2__e2_eepre_key_bundle_request__field_indices_by_name,
         1,
-        mingdrlms__v2__e2ee_pre_key_bundle_request__number_ranges,
-        (ProtobufCMessageInit)mingdrlms__v2__e2ee_pre_key_bundle_request__init,
+        mingdrlms__v2__e2_eepre_key_bundle_request__number_ranges,
+        (ProtobufCMessageInit)mingdrlms__v2__e2_eepre_key_bundle_request__init,
         NULL,
         NULL,
         NULL /* reserved[123] */
 };
-
 static const ProtobufCFieldDescriptor
-    mingdrlms__v2__e2ee_pre_key_bundle_response__field_descriptors[10] = {
+    mingdrlms__v2__e2_eepre_key_bundle_response__field_descriptors[10] = {
         {
             "code", 1, PROTOBUF_C_LABEL_NONE, PROTOBUF_C_TYPE_INT32,
             0, /* quantifier_offset */
@@ -422,23 +548,24 @@ static const ProtobufCFieldDescriptor
         },
 };
 static const unsigned
-    mingdrlms__v2__e2ee_pre_key_bundle_response__field_indices_by_name[10] = {
+    mingdrlms__v2__e2_eepre_key_bundle_response__field_indices_by_name[] = {
         0, /* field[0] = code */
-        4, /* field[1] = device_id */
+        4, /* field[4] = device_id */
         2, /* field[2] = identity_key */
-        1, /* field[3] = message */
-        5, /* field[4] = pre_key_id */
-        6, /* field[5] = pre_key_public */
-        3, /* field[6] = registration_id */
+        1, /* field[1] = message */
+        5, /* field[5] = pre_key_id */
+        6, /* field[6] = pre_key_public */
+        3, /* field[3] = registration_id */
         7, /* field[7] = signed_pre_key_id */
         8, /* field[8] = signed_pre_key_public */
         9, /* field[9] = signed_pre_key_signature */
 };
 static const ProtobufCIntRange
-    mingdrlms__v2__e2ee_pre_key_bundle_response__number_ranges[2] = {{1, 0},
-                                                                     {0, 10}};
+    mingdrlms__v2__e2_eepre_key_bundle_response__number_ranges[1 + 1] = {
+        {1, 0},
+        {0, 10}};
 const ProtobufCMessageDescriptor
-    mingdrlms__v2__e2ee_pre_key_bundle_response__descriptor = {
+    mingdrlms__v2__e2_eepre_key_bundle_response__descriptor = {
         PROTOBUF_C__MESSAGE_DESCRIPTOR_MAGIC,
         "mingdrlms.v2.E2EEPreKeyBundleResponse",
         "E2EEPreKeyBundleResponse",
@@ -446,11 +573,151 @@ const ProtobufCMessageDescriptor
         "mingdrlms.v2",
         sizeof(Mingdrlms__V2__E2EEPreKeyBundleResponse),
         10,
-        mingdrlms__v2__e2ee_pre_key_bundle_response__field_descriptors,
-        mingdrlms__v2__e2ee_pre_key_bundle_response__field_indices_by_name,
+        mingdrlms__v2__e2_eepre_key_bundle_response__field_descriptors,
+        mingdrlms__v2__e2_eepre_key_bundle_response__field_indices_by_name,
         1,
-        mingdrlms__v2__e2ee_pre_key_bundle_response__number_ranges,
-        (ProtobufCMessageInit)mingdrlms__v2__e2ee_pre_key_bundle_response__init,
+        mingdrlms__v2__e2_eepre_key_bundle_response__number_ranges,
+        (ProtobufCMessageInit)mingdrlms__v2__e2_eepre_key_bundle_response__init,
+        NULL,
+        NULL,
+        NULL /* reserved[123] */
+};
+static const ProtobufCFieldDescriptor
+    mingdrlms__v2__signal_key_pair__field_descriptors[2] = {
+        {
+            "public_key", 1, PROTOBUF_C_LABEL_NONE, PROTOBUF_C_TYPE_BYTES,
+            0, /* quantifier_offset */
+            offsetof(Mingdrlms__V2__SignalKeyPair, public_key), NULL, NULL,
+            0,            /* flags */
+            0, NULL, NULL /* reserved1,reserved2, etc */
+        },
+        {
+            "private_key", 2, PROTOBUF_C_LABEL_NONE, PROTOBUF_C_TYPE_BYTES,
+            0, /* quantifier_offset */
+            offsetof(Mingdrlms__V2__SignalKeyPair, private_key), NULL, NULL,
+            0,            /* flags */
+            0, NULL, NULL /* reserved1,reserved2, etc */
+        },
+};
+static const unsigned mingdrlms__v2__signal_key_pair__field_indices_by_name[] =
+    {
+        1, /* field[1] = private_key */
+        0, /* field[0] = public_key */
+};
+static const ProtobufCIntRange
+    mingdrlms__v2__signal_key_pair__number_ranges[1 + 1] = {{1, 0}, {0, 2}};
+const ProtobufCMessageDescriptor mingdrlms__v2__signal_key_pair__descriptor = {
+    PROTOBUF_C__MESSAGE_DESCRIPTOR_MAGIC,
+    "mingdrlms.v2.SignalKeyPair",
+    "SignalKeyPair",
+    "Mingdrlms__V2__SignalKeyPair",
+    "mingdrlms.v2",
+    sizeof(Mingdrlms__V2__SignalKeyPair),
+    2,
+    mingdrlms__v2__signal_key_pair__field_descriptors,
+    mingdrlms__v2__signal_key_pair__field_indices_by_name,
+    1,
+    mingdrlms__v2__signal_key_pair__number_ranges,
+    (ProtobufCMessageInit)mingdrlms__v2__signal_key_pair__init,
+    NULL,
+    NULL,
+    NULL /* reserved[123] */
+};
+static const ProtobufCFieldDescriptor
+    mingdrlms__v2__signal_pre_key__field_descriptors[2] = {
+        {
+            "id", 1, PROTOBUF_C_LABEL_NONE, PROTOBUF_C_TYPE_UINT32,
+            0, /* quantifier_offset */
+            offsetof(Mingdrlms__V2__SignalPreKey, id), NULL, NULL,
+            0,            /* flags */
+            0, NULL, NULL /* reserved1,reserved2, etc */
+        },
+        {
+            "key", 2, PROTOBUF_C_LABEL_NONE, PROTOBUF_C_TYPE_MESSAGE,
+            0, /* quantifier_offset */
+            offsetof(Mingdrlms__V2__SignalPreKey, key),
+            &mingdrlms__v2__signal_key_pair__descriptor, NULL, 0, /* flags */
+            0, NULL, NULL /* reserved1,reserved2, etc */
+        },
+};
+static const unsigned mingdrlms__v2__signal_pre_key__field_indices_by_name[] = {
+    0, /* field[0] = id */
+    1, /* field[1] = key */
+};
+static const ProtobufCIntRange
+    mingdrlms__v2__signal_pre_key__number_ranges[1 + 1] = {{1, 0}, {0, 2}};
+const ProtobufCMessageDescriptor mingdrlms__v2__signal_pre_key__descriptor = {
+    PROTOBUF_C__MESSAGE_DESCRIPTOR_MAGIC,
+    "mingdrlms.v2.SignalPreKey",
+    "SignalPreKey",
+    "Mingdrlms__V2__SignalPreKey",
+    "mingdrlms.v2",
+    sizeof(Mingdrlms__V2__SignalPreKey),
+    2,
+    mingdrlms__v2__signal_pre_key__field_descriptors,
+    mingdrlms__v2__signal_pre_key__field_indices_by_name,
+    1,
+    mingdrlms__v2__signal_pre_key__number_ranges,
+    (ProtobufCMessageInit)mingdrlms__v2__signal_pre_key__init,
+    NULL,
+    NULL,
+    NULL /* reserved[123] */
+};
+static const ProtobufCFieldDescriptor
+    mingdrlms__v2__signal_signed_pre_key__field_descriptors[4] = {
+        {
+            "id", 1, PROTOBUF_C_LABEL_NONE, PROTOBUF_C_TYPE_UINT32,
+            0, /* quantifier_offset */
+            offsetof(Mingdrlms__V2__SignalSignedPreKey, id), NULL, NULL,
+            0,            /* flags */
+            0, NULL, NULL /* reserved1,reserved2, etc */
+        },
+        {
+            "key", 2, PROTOBUF_C_LABEL_NONE, PROTOBUF_C_TYPE_MESSAGE,
+            0, /* quantifier_offset */
+            offsetof(Mingdrlms__V2__SignalSignedPreKey, key),
+            &mingdrlms__v2__signal_key_pair__descriptor, NULL, 0, /* flags */
+            0, NULL, NULL /* reserved1,reserved2, etc */
+        },
+        {
+            "signature", 3, PROTOBUF_C_LABEL_NONE, PROTOBUF_C_TYPE_BYTES,
+            0, /* quantifier_offset */
+            offsetof(Mingdrlms__V2__SignalSignedPreKey, signature), NULL, NULL,
+            0,            /* flags */
+            0, NULL, NULL /* reserved1,reserved2, etc */
+        },
+        {
+            "timestamp", 4, PROTOBUF_C_LABEL_NONE, PROTOBUF_C_TYPE_UINT64,
+            0, /* quantifier_offset */
+            offsetof(Mingdrlms__V2__SignalSignedPreKey, timestamp), NULL, NULL,
+            0,            /* flags */
+            0, NULL, NULL /* reserved1,reserved2, etc */
+        },
+};
+static const unsigned
+    mingdrlms__v2__signal_signed_pre_key__field_indices_by_name[] = {
+        0, /* field[0] = id */
+        1, /* field[1] = key */
+        2, /* field[2] = signature */
+        3, /* field[3] = timestamp */
+};
+static const ProtobufCIntRange
+    mingdrlms__v2__signal_signed_pre_key__number_ranges[1 + 1] = {{1, 0},
+                                                                  {0, 4}};
+const ProtobufCMessageDescriptor
+    mingdrlms__v2__signal_signed_pre_key__descriptor = {
+        PROTOBUF_C__MESSAGE_DESCRIPTOR_MAGIC,
+        "mingdrlms.v2.SignalSignedPreKey",
+        "SignalSignedPreKey",
+        "Mingdrlms__V2__SignalSignedPreKey",
+        "mingdrlms.v2",
+        sizeof(Mingdrlms__V2__SignalSignedPreKey),
+        4,
+        mingdrlms__v2__signal_signed_pre_key__field_descriptors,
+        mingdrlms__v2__signal_signed_pre_key__field_indices_by_name,
+        1,
+        mingdrlms__v2__signal_signed_pre_key__number_ranges,
+        (ProtobufCMessageInit)mingdrlms__v2__signal_signed_pre_key__init,
         NULL,
         NULL,
         NULL /* reserved[123] */

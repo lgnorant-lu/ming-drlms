@@ -12,6 +12,10 @@ message E2EEGenerateKeysResponse {
   string message = 2;
   uint32 registration_id = 3;
   uint32 pre_key_count = 4;
+  SignalKeyPair identity_key = 5;
+  uint32 device_id = 6;
+  repeated SignalPreKey pre_keys = 7;
+  SignalSignedPreKey signed_pre_key = 8;
 }
 
 // 端到端预密钥包请求
@@ -30,4 +34,21 @@ message E2EEPreKeyBundleResponse {
   uint32 signed_pre_key_id = 8;
   bytes signed_pre_key_public = 9;
   bytes signed_pre_key_signature = 10;
+}
+
+message SignalKeyPair {
+  bytes public_key = 1;
+  bytes private_key = 2;
+}
+
+message SignalPreKey {
+  uint32 id = 1;
+  SignalKeyPair key = 2;
+}
+
+message SignalSignedPreKey {
+  uint32 id = 1;
+  SignalKeyPair key = 2;
+  bytes signature = 3;
+  uint64 timestamp = 4;
 }

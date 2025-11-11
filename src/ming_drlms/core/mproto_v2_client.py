@@ -58,6 +58,7 @@ class RoomEvent:
     instance_id: str | None = None
     timestamp: str | None = None
     file: RoomFileMeta | None = None
+    payload_type: int | None = None
 
 
 @dataclass(slots=True)
@@ -256,7 +257,11 @@ class MP2Client:
         req = room_pb2.RoomPublishRequest()
         req.room_name = room_name
         req.access_token = record.access_token
-        req.payload = payload
+        payload_msg = room_pb2.SignalEncryptedPayload()
+        payload_msg.type = room_pb2.SignalCiphertextType.SIGNAL_CIPHERTEXT_TYPE_MESSAGE
+        payload_msg.ciphertext = payload
+        payload_msg.sender = username
+        req.payload.CopyFrom(payload_msg)
         req.ephemeral = bool(ephemeral)
         write_frame(
             sock,
@@ -316,10 +321,16 @@ class MP2Client:
                             )
                     except Exception:
                         file_meta = None
+                    ciphertext = bytes(event.payload.ciphertext)
+                    payload_type = (
+                        int(event.payload.type)
+                        if hasattr(event.payload, "type")
+                        else None
+                    )
                     yield RoomEvent(
                         room_name=event.room_name,
                         event_id=int(event.event_id),
-                        payload=bytes(event.payload),
+                        payload=ciphertext,
                         display_token=event.display_token,
                         kind=int(getattr(event, "kind", 0))
                         if hasattr(event, "kind")
@@ -334,6 +345,7 @@ class MP2Client:
                         if hasattr(event, "timestamp")
                         else None,
                         file=file_meta,
+                        payload_type=payload_type,
                     )
                 elif frame.msg_type == common_pb2.MSG_TYPE_ERROR_RESPONSE:
                     err = common_pb2.ErrorResponse()

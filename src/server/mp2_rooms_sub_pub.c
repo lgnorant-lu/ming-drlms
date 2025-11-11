@@ -37,10 +37,15 @@
     mingdrlms__v2__room_publish_request__free_unpacked
 #define room_event__get_packed_size mingdrlms__v2__room_event__get_packed_size
 #define room_event__pack mingdrlms__v2__room_event__pack
+#define signal_encrypted_payload__get_packed_size                              \
+    mingdrlms__v2__signal_encrypted_payload__get_packed_size
+#define signal_encrypted_payload__pack                                         \
+    mingdrlms__v2__signal_encrypted_payload__pack
 
 typedef Mingdrlms__V2__RoomSubscribeRequest RoomSubscribeRequest;
 typedef Mingdrlms__V2__RoomPublishRequest RoomPublishRequest;
 typedef Mingdrlms__V2__RoomEvent RoomEvent;
+typedef Mingdrlms__V2__SignalEncryptedPayload SignalEncryptedPayload;
 
 static int mp2_rooms_perform_subscribe(platform_socket_t client_fd,
                                        const char *username,
@@ -102,8 +107,9 @@ static int mp2_rooms_perform_subscribe(platform_socket_t client_fd,
 static int mp2_rooms_perform_publish(platform_socket_t client_fd,
                                      const char *username,
                                      const char *room_name,
-                                     const unsigned char *payload,
-                                     size_t payload_len) {
+                                     SignalEncryptedPayload *payload_msg) {
+    if (!payload_msg)
+        return -1;
     struct {
         Room *room;
         RoomInstance *instance;
@@ -125,8 +131,20 @@ static int mp2_rooms_perform_publish(platform_socket_t client_fd,
     char ts[32];
     mp2_rooms_format_timestamp(ts, sizeof ts);
 
+    if (!payload_msg->ciphertext.data || payload_msg->ciphertext.len == 0) {
+        mp2_protocol_dbgf("encrypted payload missing ciphertext");
+        return -1;
+    }
+    size_t packed_len = signal_encrypted_payload__get_packed_size(payload_msg);
+    unsigned char *packed_payload = (unsigned char *)malloc(packed_len);
+    if (!packed_payload) {
+        mp2_protocol_dbgf("failed to allocate payload buffer");
+        return -1;
+    }
+    signal_encrypted_payload__pack(payload_msg, packed_payload);
+
     unsigned char hash[32];
-    SHA256(payload, payload_len, hash);
+    SHA256(payload_msg->ciphertext.data, payload_msg->ciphertext.len, hash);
     char sha_hex[65];
     mp2_rooms_digest_to_hex(hash, sha_hex, sizeof sha_hex);
 
@@ -135,23 +153,24 @@ static int mp2_rooms_perform_publish(platform_socket_t client_fd,
 
     uint64_t event_id = 0;
     int store_result = rooms_store_text(instance, room_name, &inst_uuid, ts,
-                                        username, display_token, payload,
-                                        payload_len, sha_hex, &event_id);
+                                        username, display_token, packed_payload,
+                                        packed_len, sha_hex, &event_id);
     if (store_result != 0) {
         mp2_protocol_dbgf("failed to store text message");
+        free(packed_payload);
         return -3;
     }
 
     RoomEvent ev = ROOM_EVENT__INIT;
     ev.room_name = (char *)room_name;
     ev.event_id = (int64_t)event_id;
-    ev.payload.data = (unsigned char *)payload;
-    ev.payload.len = payload_len;
+    ev.payload = payload_msg;
     ev.display_token = (char *)(display_token ? display_token : "");
     size_t ev_sz = room_event__get_packed_size(&ev);
     unsigned char *ev_buf = (unsigned char *)malloc(ev_sz);
     if (!ev_buf) {
         mp2_protocol_dbgf("fanout alloc failed");
+        free(packed_payload);
         return 0;
     }
     room_event__pack(&ev, ev_buf);
@@ -190,8 +209,8 @@ static int mp2_rooms_perform_publish(platform_socket_t client_fd,
         ctx.room ? rooms_get_storage_policy(ctx.room) : ROOM_STORAGE_PERSISTENT;
     int is_ephemeral = (storage_snapshot == ROOM_STORAGE_EPHEMERAL) ? 1 : 0;
     int fed_result = federation_forward_publish(
-        room_name, inst_hex, event_id, ts, username, display_token, payload,
-        payload_len, sha_hex, is_ephemeral,
+        room_name, inst_hex, event_id, ts, username, display_token,
+        packed_payload, packed_len, sha_hex, is_ephemeral,
         MINGDRLMS__V2__ROOM_EVENT_KIND__ROOM_EVENT_KIND_TEXT, NULL, 0);
     if (fed_result != 0) {
         mp2_protocol_dbgf("federation forward failed (non-fatal): %d",
@@ -200,6 +219,7 @@ static int mp2_rooms_perform_publish(platform_socket_t client_fd,
 
     mp2_protocol_dbgf("room publish successful: event_id=%llu",
                       (unsigned long long)event_id);
+    free(packed_payload);
     return 0;
 }
 
@@ -250,7 +270,8 @@ int mp2_rooms_handle_publish(platform_socket_t fd, const unsigned char *payload,
                              uint32_t payload_len) {
     RoomPublishRequest *req =
         room_publish_request__unpack(NULL, payload_len, payload);
-    if (!req || !req->room_name || !req->access_token || !req->payload.data) {
+    if (!req || !req->room_name || !req->access_token || !req->payload ||
+        !req->payload->ciphertext.data || req->payload->ciphertext.len == 0) {
         if (req) {
             room_publish_request__free_unpacked(req, NULL);
         }
@@ -274,11 +295,12 @@ int mp2_rooms_handle_publish(platform_socket_t fd, const unsigned char *payload,
         return 0;
     }
 
-    mp2_protocol_dbgf("room publish: user=%s room=%s payload_len=%zu", username,
-                      req->room_name, req->payload.len);
+    mp2_protocol_dbgf("room publish: user=%s room=%s ciphertext_len=%zu",
+                      username, req->room_name,
+                      (size_t)req->payload->ciphertext.len);
 
-    int pub_result = mp2_rooms_perform_publish(
-        fd, username, req->room_name, req->payload.data, req->payload.len);
+    int pub_result =
+        mp2_rooms_perform_publish(fd, username, req->room_name, req->payload);
     if (pub_result != 0) {
         mp2_protocol_dbgf("room publish failed: %d", pub_result);
         mp2_rooms_send_error(fd, 500, "publish failed",

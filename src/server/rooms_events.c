@@ -255,28 +255,6 @@ void rooms_broadcast_system_delayed(Room *room, const char *message,
     }
 }
 
-static int subscriber_can_view_plain(RoomInstance *instance,
-                                     const char *sender_user,
-                                     const Subscriber *recipient) {
-    if (!recipient)
-        return 0;
-    if (!sender_user || !*sender_user)
-        return 1;
-    if (recipient->user[0] != '\0' && strcmp(recipient->user, sender_user) == 0)
-        return 1;
-    if (recipient->user[0] != '\0') {
-        if (rooms_ignite_is_active(instance, sender_user, recipient->user))
-            return 1;
-        if (rooms_is_sqlite_enabled()) {
-            RoomFriendshipInfo info;
-            if (rooms_friendship_lookup(sender_user, recipient->user, &info) ==
-                0)
-                return 1;
-        }
-    }
-    return 0;
-}
-
 int rooms_fanout_text(RoomInstance *instance, const char *room_name,
                       const InstanceUUID *instance_id, const char *ts,
                       const char *user, uint64_t event_id,
@@ -316,35 +294,16 @@ int rooms_fanout_text(RoomInstance *instance, const char *room_name,
 
     /* no local room variable needed here */
     int pruned = 0;
-    unsigned char *redacted_buf = NULL;
-    char redacted_sha[65] = {0};
 
     for (size_t i = 0; i < instance->subs_len; ++i) {
         Subscriber *recipient = &instance->subs[i];
         platform_socket_t fd = recipient->fd;
         if (exclude_fd != PLATFORM_INVALID_SOCKET && fd == exclude_fd)
             continue;
-        const unsigned char *out_payload = payload;
-        const char *out_sha = sha_hex;
-        size_t out_len = len;
-        if (!subscriber_can_view_plain(instance, sender_user, recipient) &&
-            len > 0) {
-            if (!redacted_buf) {
-                redacted_buf = (unsigned char *)malloc(len);
-                if (redacted_buf) {
-                    memset(redacted_buf, '.', len);
-                    dummy_sha256_hex(redacted_sha, sizeof redacted_sha);
-                }
-            }
-            if (redacted_buf) {
-                out_payload = redacted_buf;
-                out_sha = redacted_sha;
-            }
-        }
         char hdr[512];
         int hl = snprintf(hdr, sizeof hdr, "EVT|TEXT|%s|%s|%s|%s|%llu|%zu|%s\n",
                           room_name, instance_hex, ts, display_for_emit,
-                          (unsigned long long)event_id, out_len, out_sha);
+                          (unsigned long long)event_id, len, sha_hex);
         if (hl <= 0) {
             pruned = 1;
             rooms_instance_remove_sub_locked(instance, i);
@@ -357,14 +316,14 @@ int rooms_fanout_text(RoomInstance *instance, const char *room_name,
             --i;
             continue;
         }
-        if (out_len > 0) {
-            if (send_all(fd, out_payload, out_len) != 0) {
+        if (len > 0) {
+            if (send_all(fd, payload, len) != 0) {
                 rooms_instance_remove_sub_locked(instance, i);
                 pruned = 1;
                 --i;
                 continue;
             }
-            throttle_down(out_len, rate_bps);
+            throttle_down(len, rate_bps);
             if (send_all(fd, "\n", 1) != 0) {
                 rooms_instance_remove_sub_locked(instance, i);
                 pruned = 1;
@@ -373,8 +332,6 @@ int rooms_fanout_text(RoomInstance *instance, const char *room_name,
             }
         }
     }
-    if (redacted_buf)
-        free(redacted_buf);
     rooms_instance_update_last_active(instance);
     platform_mutex_unlock(&instance->mu);
 

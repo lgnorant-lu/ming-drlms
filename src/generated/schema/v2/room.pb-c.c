@@ -7,6 +7,50 @@
 #endif
 
 #include "schema/v2/room.pb-c.h"
+void mingdrlms__v2__signal_encrypted_payload__init(
+    Mingdrlms__V2__SignalEncryptedPayload *message) {
+    static const Mingdrlms__V2__SignalEncryptedPayload init_value =
+        MINGDRLMS__V2__SIGNAL_ENCRYPTED_PAYLOAD__INIT;
+    *message = init_value;
+}
+size_t mingdrlms__v2__signal_encrypted_payload__get_packed_size(
+    const Mingdrlms__V2__SignalEncryptedPayload *message) {
+    assert(message->base.descriptor ==
+           &mingdrlms__v2__signal_encrypted_payload__descriptor);
+    return protobuf_c_message_get_packed_size(
+        (const ProtobufCMessage *)(message));
+}
+size_t mingdrlms__v2__signal_encrypted_payload__pack(
+    const Mingdrlms__V2__SignalEncryptedPayload *message, uint8_t *out) {
+    assert(message->base.descriptor ==
+           &mingdrlms__v2__signal_encrypted_payload__descriptor);
+    return protobuf_c_message_pack((const ProtobufCMessage *)message, out);
+}
+size_t mingdrlms__v2__signal_encrypted_payload__pack_to_buffer(
+    const Mingdrlms__V2__SignalEncryptedPayload *message,
+    ProtobufCBuffer *buffer) {
+    assert(message->base.descriptor ==
+           &mingdrlms__v2__signal_encrypted_payload__descriptor);
+    return protobuf_c_message_pack_to_buffer((const ProtobufCMessage *)message,
+                                             buffer);
+}
+Mingdrlms__V2__SignalEncryptedPayload *
+mingdrlms__v2__signal_encrypted_payload__unpack(ProtobufCAllocator *allocator,
+                                                size_t len,
+                                                const uint8_t *data) {
+    return (Mingdrlms__V2__SignalEncryptedPayload *)protobuf_c_message_unpack(
+        &mingdrlms__v2__signal_encrypted_payload__descriptor, allocator, len,
+        data);
+}
+void mingdrlms__v2__signal_encrypted_payload__free_unpacked(
+    Mingdrlms__V2__SignalEncryptedPayload *message,
+    ProtobufCAllocator *allocator) {
+    if (!message)
+        return;
+    assert(message->base.descriptor ==
+           &mingdrlms__v2__signal_encrypted_payload__descriptor);
+    protobuf_c_message_free_unpacked((ProtobufCMessage *)message, allocator);
+}
 void mingdrlms__v2__room_file_metadata__init(
     Mingdrlms__V2__RoomFileMetadata *message) {
     static const Mingdrlms__V2__RoomFileMetadata init_value =
@@ -1179,6 +1223,91 @@ void mingdrlms__v2__room_file_download_done__free_unpacked(
     protobuf_c_message_free_unpacked((ProtobufCMessage *)message, allocator);
 }
 static const ProtobufCFieldDescriptor
+    mingdrlms__v2__signal_encrypted_payload__field_descriptors[7] = {
+        {
+            "type", 1, PROTOBUF_C_LABEL_NONE, PROTOBUF_C_TYPE_ENUM,
+            0, /* quantifier_offset */
+            offsetof(Mingdrlms__V2__SignalEncryptedPayload, type),
+            &mingdrlms__v2__signal_ciphertext_type__descriptor, NULL,
+            0,            /* flags */
+            0, NULL, NULL /* reserved1,reserved2, etc */
+        },
+        {
+            "ciphertext", 2, PROTOBUF_C_LABEL_NONE, PROTOBUF_C_TYPE_BYTES,
+            0, /* quantifier_offset */
+            offsetof(Mingdrlms__V2__SignalEncryptedPayload, ciphertext), NULL,
+            NULL, 0,      /* flags */
+            0, NULL, NULL /* reserved1,reserved2, etc */
+        },
+        {
+            "sender", 3, PROTOBUF_C_LABEL_NONE, PROTOBUF_C_TYPE_STRING,
+            0, /* quantifier_offset */
+            offsetof(Mingdrlms__V2__SignalEncryptedPayload, sender), NULL,
+            &protobuf_c_empty_string, 0, /* flags */
+            0, NULL, NULL                /* reserved1,reserved2, etc */
+        },
+        {
+            "sender_device_id", 4, PROTOBUF_C_LABEL_NONE,
+            PROTOBUF_C_TYPE_UINT32, 0, /* quantifier_offset */
+            offsetof(Mingdrlms__V2__SignalEncryptedPayload, sender_device_id),
+            NULL, NULL, 0, /* flags */
+            0, NULL, NULL  /* reserved1,reserved2, etc */
+        },
+        {
+            "sender_registration_id", 5, PROTOBUF_C_LABEL_NONE,
+            PROTOBUF_C_TYPE_UINT32, 0, /* quantifier_offset */
+            offsetof(Mingdrlms__V2__SignalEncryptedPayload,
+                     sender_registration_id),
+            NULL, NULL, 0, /* flags */
+            0, NULL, NULL  /* reserved1,reserved2, etc */
+        },
+        {
+            "pre_key_id", 6, PROTOBUF_C_LABEL_NONE, PROTOBUF_C_TYPE_UINT32,
+            0, /* quantifier_offset */
+            offsetof(Mingdrlms__V2__SignalEncryptedPayload, pre_key_id), NULL,
+            NULL, 0,      /* flags */
+            0, NULL, NULL /* reserved1,reserved2, etc */
+        },
+        {
+            "signed_pre_key_id", 7, PROTOBUF_C_LABEL_NONE,
+            PROTOBUF_C_TYPE_UINT32, 0, /* quantifier_offset */
+            offsetof(Mingdrlms__V2__SignalEncryptedPayload, signed_pre_key_id),
+            NULL, NULL, 0, /* flags */
+            0, NULL, NULL  /* reserved1,reserved2, etc */
+        },
+};
+static const unsigned
+    mingdrlms__v2__signal_encrypted_payload__field_indices_by_name[] = {
+        1, /* field[1] = ciphertext */
+        5, /* field[5] = pre_key_id */
+        2, /* field[2] = sender */
+        3, /* field[3] = sender_device_id */
+        4, /* field[4] = sender_registration_id */
+        6, /* field[6] = signed_pre_key_id */
+        0, /* field[0] = type */
+};
+static const ProtobufCIntRange
+    mingdrlms__v2__signal_encrypted_payload__number_ranges[1 + 1] = {{1, 0},
+                                                                     {0, 7}};
+const ProtobufCMessageDescriptor
+    mingdrlms__v2__signal_encrypted_payload__descriptor = {
+        PROTOBUF_C__MESSAGE_DESCRIPTOR_MAGIC,
+        "mingdrlms.v2.SignalEncryptedPayload",
+        "SignalEncryptedPayload",
+        "Mingdrlms__V2__SignalEncryptedPayload",
+        "mingdrlms.v2",
+        sizeof(Mingdrlms__V2__SignalEncryptedPayload),
+        7,
+        mingdrlms__v2__signal_encrypted_payload__field_descriptors,
+        mingdrlms__v2__signal_encrypted_payload__field_indices_by_name,
+        1,
+        mingdrlms__v2__signal_encrypted_payload__number_ranges,
+        (ProtobufCMessageInit)mingdrlms__v2__signal_encrypted_payload__init,
+        NULL,
+        NULL,
+        NULL /* reserved[123] */
+};
+static const ProtobufCFieldDescriptor
     mingdrlms__v2__room_file_metadata__field_descriptors[5] = {
         {
             "filename", 1, PROTOBUF_C_LABEL_NONE, PROTOBUF_C_TYPE_STRING,
@@ -1425,9 +1554,10 @@ static const ProtobufCFieldDescriptor
             0, NULL, NULL                /* reserved1,reserved2, etc */
         },
         {
-            "payload", 3, PROTOBUF_C_LABEL_NONE, PROTOBUF_C_TYPE_BYTES,
+            "payload", 3, PROTOBUF_C_LABEL_NONE, PROTOBUF_C_TYPE_MESSAGE,
             0, /* quantifier_offset */
-            offsetof(Mingdrlms__V2__RoomPublishRequest, payload), NULL, NULL,
+            offsetof(Mingdrlms__V2__RoomPublishRequest, payload),
+            &mingdrlms__v2__signal_encrypted_payload__descriptor, NULL,
             0,            /* flags */
             0, NULL, NULL /* reserved1,reserved2, etc */
         },
@@ -1543,9 +1673,10 @@ static const ProtobufCFieldDescriptor
             0, NULL, NULL /* reserved1,reserved2, etc */
         },
         {
-            "payload", 3, PROTOBUF_C_LABEL_NONE, PROTOBUF_C_TYPE_BYTES,
+            "payload", 3, PROTOBUF_C_LABEL_NONE, PROTOBUF_C_TYPE_MESSAGE,
             0, /* quantifier_offset */
-            offsetof(Mingdrlms__V2__RoomEvent, payload), NULL, NULL,
+            offsetof(Mingdrlms__V2__RoomEvent, payload),
+            &mingdrlms__v2__signal_encrypted_payload__descriptor, NULL,
             0,            /* flags */
             0, NULL, NULL /* reserved1,reserved2, etc */
         },
@@ -3012,4 +3143,44 @@ const ProtobufCEnumDescriptor mingdrlms__v2__room_event_kind__descriptor = {
     NULL,
     NULL,
     NULL /* reserved[1234] */
+};
+static const ProtobufCEnumValue
+    mingdrlms__v2__signal_ciphertext_type__enum_values_by_number[3] = {
+        {"SIGNAL_CIPHERTEXT_TYPE_UNKNOWN",
+         "MINGDRLMS__V2__SIGNAL_CIPHERTEXT_TYPE__SIGNAL_CIPHERTEXT_TYPE_"
+         "UNKNOWN",
+         0},
+        {"SIGNAL_CIPHERTEXT_TYPE_PREKEY",
+         "MINGDRLMS__V2__SIGNAL_CIPHERTEXT_TYPE__SIGNAL_CIPHERTEXT_TYPE_PREKEY",
+         1},
+        {"SIGNAL_CIPHERTEXT_TYPE_MESSAGE",
+         "MINGDRLMS__V2__SIGNAL_CIPHERTEXT_TYPE__SIGNAL_CIPHERTEXT_TYPE_"
+         "MESSAGE",
+         2},
+};
+static const ProtobufCIntRange
+    mingdrlms__v2__signal_ciphertext_type__value_ranges[] = {{0, 0}, {0, 3}};
+static const ProtobufCEnumValueIndex
+    mingdrlms__v2__signal_ciphertext_type__enum_values_by_name[3] = {
+        {"SIGNAL_CIPHERTEXT_TYPE_MESSAGE", 2},
+        {"SIGNAL_CIPHERTEXT_TYPE_PREKEY", 1},
+        {"SIGNAL_CIPHERTEXT_TYPE_UNKNOWN", 0},
+};
+const ProtobufCEnumDescriptor
+    mingdrlms__v2__signal_ciphertext_type__descriptor = {
+        PROTOBUF_C__ENUM_DESCRIPTOR_MAGIC,
+        "mingdrlms.v2.SignalCiphertextType",
+        "SignalCiphertextType",
+        "Mingdrlms__V2__SignalCiphertextType",
+        "mingdrlms.v2",
+        3,
+        mingdrlms__v2__signal_ciphertext_type__enum_values_by_number,
+        3,
+        mingdrlms__v2__signal_ciphertext_type__enum_values_by_name,
+        1,
+        mingdrlms__v2__signal_ciphertext_type__value_ranges,
+        NULL,
+        NULL,
+        NULL,
+        NULL /* reserved[1234] */
 };

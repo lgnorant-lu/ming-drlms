@@ -16,10 +16,15 @@
 
 #define ROOM_HISTORY_CHUNK__INIT MINGDRLMS__V2__ROOM_HISTORY_CHUNK__INIT
 #define ROOM_HISTORY_DONE__INIT MINGDRLMS__V2__ROOM_HISTORY_DONE__INIT
+#define signal_encrypted_payload__unpack                                       \
+    mingdrlms__v2__signal_encrypted_payload__unpack
+#define signal_encrypted_payload__free_unpacked                                \
+    mingdrlms__v2__signal_encrypted_payload__free_unpacked
 
 typedef Mingdrlms__V2__RoomHistoryChunk RoomHistoryChunk;
 typedef Mingdrlms__V2__RoomHistoryDone RoomHistoryDone;
 typedef Mingdrlms__V2__RoomEvent RoomEventProto;
+typedef Mingdrlms__V2__SignalEncryptedPayload SignalEncryptedPayload;
 
 static uint64_t mp2_rooms_snapshot_last_event(Room *room) {
     if (!room)
@@ -33,7 +38,7 @@ static uint64_t mp2_rooms_snapshot_last_event(Room *room) {
 typedef struct {
     Mingdrlms__V2__RoomEvent event;
     Mingdrlms__V2__RoomFileMetadata file_meta;
-    unsigned char *payload;
+    SignalEncryptedPayload *payload_msg;
     char *room_name;
     char *display_token;
     char *timestamp;
@@ -67,7 +72,8 @@ static char *mp2_rooms_strdup(const char *src) {
 static void mp2_history_item_cleanup(Mp2HistoryItem *item) {
     if (!item)
         return;
-    free(item->payload);
+    if (item->payload_msg)
+        signal_encrypted_payload__free_unpacked(item->payload_msg, NULL);
     free(item->room_name);
     free(item->display_token);
     free(item->timestamp);
@@ -139,12 +145,11 @@ static int mp2_history_collect_cb(const RoomHistoryEvent *event,
 
     if (event->kind == ROOM_HISTORY_EVENT_TEXT) {
         if (event->payload.len > 0 && event->payload.data) {
-            item.payload = (unsigned char *)malloc(event->payload.len);
-            if (!item.payload)
+            item.payload_msg = signal_encrypted_payload__unpack(
+                NULL, event->payload.len, event->payload.data);
+            if (!item.payload_msg)
                 goto fail;
-            memcpy(item.payload, event->payload.data, event->payload.len);
-            item.event.payload.data = item.payload;
-            item.event.payload.len = event->payload.len;
+            item.event.payload = item.payload_msg;
         }
     } else if (event->kind == ROOM_HISTORY_EVENT_FILE) {
         const char *filename =

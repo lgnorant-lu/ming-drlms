@@ -19,6 +19,24 @@ enum RoomEventKind {
   ROOM_EVENT_KIND_FILE = 1;
 }
 
+// Signal protocol envelope -------------------------------------------------
+
+enum SignalCiphertextType {
+  SIGNAL_CIPHERTEXT_TYPE_UNKNOWN = 0;
+  SIGNAL_CIPHERTEXT_TYPE_PREKEY = 1;
+  SIGNAL_CIPHERTEXT_TYPE_MESSAGE = 2;
+}
+
+message SignalEncryptedPayload {
+  SignalCiphertextType type = 1;
+  bytes ciphertext = 2;
+  string sender = 3;
+  uint32 sender_device_id = 4;
+  uint32 sender_registration_id = 5;
+  uint32 pre_key_id = 6;
+  uint32 signed_pre_key_id = 7;
+}
+
 // Shared structs ----------------------------------------------------------
 
 message RoomFileMetadata {
@@ -54,7 +72,7 @@ message RoomSubscribeRequest {
 message RoomPublishRequest {
   string room_name = 1;
   string access_token = 2;
-  bytes payload = 3;
+  SignalEncryptedPayload payload = 3;
   bool ephemeral = 4;
   string client_event_id = 5; // optional idempotency token
 }
@@ -68,7 +86,7 @@ message RoomPublishResponse {
 message RoomEvent {
   string room_name = 1;
   int64 event_id = 2;
-  bytes payload = 3;
+  SignalEncryptedPayload payload = 3;
   string display_token = 4;
   RoomEventKind kind = 5;
   RoomFileMetadata file = 6;

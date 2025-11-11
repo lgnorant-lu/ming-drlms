@@ -579,8 +579,7 @@ int mp2_rooms_handle_file_publish_commit(platform_socket_t fd,
     ev.timestamp = ts;
     ev.instance_id = inst_hex;
     ev.file = &meta;
-    ev.payload.data = NULL;
-    ev.payload.len = 0;
+    ev.payload = NULL;
     meta.filename = session->filename;
     meta.size_bytes = session->size_bytes;
     meta.sha256_hex = session->sha256_hex;
