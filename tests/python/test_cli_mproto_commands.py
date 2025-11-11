@@ -8,6 +8,7 @@ from typer.testing import CliRunner
 
 from ming_drlms.main import app
 from ming_drlms.core.mproto_v2_client import AuthenticationError, RoomEvent
+from ming_drlms.cli.services import PublishResult
 from ming_drlms.core.token_store import TokenRecord
 
 
@@ -63,20 +64,21 @@ def test_cli_login_auth_failure(monkeypatch, runner: CliRunner):
 def test_room_pub_uses_mp2_client(monkeypatch, runner: CliRunner):
     calls: List[tuple[str, str, bytes, bool]] = []
 
-    class StubClient:
-        def __enter__(self):
-            return self
+    class StubService:
+        def publish(self, **kwargs):
+            calls.append(
+                (
+                    kwargs["user"],
+                    kwargs["room"],
+                    kwargs["payload"],
+                    kwargs["ephemeral"],
+                )
+            )
+            return PublishResult(
+                bytes_sent=len(kwargs["payload"]), ephemeral=kwargs["ephemeral"]
+            )
 
-        def __exit__(self, exc_type, exc, tb):  # noqa: ANN001
-            return False
-
-        def publish(self, username, room, payload, *, ephemeral=False):  # noqa: ANN001
-            calls.append((username, room, payload, ephemeral))
-
-    monkeypatch.setattr(
-        "ming_drlms.cli.room.create_mp2_client",
-        lambda *args, **kwargs: StubClient(),
-    )
+    monkeypatch.setattr("ming_drlms.cli.room.room_service", StubService())
     result = runner.invoke(
         app,
         [
@@ -107,20 +109,11 @@ def test_room_sub_limit(monkeypatch, runner: CliRunner):
         RoomEvent(room_name="demo", event_id=2, payload=b"bye", display_token="t2"),
     ]
 
-    class StubClient:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, tb):  # noqa: ANN001
-            return False
-
-        def subscribe(self, username, room, *, since_id=0):  # noqa: ANN001
+    class StubService:
+        def subscribe(self, **kwargs):
             yield from events
 
-    monkeypatch.setattr(
-        "ming_drlms.cli.room.create_mp2_client",
-        lambda *args, **kwargs: StubClient(),
-    )
+    monkeypatch.setattr("ming_drlms.cli.room.room_service", StubService())
     result = runner.invoke(
         app,
         [

@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import hashlib
 import sys
 from pathlib import Path
-from typing import Optional, cast
+from typing import Optional
 
 import typer
 from rich import print
@@ -11,16 +10,22 @@ from rich.progress import Progress, BarColumn, TimeRemainingColumn, TransferSpee
 from rich.table import Table  # noqa: F401 (used in room table rendering references)
 
 from ..state import load_state, save_state, get_last_event_id, set_last_event_id
-from .utils import (
-    tcp_connect,
-    recv_line,
-    recv_exact,
-    login,
+from .services import (
+    SpaceHistoryCallbacks,
+    SpaceHistoryOptions,
+    SpaceJoinCallbacks,
+    SpaceJoinOptions,
+    SpaceService,
+    SpaceServiceError,
 )
+from .utils import tcp_connect, recv_line, recv_exact, login
 from ..i18n import t
 
 
 space_app = typer.Typer(help="shared rooms: subscribe/publish/history")
+
+
+space_service = SpaceService()
 
 
 def _emit_payload(txt: str) -> None:
@@ -60,122 +65,66 @@ def space_join(
     room_key = f"{host}:{port}:{room}"
     if since_id == -1:
         since_id = get_last_event_id(state, room_key)
-    backoff = 0.3
-    while True:
-        s = None
-        try:
-            s = tcp_connect(host, port)
-            if not login(s, user, password):
-                print("login failed")
-                raise typer.Exit(code=1)
-            if since_id > 0:
-                s.sendall(f"SUB|{room}|{since_id}\n".encode())
-            else:
-                s.sendall(f"SUB|{room}\n".encode())
-            resp = recv_line(s)
-            if resp.startswith("ERR|"):
-                print(resp)
-                s.close()
-                raise typer.Exit(code=1)
-            try:
-                s.settimeout(None)
-            except Exception:
-                pass
-            while True:
-                line = recv_line(s)
-                if not line:
-                    break
-                if line.startswith("EVT|TEXT|"):
-                    parts = line.split("|")
-                    try:
-                        eid = int(parts[5])
-                        payload_len = int(parts[6])
-                    except Exception:
-                        if not json_out:
-                            print(line)
-                        else:
-                            print(line)
-                        continue
-                    payload = recv_exact(s, payload_len)
-                    try:
-                        txt = payload.decode(errors="ignore")
-                    except Exception:
-                        txt = ""
-                    if json_out:
-                        print(line)
-                        if txt:
-                            _emit_payload(txt)
-                    else:
-                        if txt:
-                            _emit_payload(txt)
-                    # If the server indicates the room has been closed (teardown),
-                    # exit promptly instead of waiting for socket EOF.
-                    try:
-                        if txt.strip() == "ROOM|CLOSED":
-                            break
-                    except Exception:
-                        pass
-                    if eid > since_id:
-                        since_id = eid
-                        set_last_event_id(state, room_key, eid)
-                        save_state(state)
-                elif line.startswith("EVT|FILE|"):
-                    parts = line.split("|")
-                    try:
-                        eid = int(parts[5])
-                    except Exception:
-                        eid = since_id
-                    if json_out:
-                        print(line)
-                    else:
-                        print(line)
-                    if save_dir is not None and len(parts) >= 9:
-                        save_dir.mkdir(parents=True, exist_ok=True)
-                        logf = save_dir / "events.log"
-                        prev = ""
-                        if logf.exists():
-                            try:
-                                prev = logf.read_text(errors="ignore")
-                            except Exception:
-                                prev = ""
-                        try:
-                            logf.write_text(prev + line + "\n")
-                        except Exception:
-                            pass
-                    if eid > since_id:
-                        since_id = eid
-                        set_last_event_id(state, room_key, eid)
-                        save_state(state)
-                else:
-                    print(line)
-                    if line.startswith("ERR|"):
-                        s.close()
-                        raise typer.Exit(code=1)
-        except KeyboardInterrupt:
-            break
-        except Exception:
-            if not reconnect:
-                raise
-            try:
-                import time as _t
+    if save_dir is not None:
+        save_dir = save_dir.expanduser()
 
-                _t.sleep(backoff)
-            except Exception:
-                pass
-            backoff = min(backoff * 2, 5.0)
-            continue
-        finally:
-            try:
-                if s is not None:
-                    try:
-                        s.sendall(b"QUIT\n")
-                    except Exception:
-                        pass
-                    s.close()
-            except Exception:
-                pass
-        if not reconnect:
-            break
+    stop_requested = False
+
+    def handle_line(line: str) -> None:
+        if line.startswith("EVT|TEXT|") and not json_out:
+            return
+        print(line)
+
+    def handle_payload(text: str) -> None:
+        nonlocal stop_requested
+        if text:
+            _emit_payload(text) if not json_out else _emit_payload(text)
+        try:
+            if text.strip() == "ROOM|CLOSED":
+                stop_requested = True
+        except Exception:
+            pass
+
+    def update_state(event_id: int) -> None:
+        set_last_event_id(state, room_key, event_id)
+        save_state(state)
+
+    def should_stop() -> bool:
+        return stop_requested
+
+    def save_event(line: str) -> None:
+        if save_dir is None:
+            return
+        if not line.startswith("EVT|FILE|"):
+            return
+        save_dir.mkdir(parents=True, exist_ok=True)
+        logf = save_dir / "events.log"
+        with logf.open("a", encoding="utf-8", errors="ignore") as fp:
+            fp.write(line + "\n")
+
+    callbacks = SpaceJoinCallbacks(
+        handle_line=handle_line,
+        handle_payload=handle_payload,
+        update_state=update_state,
+        should_stop=should_stop,
+        save_event=save_event,
+    )
+    options = SpaceJoinOptions(
+        room=room,
+        host=host,
+        port=port,
+        user=user,
+        password=password,
+        since_id=since_id,
+        reconnect=reconnect,
+    )
+    try:
+        space_service.join(options, callbacks)
+    except KeyboardInterrupt:
+        pass
+    except SpaceServiceError as exc:
+        print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1)
 
 
 @space_app.command("leave", help=t("HELP.SPACE.LEAVE"))
@@ -186,20 +135,20 @@ def space_leave(
     user: str = typer.Option("alice", "--user", "-u"),
     password: str = typer.Option("password", "--password", "-P"),
 ):
-    s = tcp_connect(host, port)
-    if not login(s, user, password):
-        print("login failed")
+    try:
+        resp = space_service.leave(
+            host=host,
+            port=port,
+            user=user,
+            password=password,
+            room=room,
+        )
+    except SpaceServiceError as exc:
+        print(f"[red]{exc}[/red]")
         raise typer.Exit(code=1)
-    s.sendall(f"UNSUB|{room}\n".encode())
-    resp = recv_line(s)
     print(resp)
-    if resp.startswith("ERR|"):
-        s.close()
-        raise typer.Exit(code=1)
     if resp.startswith("OK"):
         print(f"[green]Left room '{room}'.[/green]")
-    s.sendall(b"QUIT\n")
-    s.close()
 
 
 @space_app.command("history", help=t("HELP.SPACE.HISTORY"))
@@ -212,150 +161,33 @@ def space_history(
     user: str = typer.Option("alice", "--user", "-u"),
     password: str = typer.Option("password", "--password", "-P"),
 ):
-    s = tcp_connect(host, port)
-    if not login(s, user, password):
-        print("login failed")
-        raise typer.Exit(code=1)
-    if since_id > 0:
-        s.sendall(f"HISTORY|{room}|{limit}|{since_id}\n".encode())
-    else:
-        s.sendall(f"HISTORY|{room}|{limit}\n".encode())
+    def handle_line(line: str) -> None:
+        print(line)
+        if line.startswith("ERR|"):
+            raise SpaceServiceError(line)
+
+    def handle_payload(text: str) -> None:
+        if text:
+            _emit_payload(text)
+
+    callbacks = SpaceHistoryCallbacks(
+        handle_line=handle_line,
+        handle_payload=handle_payload,
+    )
+    options = SpaceHistoryOptions(
+        room=room,
+        host=host,
+        port=port,
+        user=user,
+        password=password,
+        limit=limit,
+        since_id=since_id,
+    )
     try:
-        s.settimeout(None)
-    except Exception:
-        pass
-    prefetch_line: str | None = None
-    while True:
-        if prefetch_line is not None:
-            line = prefetch_line
-            prefetch_line = None
-        else:
-            line = recv_line(s)
-        if not line:
-            break
-        if line.startswith("OK|HISTORY") or line == "OK|HISTORY" or line == "OK":
-            print(line)
-            break
-        if line.startswith("EVT|TEXT|"):
-            parts = line.split("|")
-            try:
-                payload_len = int(parts[6])
-            except Exception:
-                print(line)
-                continue
-            if payload_len <= 0:
-                print(line)
-                collected: list[str] = []
-
-                def is_hex_fragment(s: str) -> bool:
-                    if not s:
-                        return False
-                    if len(s) > 64:
-                        return False
-                    for ch in s:
-                        if ch not in "0123456789abcdefABCDEF":
-                            return False
-                    return True
-
-                while True:
-                    seg = recv_line(s)
-                    if not seg:
-                        if collected:
-                            out = "".join(collected)
-                            print(out, end="" if out.endswith("\n") else "\n")
-                            collected.clear()
-                        break
-                    if "OK|HISTORY" in seg:
-                        idx = seg.find("OK|HISTORY")
-                        payload_part = seg[:idx]
-                        if payload_part:
-                            if not is_hex_fragment(payload_part):
-                                collected.append(payload_part)
-                        if collected:
-                            out = "".join(collected)
-                            print(out, end="" if out.endswith("\n") else "\n")
-                            collected.clear()
-                        prefetch_line = "OK|HISTORY"
-                        break
-                    idx_txt = seg.find("EVT|TEXT|")
-                    idx_file = seg.find("EVT|FILE|")
-                    idx_evt = -1
-                    if idx_txt != -1 and idx_file != -1:
-                        idx_evt = min(idx_txt, idx_file)
-                    else:
-                        idx_evt = max(idx_txt, idx_file)
-                    if idx_evt != -1:
-                        payload_part = seg[:idx_evt]
-                        header_rest = seg[idx_evt:]
-                        if payload_part:
-                            if not is_hex_fragment(payload_part):
-                                collected.append(payload_part)
-                        if collected:
-                            out = "".join(collected)
-                            print(out, end="" if out.endswith("\n") else "\n")
-                            collected.clear()
-                        prefetch_line = header_rest
-                        break
-                    if not is_hex_fragment(seg):
-                        collected.append(seg)
-                continue
-            else:
-                payload = recv_exact(s, payload_len)
-                tail = ""
-                nxt = recv_line(s)
-                if nxt:
-                    if "OK|HISTORY" in nxt:
-                        idx = nxt.find("OK|HISTORY")
-                        tail = nxt[:idx]
-                        prefetch_line = "OK|HISTORY"
-                    else:
-                        idx_txt = nxt.find("EVT|TEXT|")
-                        idx_file = nxt.find("EVT|FILE|")
-                        idx_evt = -1
-                        if idx_txt != -1 and idx_file != -1:
-                            idx_evt = min(idx_txt, idx_file)
-                        else:
-                            idx_evt = max(idx_txt, idx_file)
-                        if idx_evt != -1:
-                            tail = nxt[:idx_evt]
-                            prefetch_line = nxt[idx_evt:]
-                        else:
-                            tail = nxt
-                print(line)
-                try:
-                    txt = payload.decode(errors="ignore") + tail
-                except Exception:
-                    txt = tail
-                if txt:
-                    _emit_payload(txt)
-        else:
-            if "OK|HISTORY" in line:
-                idx = line.find("OK|HISTORY")
-                payload_part = line[:idx]
-                if payload_part:
-                    print(payload_part, end="" if payload_part.endswith("\n") else "\n")
-                prefetch_line = "OK|HISTORY"
-                continue
-            idx_txt = line.find("EVT|TEXT|")
-            idx_file = line.find("EVT|FILE|")
-            idx_evt = -1
-            if idx_txt != -1 and idx_file != -1:
-                idx_evt = min(idx_txt, idx_file)
-            else:
-                idx_evt = max(idx_txt, idx_file)
-            if idx_evt != -1:
-                payload_part = line[:idx_evt]
-                header_rest = line[idx_evt:]
-                if payload_part:
-                    print(payload_part, end="" if payload_part.endswith("\n") else "\n")
-                prefetch_line = header_rest
-                continue
-            print(line)
-            if line.startswith("ERR|"):
-                s.close()
-                raise typer.Exit(code=1)
-    s.sendall(b"QUIT\n")
-    s.close()
+        space_service.history(options, callbacks)
+    except SpaceServiceError as exc:
+        print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1)
 
 
 @space_app.command("send", help=t("HELP.SPACE.SEND"))
@@ -371,61 +203,60 @@ def space_send(
     if (text is None) == (file is None):
         print("provide exactly one of --text or --file")
         raise typer.Exit(code=2)
-    s = tcp_connect(host, port)
-    if not login(s, user, password):
-        print("login failed")
-        raise typer.Exit(code=1)
+    state = load_state()
+    key = f"{host}:{port}:{room}"
     if text is not None:
-        data = text.encode()
-        sha = hashlib.sha256(data).hexdigest()
-        s.sendall(f"PUBT|{room}|{len(data)}|{sha}\n".encode())
-        _ = recv_line(s)
-        s.sendall(data)
-        resp = recv_line(s)
+        try:
+            resp, event_id = space_service.publish_text(
+                host=host,
+                port=port,
+                user=user,
+                password=password,
+                room=room,
+                text=text,
+            )
+        except SpaceServiceError as exc:
+            print(f"[red]{exc}[/red]")
+            raise typer.Exit(code=1)
         print(resp)
-        if resp.startswith("OK|PUBT|"):
-            eid = int(resp.split("|")[-1])
-            state = load_state()
-            key = f"{host}:{port}:{room}"
-            set_last_event_id(state, key, eid)
+        if event_id > 0:
+            set_last_event_id(state, key, event_id)
             save_state(state)
     else:
-        p = cast(Path, file)
+        assert file is not None
+        p = file.expanduser()
+        if not p.exists():
+            print(f"[red]file not found[/red]: {p}")
+            raise typer.Exit(code=2)
         size = p.stat().st_size
-        h = hashlib.sha256()
-        with p.open("rb") as f:
-            while True:
-                buf = f.read(1024 * 1024)
-                if not buf:
-                    break
-                h.update(buf)
-        sha = h.hexdigest()
-        s.sendall(f"PUBF|{room}|{p.name}|{size}|{sha}\n".encode())
-        _ = recv_line(s)
-        sent = 0
-        with Progress(
-            "[progress.description]{task.description}",
-            BarColumn(),
-            "{task.percentage:>3.0f}%",
-            TransferSpeedColumn(),
-            TimeRemainingColumn(),
-        ) as progress:
-            task = progress.add_task("uploading", total=size)
-            with p.open("rb") as f:
-                while True:
-                    buf = f.read(1024 * 64)
-                    if not buf:
-                        break
-                    s.sendall(buf)
-                    sent += len(buf)
+        try:
+            with Progress(
+                "[progress.description]{task.description}",
+                BarColumn(),
+                "{task.percentage:>3.0f}%",
+                TransferSpeedColumn(),
+                TimeRemainingColumn(),
+            ) as progress:
+                task = progress.add_task("uploading", total=size)
+
+                def on_progress(sent: int) -> None:
                     progress.update(task, completed=sent)
-        resp = recv_line(s)
+
+                resp, event_id = space_service.publish_file(
+                    host=host,
+                    port=port,
+                    user=user,
+                    password=password,
+                    room=room,
+                    path=p,
+                    on_progress=on_progress,
+                )
+        except SpaceServiceError as exc:
+            print(f"[red]{exc}[/red]")
+            raise typer.Exit(code=1)
         print(resp)
-        if resp.startswith("OK|PUBF|"):
-            eid = int(resp.split("|")[-1])
-            state = load_state()
-            key = f"{host}:{port}:{room}"
-            set_last_event_id(state, key, eid)
+        if event_id > 0:
+            set_last_event_id(state, key, event_id)
             save_state(state)
 
 
@@ -441,6 +272,7 @@ def space_chat(
     """Immersive chat: left pane (stdout) shows events, stdin lines publish as text."""
     import threading
     import sys
+    import hashlib
 
     state = load_state()
     key = f"{host}:{port}:{room}"

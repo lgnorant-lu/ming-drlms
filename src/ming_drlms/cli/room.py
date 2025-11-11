@@ -10,10 +10,9 @@ import typer
 from rich import print
 from rich.table import Table
 
-from ming_drlms.core.mproto_v2_client import AuthenticationError, MP2Error, RoomEvent
+from ming_drlms.core.mproto_v2_client import RoomEvent
 
-from .mproto_runtime import create_mp2_client
-from .utils import tcp_connect, recv_line, login
+from .services import RoomService, RoomServiceError
 from ..i18n import t
 
 
@@ -23,6 +22,9 @@ room_app = typer.Typer(
 
 _POLICY_NAME = {0: "retain", 1: "delegate", 2: "teardown"}
 _STORAGE_POLICY_NAME = {0: "persistent", 1: "ephemeral"}
+
+
+room_service = RoomService()
 
 
 def _print_room_event(event: RoomEvent, *, json_out: bool) -> None:
@@ -73,23 +75,22 @@ def room_sub(
 ):
     count = 0
     try:
-        with create_mp2_client(
-            host,
-            port,
+        for event in room_service.subscribe(
+            host=host,
+            port=port,
+            user=user,
+            room=room,
+            since_id=since_id,
+            token_store=token_store,
             timeout=timeout,
-            token_store_path=token_store,
-        ) as client:
-            for event in client.subscribe(user, room, since_id=since_id):
-                _print_room_event(event, json_out=json_out)
-                count += 1
-                if limit and count >= limit:
-                    break
+        ):
+            _print_room_event(event, json_out=json_out)
+            count += 1
+            if limit and count >= limit:
+                break
     except KeyboardInterrupt:
         pass
-    except AuthenticationError as exc:
-        print(f"[red]subscription failed[/red]: {exc}")
-        raise typer.Exit(code=1)
-    except MP2Error as exc:
+    except RoomServiceError as exc:
         print(f"[red]{exc}[/red]")
         raise typer.Exit(code=1)
     except OSError as exc:
@@ -133,25 +134,22 @@ def room_pub(
         payload = sys.stdin.buffer.read()
 
     try:
-        with create_mp2_client(
-            host,
-            port,
+        result = room_service.publish(
+            host=host,
+            port=port,
+            user=user,
+            room=room,
+            payload=payload,
+            ephemeral=ephemeral,
+            token_store=token_store,
             timeout=timeout,
-            token_store_path=token_store,
-        ) as client:
-            client.publish(user, room, payload, ephemeral=ephemeral)
-    except AuthenticationError as exc:
-        print(f"[red]publish failed[/red]: {exc}")
-        raise typer.Exit(code=1)
-    except MP2Error as exc:
+        )
+    except RoomServiceError as exc:
         print(f"[red]{exc}[/red]")
         raise typer.Exit(code=1)
-    except OSError as exc:
-        print(f"[red]connection error[/red]: {exc}")
-        raise typer.Exit(code=2)
     else:
-        mode = "ephemeral" if ephemeral else "persistent"
-        print(f"[green]published {len(payload)} bytes to {room} ({mode})[/green]")
+        mode = "ephemeral" if result.ephemeral else "persistent"
+        print(f"[green]published {result.bytes_sent} bytes to {room} ({mode})[/green]")
 
 
 @room_app.command("info", help=t("HELP.ROOM.INFO"))
@@ -163,140 +161,51 @@ def room_info(
     password: str = typer.Option("password", "--password", "-P"),
     json_out: bool = typer.Option(False, "--json", "-j", help="以 JSON 方式输出"),
 ):
-    s = tcp_connect(host, port)
     try:
-        if not login(s, user, password):
-            print("login failed")
-            raise typer.Exit(code=1)
-        s.sendall(f"ROOMINFO|{room}\n".encode())
-        line = ""
-        info_line = None
-        for _ in range(3):
-            line = recv_line(s)
-            if not line:
-                break
-            if line.startswith("OK|ROOMINFO|"):
-                info_line = line[3:]
-                break
-            if line.startswith("ROOMINFO|"):
-                info_line = line
-                break
-        if not info_line:
-            if line:
-                print(line)
-            print("[red]ROOMINFO not returned[/red]")
-            raise typer.Exit(code=2)
-        parts = info_line.split("|")
-        if len(parts) < 3:
-            print(info_line)
-            print("[red]malformed ROOMINFO line[/red]")
-            raise typer.Exit(code=2)
-        room_name = parts[1]
-        data: dict[str, object] = {"room": room_name}
-        if len(parts) >= 7 and parts[2].isdigit():
-            try:
-                total_instances = int(parts[2])
-            except Exception:
-                total_instances = 0
-            try:
-                total_subs = int(parts[3])
-            except Exception:
-                total_subs = 0
-            try:
-                storage_policy = int(parts[4])
-            except Exception:
-                storage_policy = 0
-            try:
-                max_capacity = int(parts[5])
-            except Exception:
-                max_capacity = 0
-            owner = parts[6] if len(parts) > 6 else ""
-            try:
-                policy = int(parts[7]) if len(parts) > 7 else 0
-            except Exception:
-                policy = 0
-            data.update(
-                {
-                    "total_instances": total_instances,
-                    "total_subscribers": total_subs,
-                    "storage_policy": storage_policy,
-                    "max_capacity": max_capacity,
-                    "owner": owner,
-                    "policy": policy,
-                }
-            )
-            data["storage_policy_name"] = (
-                "ephemeral" if storage_policy == 1 else "persistent"
-            )
-        elif len(parts) >= 6:
-            owner = parts[2]
-            try:
-                policy = int(parts[3])
-            except Exception:
-                policy = -1
-            try:
-                subs = int(parts[4])
-            except Exception:
-                subs = 0
-            try:
-                last_event_id = int(parts[5])
-            except Exception:
-                last_event_id = -1
-            data.update(
-                {
-                    "owner": owner,
-                    "policy": policy,
-                    "subs": subs,
-                    "last_event_id": last_event_id,
-                }
-            )
-        else:
-            print(info_line)
-            print("[red]malformed ROOMINFO line[/red]")
-            raise typer.Exit(code=2)
-        if json_out:
-            print(json.dumps(data, ensure_ascii=False))
-        else:
-            table = Table(title=f"ROOMINFO: {room_name}")
-            table.add_column("字段")
-            table.add_column("值")
-            for key, value in data.items():
-                if key == "room":
-                    continue
-                if key in {"policy_name", "storage_policy_name"}:
-                    continue
-                table.add_row(key, str(value))
-            if "policy" in data:
-                policy_raw = data.get("policy", -1)
-                try:
-                    policy_idx = int(str(policy_raw))
-                except (TypeError, ValueError):
-                    policy_idx = -1
-                table.add_row(
-                    "policy_name",
-                    _POLICY_NAME.get(policy_idx, "unknown"),
-                )
-            if "storage_policy" in data:
-                storage_raw = data.get("storage_policy", -1)
-                try:
-                    storage_idx = int(str(storage_raw))
-                except (TypeError, ValueError):
-                    storage_idx = -1
-                table.add_row(
-                    "storage_policy_name",
-                    _STORAGE_POLICY_NAME.get(storage_idx, "unknown"),
-                )
-            print(table)
-    finally:
+        info = room_service.fetch_info(
+            host=host,
+            port=port,
+            user=user,
+            password=password,
+            room=room,
+        )
+    except RoomServiceError as exc:
+        print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=2)
+    data = info.as_dict()
+    if json_out:
+        print(json.dumps(data, ensure_ascii=False))
+        return
+    table = Table(title=f"ROOMINFO: {info.name}")
+    table.add_column("字段")
+    table.add_column("值")
+    for key, value in data.items():
+        if key == "room":
+            continue
+        if key in {"policy_name", "storage_policy_name"}:
+            continue
+        table.add_row(key, str(value))
+    if "policy" in data:
+        policy_raw = data.get("policy", -1)
         try:
-            try:
-                s.sendall(b"QUIT\n")
-            except Exception:
-                pass
-            _ = recv_line(s)
-            s.close()
-        except Exception:
-            pass
+            policy_idx = int(str(policy_raw))
+        except (TypeError, ValueError):
+            policy_idx = -1
+        table.add_row(
+            "policy_name",
+            _POLICY_NAME.get(policy_idx, "unknown"),
+        )
+    if "storage_policy" in data:
+        storage_raw = data.get("storage_policy", -1)
+        try:
+            storage_idx = int(str(storage_raw))
+        except (TypeError, ValueError):
+            storage_idx = -1
+        table.add_row(
+            "storage_policy_name",
+            _STORAGE_POLICY_NAME.get(storage_idx, "unknown"),
+        )
+    print(table)
 
 
 @room_app.command("create", help="创建房间，可指定阅后即焚模式")
@@ -311,25 +220,20 @@ def room_create(
     password: str = typer.Option("password", "--password", "-P"),
 ):
     policy = "ephemeral" if ephemeral else "persistent"
-    s = tcp_connect(host, port)
     try:
-        if not login(s, user, password):
-            print("login failed")
-            raise typer.Exit(code=1)
-        s.sendall(f"CREATE|{room}|{policy}\n".encode())
-        resp = recv_line(s)
-        if resp.startswith("OK"):
-            print(resp if resp != "OK" else "OK|CREATE")
-        else:
-            print(resp)
-            raise typer.Exit(code=1)
-    finally:
-        try:
-            s.sendall(b"QUIT\n")
-            _ = recv_line(s)
-            s.close()
-        except Exception:
-            pass
+        result = room_service.create_room(
+            host=host,
+            port=port,
+            user=user,
+            password=password,
+            room=room,
+            policy=policy,
+        )
+    except RoomServiceError as exc:
+        print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1)
+    for line in result.lines:
+        print(line if line != "OK" else "OK|CREATE")
 
 
 @room_app.command("set-policy", help=t("HELP.ROOM.SETPOLICY"))
@@ -346,25 +250,20 @@ def room_set_policy(
     if pol not in allowed:
         print(f"[red]unknown policy[/red]: {policy}; expect one of {sorted(allowed)}")
         raise typer.Exit(code=2)
-    s = tcp_connect(host, port)
     try:
-        if not login(s, user, password):
-            print("login failed")
-            raise typer.Exit(code=1)
-        s.sendall(f"SETPOLICY|{room}|{pol}\n".encode())
-        resp = recv_line(s)
-        if resp.startswith("OK"):
-            print(resp if resp != "OK" else "OK|SETPOLICY")
-        else:
-            print(resp)
-            raise typer.Exit(code=1)
-    finally:
-        try:
-            s.sendall(b"QUIT\n")
-            _ = recv_line(s)
-            s.close()
-        except Exception:
-            pass
+        result = room_service.set_policy(
+            host=host,
+            port=port,
+            user=user,
+            password=password,
+            room=room,
+            policy=pol,
+        )
+    except RoomServiceError as exc:
+        print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1)
+    for line in result.lines:
+        print(line if line != "OK" else "OK|SETPOLICY")
 
 
 @room_app.command("set-storage-policy", help="设置房间存储策略")
@@ -385,25 +284,20 @@ def room_set_storage_policy(
             f"[red]unknown storage policy[/red]: {policy}; expect one of {sorted(allowed)}"
         )
         raise typer.Exit(code=2)
-    s = tcp_connect(host, port)
     try:
-        if not login(s, user, password):
-            print("login failed")
-            raise typer.Exit(code=1)
-        s.sendall(f"SETSTORAGE|{room}|{pol}\n".encode())
-        resp = recv_line(s)
-        if resp.startswith("OK"):
-            print(resp if resp != "OK" else "OK|SETSTORAGE")
-        else:
-            print(resp)
-            raise typer.Exit(code=1)
-    finally:
-        try:
-            s.sendall(b"QUIT\n")
-            _ = recv_line(s)
-            s.close()
-        except Exception:
-            pass
+        result = room_service.set_storage_policy(
+            host=host,
+            port=port,
+            user=user,
+            password=password,
+            room=room,
+            policy=pol,
+        )
+    except RoomServiceError as exc:
+        print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1)
+    for line in result.lines:
+        print(line if line != "OK" else "OK|SETSTORAGE")
 
 
 @room_app.command("transfer", help=t("HELP.ROOM.TRANSFER"))
@@ -415,29 +309,20 @@ def room_transfer(
     user: str = typer.Option("alice", "--user", "-u"),
     password: str = typer.Option("password", "--password", "-P"),
 ):
-    s = tcp_connect(host, port)
     try:
-        if not login(s, user, password):
-            print("login failed")
-            raise typer.Exit(code=1)
-        s.sendall(f"TRANSFER|{room}|{new_owner}\n".encode())
-        ack = recv_line(s)
-        if ack:
-            print(ack)
-        else:
-            print("[red]no response for TRANSFER[/red]")
-            raise typer.Exit(code=2)
-        try:
-            nxt = recv_line(s)
-            if nxt:
-                print(nxt)
-        except Exception:
-            pass
-    finally:
-        try:
-            s.close()
-        except Exception:
-            pass
+        result = room_service.transfer_owner(
+            host=host,
+            port=port,
+            user=user,
+            password=password,
+            room=room,
+            new_owner=new_owner,
+        )
+    except RoomServiceError as exc:
+        print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=2)
+    for line in result.lines:
+        print(line)
 
 
 __all__ = [

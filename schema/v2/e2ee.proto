@@ -2,12 +2,12 @@ syntax = "proto3";
 package mingdrlms.v2;
 
 // 端到端密钥生成请求
-message E2EE_GenerateKeysRequest {
+message E2EEGenerateKeysRequest {
   string user_name = 1;
   bool force_regenerate = 2;
 }
 
-message E2EE_GenerateKeysResponse {
+message E2EEGenerateKeysResponse {
   int32 code = 1;
   string message = 2;
   uint32 registration_id = 3;
@@ -15,11 +15,11 @@ message E2EE_GenerateKeysResponse {
 }
 
 // 端到端预密钥包请求
-message E2EE_PreKeyBundleRequest {
+message E2EEPreKeyBundleRequest {
   string user_name = 1;
 }
 
-message E2EE_PreKeyBundleResponse {
+message E2EEPreKeyBundleResponse {
   int32 code = 1;
   string message = 2;
   bytes identity_key = 3;
