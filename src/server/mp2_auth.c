@@ -14,6 +14,11 @@
 #endif
 #include <time.h>
 
+/* Windows下PATH_MAX兼容性 */
+#ifndef PATH_MAX
+#define PATH_MAX _MAX_PATH
+#endif
+
 #if defined(_WIN32)
 #include <windows.h>
 #endif
