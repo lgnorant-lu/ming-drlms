@@ -8,6 +8,7 @@ import typer
 from rich import print
 from rich.progress import Progress, BarColumn, TimeRemainingColumn, TransferSpeedColumn
 from rich.table import Table  # noqa: F401 (used in room table rendering references)
+from typer.models import OptionInfo
 
 from ..state import load_state, save_state, get_last_event_id, set_last_event_id
 from .services import (
@@ -26,6 +27,24 @@ space_app = typer.Typer(help="shared rooms: subscribe/publish/history")
 
 
 space_service = SpaceService()
+
+
+def _option_value(value, name: str):
+    if isinstance(value, OptionInfo):
+        value = value.default
+    if value is Ellipsis:
+        raise TypeError(f"missing required option: {name}")
+    return value
+
+
+def _refresh_space_service() -> None:
+    if isinstance(space_service, SpaceService):
+        space_service.set_dependencies(
+            tcp_connect_fn=tcp_connect,
+            login_fn=login,
+            recv_line_fn=recv_line,
+            recv_exact_fn=recv_exact,
+        )
 
 
 def _emit_payload(txt: str) -> None:
@@ -60,6 +79,16 @@ def space_join(
         help="auto reconnect with backoff and resume from last id",
     ),
 ):
+    _refresh_space_service()
+    room = _option_value(room, "room")
+    host = _option_value(host, "host")
+    port = _option_value(port, "port")
+    user = _option_value(user, "user")
+    password = _option_value(password, "password")
+    since_id = _option_value(since_id, "since_id")
+    save_dir = _option_value(save_dir, "save_dir")
+    json_out = _option_value(json_out, "json_out")
+    reconnect = _option_value(reconnect, "reconnect")
     """Subscribe to a room and tail events, with optional resume and auto-save."""
     state = load_state()
     room_key = f"{host}:{port}:{room}"
@@ -135,6 +164,12 @@ def space_leave(
     user: str = typer.Option("alice", "--user", "-u"),
     password: str = typer.Option("password", "--password", "-P"),
 ):
+    _refresh_space_service()
+    room = _option_value(room, "room")
+    host = _option_value(host, "host")
+    port = _option_value(port, "port")
+    user = _option_value(user, "user")
+    password = _option_value(password, "password")
     try:
         resp = space_service.leave(
             host=host,
@@ -161,6 +196,15 @@ def space_history(
     user: str = typer.Option("alice", "--user", "-u"),
     password: str = typer.Option("password", "--password", "-P"),
 ):
+    _refresh_space_service()
+    room = _option_value(room, "room")
+    limit = _option_value(limit, "limit")
+    since_id = _option_value(since_id, "since_id")
+    host = _option_value(host, "host")
+    port = _option_value(port, "port")
+    user = _option_value(user, "user")
+    password = _option_value(password, "password")
+
     def handle_line(line: str) -> None:
         print(line)
         if line.startswith("ERR|"):
@@ -200,6 +244,14 @@ def space_send(
     user: str = typer.Option("alice", "--user", "-u"),
     password: str = typer.Option("password", "--password", "-P"),
 ):
+    _refresh_space_service()
+    room = _option_value(room, "room")
+    text = _option_value(text, "text")
+    file = _option_value(file, "file")
+    host = _option_value(host, "host")
+    port = _option_value(port, "port")
+    user = _option_value(user, "user")
+    password = _option_value(password, "password")
     if (text is None) == (file is None):
         print("provide exactly one of --text or --file")
         raise typer.Exit(code=2)
@@ -269,6 +321,13 @@ def space_chat(
     password: str = typer.Option("password", "--password"),
     since_id: int = typer.Option(-1, "--since-id"),
 ):
+    _refresh_space_service()
+    room = _option_value(room, "room")
+    host = _option_value(host, "host")
+    port = _option_value(port, "port")
+    user = _option_value(user, "user")
+    password = _option_value(password, "password")
+    since_id = _option_value(since_id, "since_id")
     """Immersive chat: left pane (stdout) shows events, stdin lines publish as text."""
     import threading
     import sys

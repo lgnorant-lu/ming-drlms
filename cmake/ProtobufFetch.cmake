@@ -30,6 +30,28 @@ if(PKG_CONFIG_FOUND)
                 set(PROTOBUF_C_INCLUDE_DIRS ${_PROTOBUF_C_INCLUDE_DIRS})
                 set(PROTOBUF_C_VERSION ${_PROTOBUF_C_VERSION})
                 set(PROTOBUF_C_DETECTION_METHOD "pkg-config (${_pkg_name})")
+
+                set(_protobuf_pregen_dir "${PROJECT_SOURCE_DIR}/src/generated/schema/v2")
+                if(EXISTS "${_protobuf_pregen_dir}/common.pb-c.c")
+                    message(STATUS "Found pre-generated protobuf files, using them with local implementation")
+                    set(PROTOBUF_C_USE_PREGENSETS TRUE)
+                    set(PROTOBUF_C_SOURCES
+                        "${_protobuf_pregen_dir}/common.pb-c.c"
+                        "${_protobuf_pregen_dir}/auth.pb-c.c"
+                        "${_protobuf_pregen_dir}/room.pb-c.c"
+                        "${_protobuf_pregen_dir}/federation.pb-c.c"
+                        "${_protobuf_pregen_dir}/e2ee.pb-c.c"
+                        "${PROJECT_SOURCE_DIR}/src/external/protobuf-c/protobuf-c.c")
+                    set(PROTOBUF_C_HEADERS
+                        "${_protobuf_pregen_dir}/common.pb-c.h"
+                        "${_protobuf_pregen_dir}/auth.pb-c.h"
+                        "${_protobuf_pregen_dir}/room.pb-c.h"
+                        "${_protobuf_pregen_dir}/federation.pb-c.h"
+                        "${_protobuf_pregen_dir}/e2ee.pb-c.h")
+                    list(APPEND PROTOBUF_C_INCLUDE_DIRS 
+                        ${_protobuf_pregen_dir}
+                        "${PROJECT_SOURCE_DIR}/src")
+                endif()
             endif()
         endif()
     endforeach()

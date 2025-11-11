@@ -54,19 +54,51 @@ class SpaceService:
     def __init__(
         self,
         *,
-        tcp_connect_fn: Callable[..., object] = tcp_connect,
-        login_fn: Callable[..., bool] = login,
-        recv_line_fn: Callable[..., str] = recv_line,
-        recv_exact_fn: Callable[..., bytes] = recv_exact,
-        sleep_fn: Callable[[float], None] = None,
+        tcp_connect_fn: Optional[Callable[..., object]] = None,
+        login_fn: Optional[Callable[..., bool]] = None,
+        recv_line_fn: Optional[Callable[..., str]] = None,
+        recv_exact_fn: Optional[Callable[..., bytes]] = None,
+        sleep_fn: Optional[Callable[[float], None]] = None,
     ) -> None:
         import time
 
-        self._tcp_connect = tcp_connect_fn
-        self._login = login_fn
-        self._recv_line = recv_line_fn
-        self._recv_exact = recv_exact_fn
+        def _tcp_connect_wrapper(*args, **kwargs):
+            return tcp_connect(*args, **kwargs)
+
+        def _login_wrapper(*args, **kwargs):
+            return login(*args, **kwargs)
+
+        def _recv_line_wrapper(*args, **kwargs):
+            return recv_line(*args, **kwargs)
+
+        def _recv_exact_wrapper(*args, **kwargs):
+            return recv_exact(*args, **kwargs)
+
+        self._tcp_connect = tcp_connect_fn or _tcp_connect_wrapper
+        self._login = login_fn or _login_wrapper
+        self._recv_line = recv_line_fn or _recv_line_wrapper
+        self._recv_exact = recv_exact_fn or _recv_exact_wrapper
         self._sleep = sleep_fn or time.sleep
+
+    def set_dependencies(
+        self,
+        *,
+        tcp_connect_fn: Optional[Callable[..., object]] = None,
+        login_fn: Optional[Callable[..., bool]] = None,
+        recv_line_fn: Optional[Callable[..., str]] = None,
+        recv_exact_fn: Optional[Callable[..., bytes]] = None,
+        sleep_fn: Optional[Callable[[float], None]] = None,
+    ) -> None:
+        if tcp_connect_fn is not None:
+            self._tcp_connect = tcp_connect_fn
+        if login_fn is not None:
+            self._login = login_fn
+        if recv_line_fn is not None:
+            self._recv_line = recv_line_fn
+        if recv_exact_fn is not None:
+            self._recv_exact = recv_exact_fn
+        if sleep_fn is not None:
+            self._sleep = sleep_fn
 
     # ------------------------------------------------------------------
     # Join / subscribe
@@ -122,6 +154,13 @@ class SpaceService:
                     if line.startswith("EVT|FILE|"):
                         callbacks.handle_line(line)
                         callbacks.save_event(line)
+                        try:
+                            parts = line.split("|")
+                            file_event_id = int(parts[5])
+                        except Exception:
+                            file_event_id = None
+                        if file_event_id is not None:
+                            _update_since_local(file_event_id)
                         continue
                     callbacks.handle_line(line)
                     if line.startswith("ERR|"):

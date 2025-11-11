@@ -9,6 +9,7 @@ from typing import Optional
 import typer
 from rich import print
 from rich.table import Table
+from typer.models import OptionInfo
 
 from ming_drlms.core.mproto_v2_client import RoomEvent
 
@@ -25,6 +26,14 @@ _STORAGE_POLICY_NAME = {0: "persistent", 1: "ephemeral"}
 
 
 room_service = RoomService()
+
+
+def _option_value(value, name: str):
+    if isinstance(value, OptionInfo):
+        value = value.default
+    if value is Ellipsis:
+        raise TypeError(f"missing required option: {name}")
+    return value
 
 
 def _print_room_event(event: RoomEvent, *, json_out: bool) -> None:
@@ -73,6 +82,15 @@ def room_sub(
     ),
     timeout: float = typer.Option(10.0, "--timeout", help="socket 超时时间"),
 ):
+    room = _option_value(room, "room")
+    host = _option_value(host, "host")
+    port = _option_value(port, "port")
+    user = _option_value(user, "user")
+    since_id = _option_value(since_id, "since_id")
+    limit = _option_value(limit, "limit")
+    json_out = _option_value(json_out, "json_out")
+    token_store = _option_value(token_store, "token_store")
+    timeout = _option_value(timeout, "timeout")
     count = 0
     try:
         for event in room_service.subscribe(
@@ -117,6 +135,16 @@ def room_pub(
     ),
     timeout: float = typer.Option(10.0, "--timeout", help="socket 超时时间"),
 ):
+    room = _option_value(room, "room")
+    text = _option_value(text, "text")
+    file = _option_value(file, "file")
+    stdin = _option_value(stdin, "stdin")
+    ephemeral = _option_value(ephemeral, "ephemeral")
+    host = _option_value(host, "host")
+    port = _option_value(port, "port")
+    user = _option_value(user, "user")
+    token_store = _option_value(token_store, "token_store")
+    timeout = _option_value(timeout, "timeout")
     sources = [text is not None, file is not None, stdin]
     if sum(1 for src in sources if src) != 1:
         print("[red]请使用 --text、--file 或 --stdin 之一提供消息内容。[/red]")
@@ -161,6 +189,12 @@ def room_info(
     password: str = typer.Option("password", "--password", "-P"),
     json_out: bool = typer.Option(False, "--json", "-j", help="以 JSON 方式输出"),
 ):
+    room = _option_value(room, "room")
+    host = _option_value(host, "host")
+    port = _option_value(port, "port")
+    user = _option_value(user, "user")
+    password = _option_value(password, "password")
+    json_out = _option_value(json_out, "json_out")
     try:
         info = room_service.fetch_info(
             host=host,
@@ -219,6 +253,12 @@ def room_create(
     user: str = typer.Option("alice", "--user", "-u"),
     password: str = typer.Option("password", "--password", "-P"),
 ):
+    room = _option_value(room, "room")
+    ephemeral = _option_value(ephemeral, "ephemeral")
+    host = _option_value(host, "host")
+    port = _option_value(port, "port")
+    user = _option_value(user, "user")
+    password = _option_value(password, "password")
     policy = "ephemeral" if ephemeral else "persistent"
     try:
         result = room_service.create_room(
@@ -245,6 +285,12 @@ def room_set_policy(
     user: str = typer.Option("alice", "--user", "-u"),
     password: str = typer.Option("password", "--password", "-P"),
 ):
+    room = _option_value(room, "room")
+    policy = _option_value(policy, "policy")
+    host = _option_value(host, "host")
+    port = _option_value(port, "port")
+    user = _option_value(user, "user")
+    password = _option_value(password, "password")
     allowed = {"retain", "delegate", "teardown"}
     pol = policy.lower()
     if pol not in allowed:
@@ -277,6 +323,12 @@ def room_set_storage_policy(
     user: str = typer.Option("alice", "--user", "-u"),
     password: str = typer.Option("password", "--password", "-P"),
 ):
+    room = _option_value(room, "room")
+    policy = _option_value(policy, "policy")
+    host = _option_value(host, "host")
+    port = _option_value(port, "port")
+    user = _option_value(user, "user")
+    password = _option_value(password, "password")
     allowed = {"persistent", "ephemeral"}
     pol = policy.lower()
     if pol not in allowed:
@@ -309,6 +361,12 @@ def room_transfer(
     user: str = typer.Option("alice", "--user", "-u"),
     password: str = typer.Option("password", "--password", "-P"),
 ):
+    room = _option_value(room, "room")
+    new_owner = _option_value(new_owner, "new_owner")
+    host = _option_value(host, "host")
+    port = _option_value(port, "port")
+    user = _option_value(user, "user")
+    password = _option_value(password, "password")
     try:
         result = room_service.transfer_owner(
             host=host,
