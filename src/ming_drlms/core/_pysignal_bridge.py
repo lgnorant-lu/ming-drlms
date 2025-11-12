@@ -428,6 +428,12 @@ def _build_link_args(lib_path: Path, openssl_lib: Optional[Path] = None) -> dict
         link_args.setdefault("extra_link_args", []).append("/NODEFAULTLIB:MSVCRTD")
     else:
         link_args["extra_objects"] = [str(lib_path)]
+        # Ensure the dynamic loader can find the Signal library at runtime
+        rpaths = link_args.setdefault("runtime_library_dirs", [])
+        parent_dir = str(lib_path.parent)
+        if parent_dir not in rpaths:
+            rpaths.append(parent_dir)
+        # Common crypto/math deps
         extra = ["-lcrypto", "-lm"]
         link_args.setdefault("extra_link_args", []).extend(extra)
     return link_args
