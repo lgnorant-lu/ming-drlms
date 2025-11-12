@@ -209,203 +209,15 @@ _CDEF = """
             const session_signed_pre_key *pre_key);
         size_t session_signed_pre_key_get_signature_len(
             const session_signed_pre_key *pre_key);
+        ec_key_pair *session_signed_pre_key_get_key_pair(
+            const session_signed_pre_key *pre_key);
         uint64_t session_signed_pre_key_get_timestamp(
             const session_signed_pre_key *pre_key);
+        void session_signed_pre_key_destroy(signal_type_base *pre_key);
 """
 
-_C_SOURCE = r"""
-#include <openssl/evp.h>
-#include <openssl/hmac.h>
-#include <openssl/rand.h>
-
-#include <stdint.h>
-#include <stdlib.h>
-#include <string.h>
-
-#include <signal/signal_protocol.h>
-#include <signal/session_builder.h>
-#include <signal/session_cipher.h>
-#include <signal/session_pre_key.h>
-#include <signal/curve.h>
-#include <signal/protocol.h>
-
-typedef struct key_value_node {
-    char *key;
-    uint8_t *value;
-    size_t value_len;
-    struct key_value_node *next;
-} key_value_node;
-
-typedef struct {
-    key_value_node *head;
-} key_value_store;
-
-static key_value_store *kv_store_create(void) {
-    key_value_store *store = (key_value_store *)calloc(1, sizeof(key_value_store));
-    return store;
-}
-
-static void kv_store_free(key_value_store *store) {
-    if (!store) {
-        return;
-    }
-    key_value_node *node = store->head;
-    while (node) {
-        key_value_node *next = node->next;
-        free(node->key);
-        free(node->value);
-        free(node);
-        node = next;
-    }
-    free(store);
-}
-
-static key_value_node *kv_store_find(key_value_store *store, const char *key) {
-    for (key_value_node *node = store->head; node; node = node->next) {
-        if (strcmp(node->key, key) == 0) {
-            return node;
-        }
-    }
-    return NULL;
-}
-
-static int kv_store_put(key_value_store *store, const char *key,
-                        const uint8_t *value, size_t value_len) {
-    if (!store || !key) {
-        return SG_ERR_INVAL;
-    }
-    key_value_node *node = kv_store_find(store, key);
-    if (!node) {
-        node = (key_value_node *)calloc(1, sizeof(key_value_node));
-        if (!node) {
-            return SG_ERR_NOMEM;
-        }
-        node->key = strdup(key);
-        if (!node->key) {
-            free(node);
-            return SG_ERR_NOMEM;
-        }
-        node->next = store->head;
-        store->head = node;
-    } else {
-        free(node->value);
-        node->value = NULL;
-        node->value_len = 0;
-    }
-    if (value && value_len > 0) {
-        node->value = (uint8_t *)malloc(value_len);
-        if (!node->value) {
-            return SG_ERR_NOMEM;
-        }
-        memcpy(node->value, value, value_len);
-        node->value_len = value_len;
-    }
-    return SG_SUCCESS;
-}
-
-static int kv_store_remove(key_value_store *store, const char *key) {
-    if (!store || !key) {
-        return SG_ERR_INVAL;
-    }
-    key_value_node **prev = &store->head;
-    while (*prev) {
-        key_value_node *node = *prev;
-        if (strcmp(node->key, key) == 0) {
-            *prev = node->next;
-            free(node->key);
-            free(node->value);
-            free(node);
-            return 1;
-        }
-        prev = &node->next;
-    }
-    return 0;
-}
-
-static char *dup_address_key(const char *name, int32_t device_id) {
-    size_t name_len = name ? strlen(name) : 0;
-    size_t total = name_len + 24;
-    char *buf = (char *)malloc(total);
-    if (!buf) {
-        return NULL;
-    }
-    if (name_len > 0) {
-        memcpy(buf, name, name_len);
-    }
-    snprintf(buf + name_len, total - name_len, "#%d", device_id);
-    return buf;
-}
-
-typedef struct drlms_signal_store {
-    signal_context *ctx;
-    signal_protocol_store_context *store;
-    signal_protocol_session_store session_store_iface;
-    signal_protocol_pre_key_store pre_key_store_iface;
-    signal_protocol_signed_pre_key_store signed_pre_key_store_iface;
-    signal_protocol_identity_key_store identity_store_iface;
-    key_value_store *sessions;
-    key_value_store *pre_keys;
-    key_value_store *signed_pre_keys;
-    key_value_store *remote_identities;
-    uint8_t *identity_public;
-    size_t identity_public_len;
-    uint8_t *identity_private;
-    size_t identity_private_len;
-    uint32_t registration_id;
-    int32_t device_id;
-} drlms_signal_store;
-
-static void drlms_store_clear_identity(drlms_signal_store *store) {
-    if (!store) {
-        return;
-    }
-    free(store->identity_public);
-    free(store->identity_private);
-    store->identity_public = NULL;
-    store->identity_private = NULL;
-    store->identity_public_len = 0;
-    store->identity_private_len = 0;
-    store->registration_id = 0;
-    store->device_id = 0;
-}
-
-static void drlms_signal_store_destroy(drlms_signal_store *store) {
-    if (!store) {
-        return;
-    }
-    if (store->store) {
-        signal_protocol_store_context_destroy(store->store);
-    }
-    kv_store_free(store->sessions);
-    kv_store_free(store->pre_keys);
-    kv_store_free(store->signed_pre_keys);
-    kv_store_free(store->remote_identities);
-    drlms_store_clear_identity(store);
-    free(store);
-}
-
-// ---------------------------------------------------------------------
-// Identity functions
-// ---------------------------------------------------------------------
-
-static int identity_get_pair(signal_buffer **public_data,
-                             signal_buffer **private_data, void *user_data) {
-    drlms_signal_store *store = (drlms_signal_store *)user_data;
-    if (!store || !store->identity_public || !store->identity_private) {
-        return SG_ERR_INVALID_KEY;
-    }
-    *public_data = signal_buffer_create(store->identity_public,
-                                        store->identity_public_len);
-    if (!*public_data) {
-        return SG_ERR_NOMEM;
-    }
-    *private_data = signal_buffer_create(store->identity_private,
-                                         store->identity_private_len);
-    if (!*private_data) {
-        signal_buffer_free(*public_data);
-
-... (C source continues)
-"""
+_C_SOURCE_PATH = Path(__file__).with_name("_pysignal_runtime.c")
+_C_SOURCE = _C_SOURCE_PATH.read_text(encoding="utf-8")
 
 
 @functools.lru_cache(maxsize=1)
@@ -423,11 +235,17 @@ def load_bridge() -> Tuple[FFI, object]:
     ffi = FFI()
     ffi.cdef(_CDEF)
 
-    link_args = _build_link_args(lib_path)
+    openssl_include, openssl_lib = _detect_openssl_prefix(lib_path)
+
+    include_dirs = [str(include_dir)]
+    if openssl_include is not None:
+        include_dirs.append(str(openssl_include))
+
+    link_args = _build_link_args(lib_path, openssl_lib)
     try:
         module = ffi.verify(
             _C_SOURCE,
-            include_dirs=[str(include_dir)],
+            include_dirs=include_dirs,
             **link_args,
         )
     except VerificationError as exc:  # pragma: no cover - 构建期依赖缺失
@@ -443,7 +261,7 @@ def _locate_signal_artifacts() -> Tuple[Optional[Path], Optional[Path]]:
     if env_prefix:
         prefixes.append(Path(env_prefix))
 
-    root = Path(__file__).resolve().parents[2]
+    root = Path(__file__).resolve().parents[3]
     build_root = root / "build"
     search_dirs = [build_root]
     if build_root.is_dir():
@@ -495,15 +313,82 @@ def _validate_signal_prefix(prefix: Path) -> Tuple[Optional[Path], Optional[Path
     return None, None
 
 
-def _build_link_args(lib_path: Path) -> dict:
+def _build_link_args(lib_path: Path, openssl_lib: Optional[Path] = None) -> dict:
     lib_path = Path(lib_path)
     link_args: dict = {"extra_objects": [str(lib_path)]}
     if os.name == "nt":
-        link_args.setdefault("library_dirs", []).append(str(lib_path.parent))
+        lib_dirs = link_args.setdefault("library_dirs", [])
+        if str(lib_path.parent) not in lib_dirs:
+            lib_dirs.append(str(lib_path.parent))
+        compile_args = link_args.setdefault("extra_compile_args", [])
+        if "/std:c11" not in compile_args:
+            compile_args.append("/std:c11")
+        if "/MD" not in compile_args:
+            compile_args.append("/MD")
+        if openssl_lib is not None:
+            if str(openssl_lib) not in lib_dirs:
+                lib_dirs.append(str(openssl_lib))
+            libs = link_args.setdefault("libraries", [])
+            for name in ("libcrypto", "libssl"):
+                if name not in libs:
+                    libs.append(name)
+        link_args.setdefault("extra_link_args", []).append("/NODEFAULTLIB:MSVCRTD")
     else:
         extra = ["-lcrypto", "-lm"]
         link_args.setdefault("extra_link_args", []).extend(extra)
     return link_args
+
+
+def _detect_openssl_prefix(
+    signal_lib_path: Path,
+) -> Tuple[Optional[Path], Optional[Path]]:
+    candidates: list[Tuple[Path, Path]] = []
+
+    env_root = os.environ.get("OPENSSL_ROOT_DIR")
+    if env_root:
+        base = Path(env_root)
+        candidates.append((base / "include", base / "lib"))
+
+    vcpkg_root = os.environ.get("VCPKG_ROOT")
+    if vcpkg_root:
+        base = Path(vcpkg_root)
+        triplets = [
+            "x64-windows",
+            "x64-windows-static-md",
+            "x64-windows-static",
+            "x64-windows-static-release",
+        ]
+        for triplet in triplets:
+            prefix = base / "installed" / triplet
+            candidates.append((prefix / "include", prefix / "lib"))
+
+    drive = Path(signal_lib_path).anchor
+    if drive:
+        drive_root = Path(drive)
+        default_roots = [
+            drive_root / "vcpkg",
+            drive_root / "Coding" / "vcpkg",
+            drive_root / "dev" / "vcpkg",
+            drive_root / "src" / "vcpkg",
+        ]
+        for base in default_roots:
+            if not base.exists():
+                continue
+            for triplet in (
+                "x64-windows",
+                "x64-windows-static-md",
+                "x64-windows-static",
+            ):
+                prefix = base / "installed" / triplet
+                candidates.append((prefix / "include", prefix / "lib"))
+
+    for include_dir, lib_dir in candidates:
+        header = include_dir / "openssl" / "evp.h"
+        crypto_lib = lib_dir / "libcrypto.lib"
+        if header.exists() and crypto_lib.exists():
+            return include_dir, lib_dir
+
+    return None, None
 
 
 def _ensure_win_distutils() -> None:

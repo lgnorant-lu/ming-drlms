@@ -77,9 +77,15 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $customRoot = Join-Path $Env:RUNNER_TEMP 'vcpkg'
+          $binaryCache = Join-Path $Env:RUNNER_TEMP 'vcpkg-binary-cache'
+          if (-not (Test-Path $binaryCache)) {
+            New-Item -ItemType Directory -Path $binaryCache | Out-Null
+          }
           Add-Content -Path $Env:GITHUB_ENV -Value "VCPKG_ROOT=$customRoot"
           Add-Content -Path $Env:GITHUB_ENV -Value ("CMAKE_TOOLCHAIN_FILE={0}" -f (Join-Path $customRoot 'scripts/buildsystems/vcpkg.cmake'))
           Add-Content -Path $Env:GITHUB_ENV -Value "VCPKG_TARGET_TRIPLET=x64-windows"
+          Add-Content -Path $Env:GITHUB_ENV -Value "VCPKG_DEFAULT_BINARY_CACHE=$binaryCache"
+          Add-Content -Path $Env:GITHUB_ENV -Value "VCPKG_BINARY_SOURCES=clear;filesystem,$binaryCache,readwrite"
 
       - name: Restore vcpkg cache (Windows)
         if: matrix.os == 'windows-latest'
@@ -87,8 +93,8 @@ jobs:
         with:
           path: |
             ${{ env.VCPKG_ROOT }}
-            ~\AppData\Local\vcpkg\archives
-          key: ${{ runner.os }}-vcpkg-${{ hashFiles('.github/workflows/build-and-test.yml') }}
+            ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+          key: ${{ runner.os }}-vcpkg-${{ hashFiles('.github/workflows/build-and-test.yml', '.github/vcpkg-windows-ports.txt') }}
           restore-keys: |
             ${{ runner.os }}-vcpkg-
 
@@ -117,8 +123,17 @@ jobs:
           if (-not (Test-Path $Env:VCPKG_ROOT)) {
             throw "VCPKG_ROOT is not initialized"
           }
-          & "$Env:VCPKG_ROOT\vcpkg.exe" install sqlite3:x64-windows argon2:x64-windows openssl:x64-windows
-          & "$Env:VCPKG_ROOT\vcpkg.exe" install protobuf-c:x64-windows
+          $portsFile = Join-Path $Env:GITHUB_WORKSPACE '.github/vcpkg-windows-ports.txt'
+          if (-not (Test-Path $portsFile)) {
+            throw "vcpkg ports list not found: $portsFile"
+          }
+          $ports = Get-Content $portsFile | Where-Object { $_ -and -not $_.StartsWith('#') }
+          if (-not $ports) {
+            throw "vcpkg ports list is empty"
+          }
+          $env:VCPKG_FEATURE_FLAGS = 'binarycaching'
+          $env:VCPKG_BINARY_SOURCES = $Env:VCPKG_BINARY_SOURCES
+          & "$Env:VCPKG_ROOT\vcpkg.exe" install $ports --clean-after-build
 
       - name: Install Python dependencies
         run: |
