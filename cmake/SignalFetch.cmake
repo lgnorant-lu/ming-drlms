@@ -74,44 +74,22 @@ ExternalProject_Add(signal_protocol_ext
     LOG_BUILD ON
     LOG_INSTALL ON)
 
-# Ensure proper library installation for all platforms
-if(WIN32)
-    # 根据平台设置库文件名（需在使用前定义）
-    set(_signal_lib_name "signal-protocol-c.lib")
-    set(_signal_dll_name "signal-protocol-c.dll")
-    # After the external project install, move/copy DLL to bin directory
-    add_custom_command(TARGET signal_protocol_ext POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E make_directory ${SIGNAL_INSTALL_PREFIX}/bin
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            ${SIGNAL_INSTALL_PREFIX}/lib/${_signal_dll_name}
-            ${SIGNAL_INSTALL_PREFIX}/bin/${_signal_dll_name}
-        COMMENT "Installing signal-protocol-c.dll to bin directory"
-    )
-elseif(APPLE)
-    # 根据平台设置库文件名（需在使用前定义）
-    set(_signal_lib_name "libsignal-protocol-c.dylib")
-    set(_signal_dll_name "libsignal-protocol-c.dylylib")
-    # On macOS, ensure the library is in the correct location and has proper install names
-    add_custom_command(TARGET signal_protocol_ext POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E make_directory ${SIGNAL_INSTALL_PREFIX}/lib
-        COMMAND sh -c "if [ -f \\\"${SIGNAL_INSTALL_PREFIX}/lib/${_signal_lib_name}\\\" ]; then install_name_tool -id @rpath/${_signal_lib_name} \\\"${SIGNAL_INSTALL_PREFIX}/lib/${_signal_lib_name}\\\"; else echo \\\"Library file not found: ${SIGNAL_INSTALL_PREFIX}/lib/${_signal_lib_name}\\\"; fi"
-        COMMENT "Setting install name for macOS dylib"
-    )
-else()
-    # 根据平台设置库文件名（需在使用前定义）
-    set(_signal_lib_name "libsignal-protocol-c.so")
-    set(_signal_dll_name "libsignal-protocol-c.so")
-    # On Linux, create symlink for versioned library if needed
-    add_custom_command(TARGET signal_protocol_ext POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E make_directory ${SIGNAL_INSTALL_PREFIX}/lib
-        COMMAND sh -c "if [ ! -L ${SIGNAL_INSTALL_PREFIX}/lib/libsignal-protocol-c.so ] && [ -f ${SIGNAL_INSTALL_PREFIX}/lib/libsignal-protocol-c.so.2 ]; then ln -sf libsignal-protocol-c.so.2 ${SIGNAL_INSTALL_PREFIX}/lib/libsignal-protocol-c.so; fi"
-        COMMENT "Creating versioned symlink for Linux shared library"
-    )
-endif()
+# Note:
+# We build static libraries to avoid runtime loader differences across platforms.
+# As such, we do not need any post-build shell commands here (which were causing CI issues).
 
 file(MAKE_DIRECTORY "${SIGNAL_INSTALL_PREFIX}/include")
 file(MAKE_DIRECTORY "${SIGNAL_INSTALL_PREFIX}/lib")
 file(MAKE_DIRECTORY "${SIGNAL_INSTALL_PREFIX}/bin")
+
+# 根据平台设置库文件名（静态库）
+if(WIN32)
+    set(_signal_lib_name "signal-protocol-c.lib")
+elseif(APPLE)
+    set(_signal_lib_name "libsignal-protocol-c.a")
+else()
+    set(_signal_lib_name "libsignal-protocol-c.a")
+endif()
 
 set(_signal_lib_path "${SIGNAL_INSTALL_PREFIX}/lib/${_signal_lib_name}")
 add_library(signal_protocol STATIC IMPORTED GLOBAL)
