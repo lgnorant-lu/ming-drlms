@@ -220,6 +220,12 @@ def server_up(
         DRLMS_EPHEMERAL_HISTORY_LIMIT=cfg.rooms_ephemeral_history_limit,
         LD_LIBRARY_PATH=str(server_bin.parent),
     )
+
+    # Debug: print environment variables for CI troubleshooting
+    print(
+        f"[DEBUG] CLI server env: DRLMS_ENABLE_MPROTO_V2={env.get('DRLMS_ENABLE_MPROTO_V2', 'NOT_SET')}",
+        file=sys.stderr,
+    )
     if os.name == "nt":
         env["PATH"] = (
             f"{server_bin.parent}{os.pathsep}{env.get('PATH', '')}"

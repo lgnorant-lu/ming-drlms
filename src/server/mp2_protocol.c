@@ -43,8 +43,8 @@ int mp2_protocol_is_enabled(void) {
     // Debug: print protocol selection for CI troubleshooting
     static int once = 0;
     if (!once) {
-        fprintf(stderr, "[DEBUG] MP2 protocol: env='%s', enabled=%d\n",
-                env ? env : "NULL", enabled);
+        fprintf(stderr, "[DEBUG] MP2 protocol: env='%s', enabled=%d, pid=%d\n",
+                env ? env : "NULL", enabled, (int)getpid());
         once = 1;
     }
     return enabled;
