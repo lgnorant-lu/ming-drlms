@@ -61,8 +61,7 @@ C:\tools\vcpkg\bootstrap-vcpkg.bat
     "argon2",
     "openssl",
     "protobuf-c"
-  ],
-  "builtin-baseline": "f012ddcdad91089f118e97033a15a47e4dcd3c0f"
+  ]
 }
 ```
 
