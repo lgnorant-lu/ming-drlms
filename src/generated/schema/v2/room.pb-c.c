@@ -3184,3 +3184,118 @@ const ProtobufCEnumDescriptor
         NULL,
         NULL /* reserved[1234] */
 };
+
+/* RoomMember message implementation */
+void mingdrlms__v2__room_member__init(Mingdrlms__V2__RoomMember *message) {
+    static const Mingdrlms__V2__RoomMember init_value =
+        MINGDRLMS__V2__ROOM_MEMBER__INIT;
+    *message = init_value;
+}
+
+size_t mingdrlms__v2__room_member__get_packed_size(
+    const Mingdrlms__V2__RoomMember *message) {
+    assert(message->base.descriptor == &mingdrlms__v2__room_member__descriptor);
+    return protobuf_c_message_get_packed_size(
+        (const ProtobufCMessage *)(message));
+}
+
+size_t
+mingdrlms__v2__room_member__pack(const Mingdrlms__V2__RoomMember *message,
+                                 uint8_t *out) {
+    assert(message->base.descriptor == &mingdrlms__v2__room_member__descriptor);
+    return protobuf_c_message_pack((const ProtobufCMessage *)message, out);
+}
+
+size_t mingdrlms__v2__room_member__unpack(ProtobufCAllocator *allocator,
+                                          size_t len, const uint8_t *data) {
+    return (size_t)protobuf_c_message_unpack(
+        &mingdrlms__v2__room_member__descriptor, allocator, len, data);
+}
+
+void mingdrlms__v2__room_member__free_unpacked(
+    Mingdrlms__V2__RoomMember *message, ProtobufCAllocator *allocator) {
+    if (!message)
+        return;
+    assert(message->base.descriptor == &mingdrlms__v2__room_member__descriptor);
+    protobuf_c_message_free_unpacked((ProtobufCMessage *)message, allocator);
+}
+
+/* RoomMemberListRequest message implementation */
+void mingdrlms__v2__room_member_list_request__init(
+    Mingdrlms__V2__RoomMemberListRequest *message) {
+    static const Mingdrlms__V2__RoomMemberListRequest init_value =
+        MINGDRLMS__V2__ROOM_MEMBER_LIST_REQUEST__INIT;
+    *message = init_value;
+}
+
+size_t mingdrlms__v2__room_member_list_request__get_packed_size(
+    const Mingdrlms__V2__RoomMemberListRequest *message) {
+    assert(message->base.descriptor ==
+           &mingdrlms__v2__room_member_list_request__descriptor);
+    return protobuf_c_message_get_packed_size(
+        (const ProtobufCMessage *)(message));
+}
+
+size_t mingdrlms__v2__room_member_list_request__pack(
+    const Mingdrlms__V2__RoomMemberListRequest *message, uint8_t *out) {
+    assert(message->base.descriptor ==
+           &mingdrlms__v2__room_member_list_request__descriptor);
+    return protobuf_c_message_pack((const ProtobufCMessage *)message, out);
+}
+
+size_t mingdrlms__v2__room_member_list_request__unpack(
+    ProtobufCAllocator *allocator, size_t len, const uint8_t *data) {
+    return (size_t)protobuf_c_message_unpack(
+        &mingdrlms__v2__room_member_list_request__descriptor, allocator, len,
+        data);
+}
+
+void mingdrlms__v2__room_member_list_request__free_unpacked(
+    Mingdrlms__V2__RoomMemberListRequest *message,
+    ProtobufCAllocator *allocator) {
+    if (!message)
+        return;
+    assert(message->base.descriptor ==
+           &mingdrlms__v2__room_member_list_request__descriptor);
+    protobuf_c_message_free_unpacked((ProtobufCMessage *)message, allocator);
+}
+
+/* RoomMemberListResponse message implementation */
+void mingdrlms__v2__room_member_list_response__init(
+    Mingdrlms__V2__RoomMemberListResponse *message) {
+    static const Mingdrlms__V2__RoomMemberListResponse init_value =
+        MINGDRLMS__V2__ROOM_MEMBER_LIST_RESPONSE__INIT;
+    *message = init_value;
+}
+
+size_t mingdrlms__v2__room_member_list_response__get_packed_size(
+    const Mingdrlms__V2__RoomMemberListResponse *message) {
+    assert(message->base.descriptor ==
+           &mingdrlms__v2__room_member_list_response__descriptor);
+    return protobuf_c_message_get_packed_size(
+        (const ProtobufCMessage *)(message));
+}
+
+size_t mingdrlms__v2__room_member_list_response__pack(
+    const Mingdrlms__V2__RoomMemberListResponse *message, uint8_t *out) {
+    assert(message->base.descriptor ==
+           &mingdrlms__v2__room_member_list_response__descriptor);
+    return protobuf_c_message_pack((const ProtobufCMessage *)message, out);
+}
+
+size_t mingdrlms__v2__room_member_list_response__unpack(
+    ProtobufCAllocator *allocator, size_t len, const uint8_t *data) {
+    return (size_t)protobuf_c_message_unpack(
+        &mingdrlms__v2__room_member_list_response__descriptor, allocator, len,
+        data);
+}
+
+void mingdrlms__v2__room_member_list_response__free_unpacked(
+    Mingdrlms__V2__RoomMemberListResponse *message,
+    ProtobufCAllocator *allocator) {
+    if (!message)
+        return;
+    assert(message->base.descriptor ==
+           &mingdrlms__v2__room_member_list_response__descriptor);
+    protobuf_c_message_free_unpacked((ProtobufCMessage *)message, allocator);
+}

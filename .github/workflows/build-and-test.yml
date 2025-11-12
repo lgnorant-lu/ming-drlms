@@ -105,7 +105,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $desiredVersion = "2024.12.01"
+          $desiredVersion = "2024.11"  # 使用存在的版本
           
           if (Test-Path $Env:VCPKG_ROOT) {
             if (-not (Test-Path (Join-Path $Env:VCPKG_ROOT '.git'))) {
