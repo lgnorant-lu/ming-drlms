@@ -57,12 +57,12 @@ C:\tools\vcpkg\bootstrap-vcpkg.bat
   "name": "ming-drlms",
   "version-string": "1.0.0",
   "dependencies": [
-    "sqlite3:x64-windows",
-    "argon2:x64-windows",
-    "openssl:x64-windows",
-    "protobuf-c:x64-windows"
+    "sqlite3",
+    "argon2",
+    "openssl",
+    "protobuf-c"
   ],
-  "builtin-baseline": "2024.12.01"
+  "builtin-baseline": "f012ddcdad91089f118e97033a15a47e4dcd3c0f"
 }
 ```
 
@@ -85,7 +85,7 @@ cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=C:/tools/vcpkg/scripts/buildsystems/v
 手动安装依赖：
 
 ```powershell
-C:\tools\vcpkg\vcpkg install sqlite3:x64-windows argon2:x64-windows openssl:x64-windows protobuf-c:x64-windows
+C:\tools\vcpkg\vcpkg install sqlite3 argon2 openssl protobuf-c --triplet x64-windows
 ```
 
 #### OpenSSL配置 (CFFI构建必需)
