@@ -121,7 +121,7 @@ if(WIN32)
         # Use cmake script mode to avoid shell syntax issues
         COMMAND ${CMAKE_COMMAND}
             -DSIGNAL_LIB_DIR=${SIGNAL_INSTALL_PREFIX}/lib
-            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/CheckWindowsLib.cmake
+            -P ${CMAKE_SOURCE_DIR}/cmake/CheckWindowsLib.cmake
         COMMENT "Ensuring signal-protocol-c.lib is available on Windows"
     )
 endif()
