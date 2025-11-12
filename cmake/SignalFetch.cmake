@@ -49,6 +49,17 @@ set(_signal_cmake_args
     -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=${SIGNAL_INSTALL_PREFIX}/bin
     -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=${SIGNAL_INSTALL_PREFIX}/lib)
 
+# Ensure external project uses same generator/toolchain as main build
+if(CMAKE_GENERATOR)
+    list(APPEND _signal_cmake_args -DCMAKE_GENERATOR=${CMAKE_GENERATOR})
+endif()
+if(CMAKE_GENERATOR_TOOLSET)
+    list(APPEND _signal_cmake_args -DCMAKE_GENERATOR_TOOLSET=${CMAKE_GENERATOR_TOOLSET})
+endif()
+if(CMAKE_GENERATOR_PLATFORM)
+    list(APPEND _signal_cmake_args -DCMAKE_GENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM})
+endif()
+
 # Windows特定配置
 if(WIN32)
     # Windows doesn't need separate math library
@@ -103,9 +114,15 @@ set_target_properties(signal_protocol PROPERTIES
 if(WIN32)
     add_custom_command(TARGET signal_protocol_ext POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory ${SIGNAL_INSTALL_PREFIX}/lib
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${SIGNAL_INSTALL_PREFIX}/lib/libsignal-protocol-c.a"
-            "${SIGNAL_INSTALL_PREFIX}/lib/signal-protocol-c.lib"
+        # Check for correct .lib file, fail if only .a exists (incompatible toolchain)
+        COMMAND if exist "${SIGNAL_INSTALL_PREFIX}/lib/signal-protocol-c.lib" (
+            echo "Found signal-protocol-c.lib - OK"
+        ) else if exist "${SIGNAL_INSTALL_PREFIX}/lib/libsignal-protocol-c.a" (
+            echo "ERROR: Found libsignal-protocol-c.a but no .lib file. This indicates MinGW toolchain output which is incompatible with MSVC. Please ensure the external project uses the same toolchain as the main build." >&2
+            exit 1
+        ) else (
+            echo "WARNING: No static library found for signal-protocol-c" >&2
+        )
         COMMENT "Ensuring signal-protocol-c.lib is available on Windows"
     )
 endif()

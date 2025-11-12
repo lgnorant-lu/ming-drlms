@@ -62,6 +62,26 @@ C:\tools\vcpkg\vcpkg integrate install
 C:\tools\vcpkg\vcpkg install sqlite3:x64-windows argon2:x64-windows openssl:x64-windows
 ```
 
+#### OpenSSL配置 (CFFI构建必需)
+
+Python CFFI在构建signal桥接模块时需要OpenSSL头文件。确保设置以下环境变量：
+
+```powershell
+# 对于vcpkg安装
+$env:OPENSSL_ROOT_DIR = "C:\tools\vcpkg\installed\x64-windows"
+$env:VCPKG_ROOT = "C:\tools\vcpkg"
+
+# 验证配置
+python -c "
+from pathlib import Path
+root = Path(os.environ.get('OPENSSL_ROOT_DIR', ''))
+if (root / 'include' / 'openssl' / 'evp.h').exists():
+    print('OpenSSL headers found')
+else:
+    print('OpenSSL headers missing - check OPENSSL_ROOT_DIR')
+"
+```
+
 若选择 MinGW-w64，请安装对应三方包：
 
 ```bash
@@ -90,6 +110,7 @@ pacman -S mingw-w64-ucrt-x86_64-openssl mingw-w64-ucrt-x86_64-sqlite mingw-w64-u
 | 链接阶段缺少 `ws2_32.lib` | 未显式链接 Winsock | 在 CMakeLists 中添加 `ws2_32`，或确认 vcpkg triplet 是否正确 |
 | Argon2 构建失败 | vcpkg 版本过旧 | 更新 vcpkg：`git pull && bootstrap-vcpkg.bat` |
 | OpenSSL 路径冲突 | 同时存在多个 OpenSSL 版本 | 确保 `PATH` 与 CMake 缓存中仅指向所需版本，清理 `build` 目录后重新配置 |
+| CFFI OpenSSL 头文件缺失 | `openssl/evp.h` 找不到 | 设置 `OPENSSL_ROOT_DIR` 环境变量指向OpenSSL安装目录，确认 `include/openssl/evp.h` 存在 |
 
 ## 6. 下一步
 
