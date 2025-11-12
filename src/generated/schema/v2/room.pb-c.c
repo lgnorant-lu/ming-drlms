@@ -3299,3 +3299,153 @@ void mingdrlms__v2__room_member_list_response__free_unpacked(
            &mingdrlms__v2__room_member_list_response__descriptor);
     protobuf_c_message_free_unpacked((ProtobufCMessage *)message, allocator);
 }
+
+/* Field descriptors for RoomMember message */
+static const ProtobufCFieldDescriptor
+    mingdrlms__v2__room_member__field_descriptors[3] = {
+        {
+            "user_id", 1, PROTOBUF_C_LABEL_NONE, PROTOBUF_C_TYPE_STRING,
+            0, /* quantifier_offset */
+            offsetof(Mingdrlms__V2__RoomMember, user_id), NULL, NULL, 0, NULL,
+            NULL /* reserved1,2,3 */
+        },
+        {
+            "device_id", 2, PROTOBUF_C_LABEL_NONE, PROTOBUF_C_TYPE_UINT32,
+            0, /* quantifier_offset */
+            offsetof(Mingdrlms__V2__RoomMember, device_id), NULL, NULL, 0, NULL,
+            NULL /* reserved1,2,3 */
+        },
+        {
+            "timestamp", 3, PROTOBUF_C_LABEL_NONE, PROTOBUF_C_TYPE_STRING,
+            0, /* quantifier_offset */
+            offsetof(Mingdrlms__V2__RoomMember, timestamp), NULL, NULL, 0, NULL,
+            NULL /* reserved1,2,3 */
+        },
+};
+
+static const unsigned mingdrlms__v2__room_member__field_indices_by_name[] = {
+    1, /* field[1] = device_id */
+    2, /* field[2] = timestamp */
+    0, /* field[0] = user_id */
+};
+
+static const ProtobufCIntRange
+    mingdrlms__v2__room_member__number_ranges[1 + 1] = {{1, 0}, {0, 3}};
+
+const ProtobufCMessageDescriptor mingdrlms__v2__room_member__descriptor = {
+    PROTOBUF_C__MESSAGE_DESCRIPTOR_MAGIC,
+    "mingdrlms.v2.RoomMember",
+    "RoomMember",
+    "Mingdrlms__V2__RoomMember",
+    "mingdrlms.v2",
+    sizeof(Mingdrlms__V2__RoomMember),
+    3,
+    mingdrlms__v2__room_member__field_descriptors,
+    mingdrlms__v2__room_member__field_indices_by_name,
+    1,
+    mingdrlms__v2__room_member__number_ranges,
+    (ProtobufCMessageInit)mingdrlms__v2__room_member__init,
+    NULL,
+    NULL,
+    NULL /* reserved[123] */
+};
+
+/* Field descriptors for RoomMemberListRequest message */
+static const ProtobufCFieldDescriptor
+    mingdrlms__v2__room_member_list_request__field_descriptors[2] = {
+        {
+            "room_name", 1, PROTOBUF_C_LABEL_NONE, PROTOBUF_C_TYPE_STRING,
+            0, /* quantifier_offset */
+            offsetof(Mingdrlms__V2__RoomMemberListRequest, room_name), NULL,
+            NULL, 0, NULL, NULL /* reserved1,2,3 */
+        },
+        {
+            "access_token", 2, PROTOBUF_C_LABEL_NONE, PROTOBUF_C_TYPE_STRING,
+            0, /* quantifier_offset */
+            offsetof(Mingdrlms__V2__RoomMemberListRequest, access_token), NULL,
+            NULL, 0, NULL, NULL /* reserved1,2,3 */
+        },
+};
+
+static const unsigned
+    mingdrlms__v2__room_member_list_request__field_indices_by_name[] = {
+        1, /* field[1] = access_token */
+        0, /* field[0] = room_name */
+};
+
+static const ProtobufCIntRange
+    mingdrlms__v2__room_member_list_request__number_ranges[1 + 1] = {{1, 0},
+                                                                     {0, 2}};
+
+const ProtobufCMessageDescriptor
+    mingdrlms__v2__room_member_list_request__descriptor = {
+        PROTOBUF_C__MESSAGE_DESCRIPTOR_MAGIC,
+        "mingdrlms.v2.RoomMemberListRequest",
+        "RoomMemberListRequest",
+        "Mingdrlms__V2__RoomMemberListRequest",
+        "mingdrlms.v2",
+        sizeof(Mingdrlms__V2__RoomMemberListRequest),
+        2,
+        mingdrlms__v2__room_member_list_request__field_descriptors,
+        mingdrlms__v2__room_member_list_request__field_indices_by_name,
+        1,
+        mingdrlms__v2__room_member_list_request__number_ranges,
+        (ProtobufCMessageInit)mingdrlms__v2__room_member_list_request__init,
+        NULL,
+        NULL,
+        NULL /* reserved[123] */
+};
+
+/* Field descriptors for RoomMemberListResponse message */
+static const ProtobufCFieldDescriptor
+    mingdrlms__v2__room_member_list_response__field_descriptors[3] = {
+        {
+            "room_name", 1, PROTOBUF_C_LABEL_NONE, PROTOBUF_C_TYPE_STRING,
+            0, /* quantifier_offset */
+            offsetof(Mingdrlms__V2__RoomMemberListResponse, room_name), NULL,
+            NULL, 0, NULL, NULL /* reserved1,2,3 */
+        },
+        {
+            "members", 2, PROTOBUF_C_LABEL_REPEATED, PROTOBUF_C_TYPE_MESSAGE,
+            offsetof(Mingdrlms__V2__RoomMemberListResponse, n_members),
+            offsetof(Mingdrlms__V2__RoomMemberListResponse, members),
+            &mingdrlms__v2__room_member__descriptor, NULL, 0, NULL,
+            NULL /* reserved1,2,3 */
+        },
+        {
+            "total", 3, PROTOBUF_C_LABEL_NONE, PROTOBUF_C_TYPE_UINT64,
+            0, /* quantifier_offset */
+            offsetof(Mingdrlms__V2__RoomMemberListResponse, total), NULL, NULL,
+            0, NULL, NULL /* reserved1,2,3 */
+        },
+};
+
+static const unsigned
+    mingdrlms__v2__room_member_list_response__field_indices_by_name[] = {
+        1, /* field[1] = members */
+        0, /* field[0] = room_name */
+        2, /* field[2] = total */
+};
+
+static const ProtobufCIntRange
+    mingdrlms__v2__room_member_list_response__number_ranges[1 + 1] = {{1, 0},
+                                                                      {0, 3}};
+
+const ProtobufCMessageDescriptor
+    mingdrlms__v2__room_member_list_response__descriptor = {
+        PROTOBUF_C__MESSAGE_DESCRIPTOR_MAGIC,
+        "mingdrlms.v2.RoomMemberListResponse",
+        "RoomMemberListResponse",
+        "Mingdrlms__V2__RoomMemberListResponse",
+        "mingdrlms.v2",
+        sizeof(Mingdrlms__V2__RoomMemberListResponse),
+        3,
+        mingdrlms__v2__room_member_list_response__field_descriptors,
+        mingdrlms__v2__room_member_list_response__field_indices_by_name,
+        1,
+        mingdrlms__v2__room_member_list_response__number_ranges,
+        (ProtobufCMessageInit)mingdrlms__v2__room_member_list_response__init,
+        NULL,
+        NULL,
+        NULL /* reserved[123] */
+};

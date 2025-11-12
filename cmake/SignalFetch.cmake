@@ -84,6 +84,7 @@ file(MAKE_DIRECTORY "${SIGNAL_INSTALL_PREFIX}/bin")
 
 # 根据平台设置库文件名（静态库）
 if(WIN32)
+    # Windows静态库通常命名为.lib，但CMake可能生成.a
     set(_signal_lib_name "signal-protocol-c.lib")
 elseif(APPLE)
     set(_signal_lib_name "libsignal-protocol-c.a")
@@ -97,6 +98,19 @@ add_dependencies(signal_protocol signal_protocol_ext)
 set_target_properties(signal_protocol PROPERTIES
     IMPORTED_LOCATION ${_signal_lib_path}
     INTERFACE_INCLUDE_DIRECTORIES "${SIGNAL_INSTALL_PREFIX}/include")
+
+# Windows下确保静态库可用
+if(WIN32)
+    add_custom_command(TARGET signal_protocol_ext POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${SIGNAL_INSTALL_PREFIX}/lib
+        COMMAND if exist "${SIGNAL_INSTALL_PREFIX}/lib/libsignal-protocol-c.a" (
+            ${CMAKE_COMMAND} -E copy_if_different "${SIGNAL_INSTALL_PREFIX}/lib/libsignal-protocol-c.a" "${SIGNAL_INSTALL_PREFIX}/lib/signal-protocol-c.lib"
+        ) else (
+            echo "Checking for signal-protocol-c.lib..."
+        )
+        COMMENT "Ensuring signal-protocol-c.lib is available on Windows"
+    )
+endif()
 
 add_library(Signal::protocol ALIAS signal_protocol)
 

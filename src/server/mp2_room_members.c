@@ -18,12 +18,13 @@ M-Proto-v2 Room Member List API implementation
 #include "generated/schema/v2/room.pb-c.h"
 #endif
 
-// Define message type constant if not available
+// Define message type constants for error responses (used in fallback code)
+#ifndef MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ERROR_RESPONSE
+#define MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ERROR_RESPONSE 500
+#endif
+
 #ifndef MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ROOM_MEMBER_LIST_RESPONSE
 #define MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ROOM_MEMBER_LIST_RESPONSE 505
-#endif
-#ifndef MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ERROR_RESPONSE
-#define MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ERROR_RESPONSE 400
 #endif
 
 /**
@@ -105,8 +106,9 @@ void mp2_room_members_handle_list_request(platform_socket_t fd,
                                           const mp2_frame_t *frame) {
 #ifdef HAVE_PROTOBUF_C
     Mingdrlms__V2__RoomMemberListRequest *req =
-        mingdrlms__v2__room_member_list_request__unpack(
-            NULL, frame->payload_len, frame->payload);
+        (Mingdrlms__V2__RoomMemberListRequest *)
+            mingdrlms__v2__room_member_list_request__unpack(
+                NULL, frame->payload_len, frame->payload);
 
     if (!req || !req->room_name || !req->access_token) {
         if (req) {
