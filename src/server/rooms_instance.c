@@ -12,6 +12,11 @@
 #include "rooms_gc.h"
 #include "mp2_protocol.h"
 #include "mp2_room_members.h"
+
+#ifdef HAVE_PROTOBUF_C
+#include "generated/schema/v2/room.pb-c.h"
+#include "generated/schema/v2/common.pb-c.h"
+#endif
 extern int rooms_is_sqlite_enabled(void);
 extern SQLiteStorage *rooms_get_sqlite_storage(void);
 extern void room_update_aggregates_locked(Room *room);
@@ -30,35 +35,73 @@ rooms_instance_broadcast_presence_event(Room *room, const char *username,
         return;
     }
 
-    // Only broadcast for room events if this is a room instance (not a specific
-    // instance) We need to broadcast to all instances of this room
+#ifdef HAVE_PROTOBUF_C
+    // Create proper RoomEvent with standard Protobuf format
+    Mingdrlms__V2__RoomEvent event = MINGDRLMS__V2__ROOM_EVENT__INIT;
+    static char room_name_buffer[256];
+
+    snprintf(room_name_buffer, sizeof(room_name_buffer), "%s", room->name);
+    event.room_name = room_name_buffer;
+    event.event_id = time(NULL); // Use timestamp as event ID
+    event.kind = (event_kind == 2)
+                     ? MINGDRLMS__V2__ROOM_EVENT_KIND__MEMBER_JOINED
+                     : MINGDRLMS__V2__ROOM_EVENT_KIND__MEMBER_LEFT;
+
+    // Create content with user information
+    static char content_buffer[512];
+    static char timestamp[32];
+
+    time_t now = time(NULL);
+    struct tm *tm_info = gmtime(&now);
+    strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ", tm_info);
+
+    snprintf(content_buffer, sizeof(content_buffer),
+             "{\"user\": \"%s\", \"timestamp\": \"%s\"}", username, timestamp);
+    event.content = content_buffer;
+
+    // Pack the event
+    size_t event_size = mingdrlms__v2__room_event__get_packed_size(&event);
+    unsigned char *event_data = (unsigned char *)malloc(event_size);
+    if (!event_data) {
+        return;
+    }
+
+    mingdrlms__v2__room_event__pack(&event, event_data);
+
+    // Broadcast to all subscribers
     for (RoomInstance *inst = room->instances; inst; inst = inst->next) {
-        // Create presence event payload (simplified - would need proper
-        // protobuf in real implementation)
-        static char event_buffer[256];
-        static char timestamp[32];
-
-        // Create timestamp
-        time_t now = time(NULL);
-        struct tm *tm_info = gmtime(&now);
-        strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ", tm_info);
-
-        // Format presence event (this is a simplified format)
-        // In a real implementation, this would be a proper protobuf RoomEvent
-        // with kind=MEMBER_JOINED/LEFT
-        snprintf(event_buffer, sizeof(event_buffer),
-                 "{\"event_type\": \"presence\", \"user\": \"%s\", \"action\": "
-                 "\"%s\", \"timestamp\": \"%s\"}",
-                 username, event_kind == 2 ? "joined" : "left", timestamp);
-
-        // Broadcast to all subscribers in this instance
         platform_mutex_lock(&inst->mu);
         for (size_t i = 0; i < inst->subs_len; ++i) {
             Subscriber *sub = &inst->subs[i];
             if (sub->fd != PLATFORM_INVALID_SOCKET) {
-                // Send the presence event as a text message
-                // In the real implementation, this would be a proper RoomEvent
-                // with the new MEMBER_JOINED/LEFT kind
+                mp2_protocol_send_frame(
+                    sub->fd, MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ROOM_EVENT,
+                    event_data, (uint32_t)event_size);
+            }
+        }
+        platform_mutex_unlock(&inst->mu);
+    }
+
+    free(event_data);
+#else
+    // Fallback to simple format when protobuf-c is not available
+    static char event_buffer[512];
+    static char timestamp[32];
+
+    time_t now = time(NULL);
+    struct tm *tm_info = gmtime(&now);
+    strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ", tm_info);
+
+    snprintf(event_buffer, sizeof(event_buffer),
+             "{\"event_type\": \"presence\", \"user\": \"%s\", \"action\": "
+             "\"%s\", \"timestamp\": \"%s\"}",
+             username, event_kind == 2 ? "joined" : "left", timestamp);
+
+    for (RoomInstance *inst = room->instances; inst; inst = inst->next) {
+        platform_mutex_lock(&inst->mu);
+        for (size_t i = 0; i < inst->subs_len; ++i) {
+            Subscriber *sub = &inst->subs[i];
+            if (sub->fd != PLATFORM_INVALID_SOCKET) {
                 mp2_protocol_send_frame(
                     sub->fd, MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ROOM_EVENT,
                     (unsigned char *)event_buffer, strlen(event_buffer));
@@ -66,6 +109,7 @@ rooms_instance_broadcast_presence_event(Room *room, const char *username,
         }
         platform_mutex_unlock(&inst->mu);
     }
+#endif
 }
 
 void rooms_clear_all_subscribers(Room *room, int close_fds) {
