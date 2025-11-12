@@ -242,6 +242,28 @@ def load_bridge() -> Tuple[FFI, object]:
         include_dirs.append(str(openssl_include))
 
     link_args = _build_link_args(lib_path, openssl_lib)
+
+    # Try multiple DLL locations for CI compatibility
+    if os.name == "nt":
+        # For CI environments, try loading from build directory first
+        root = Path(__file__).resolve().parents[3]
+        build_root = root / "build"
+        bin_candidates = [
+            build_root / "_deps" / "signal-install" / "bin",
+            build_root / "RelWithDebInfo",
+            build_root / "Debug",
+            build_root,
+        ]
+
+        for bin_dir in bin_candidates:
+            dll_path = bin_dir / "signal-protocol-c.dll"
+            if dll_path.exists():
+                # Update library path to include DLL directory
+                lib_dirs = link_args.setdefault("library_dirs", [])
+                if str(bin_dir) not in lib_dirs:
+                    lib_dirs.append(str(bin_dir))
+                break
+
     try:
         module = ffi.verify(
             _C_SOURCE,
@@ -332,6 +354,11 @@ def _build_link_args(lib_path: Path, openssl_lib: Optional[Path] = None) -> dict
             libs = link_args.setdefault("libraries", [])
             if "signal-protocol-c" not in libs:
                 libs.append("signal-protocol-c")
+
+            # For Windows DLLs, also ensure bin directory is in library path
+            bin_dir = lib_path.parent.parent / "bin"
+            if bin_dir.exists() and str(bin_dir) not in lib_dirs:
+                lib_dirs.append(str(bin_dir))
         else:
             # For LIB files, use as extra_objects (existing behavior)
             link_args["extra_objects"] = [str(lib_path)]

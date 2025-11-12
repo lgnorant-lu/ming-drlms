@@ -74,14 +74,40 @@ ExternalProject_Add(signal_protocol_ext
     LOG_BUILD ON
     LOG_INSTALL ON)
 
+# For Windows, ensure both DLL and LIB files are installed to correct directories
+if(WIN32)
+    # After the external project install, move/copy DLL to bin directory
+    add_custom_command(TARGET signal_protocol_ext POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${SIGNAL_INSTALL_PREFIX}/bin
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different 
+            ${SIGNAL_INSTALL_PREFIX}/lib/signal-protocol-c.dll 
+            ${SIGNAL_INSTALL_PREFIX}/bin/signal-protocol-c.dll
+        COMMENT "Installing signal-protocol-c.dll to bin directory"
+    )
+endif()
+
 file(MAKE_DIRECTORY "${SIGNAL_INSTALL_PREFIX}/include")
 file(MAKE_DIRECTORY "${SIGNAL_INSTALL_PREFIX}/lib")
+file(MAKE_DIRECTORY "${SIGNAL_INSTALL_PREFIX}/bin")
 
-set(_signal_static_lib "${SIGNAL_INSTALL_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}signal-protocol-c${CMAKE_STATIC_LIBRARY_SUFFIX}")
+# Choose the correct library based on platform and build type
+if(WIN32)
+    # For Windows shared builds, the DLL goes to bin/ and LIB to lib/
+    if(BUILD_SHARED_LIBS)
+        set(_signal_lib_name "signal-protocol-c.lib")
+    else()
+        set(_signal_lib_name "${CMAKE_STATIC_LIBRARY_PREFIX}signal-protocol-c${CMAKE_STATIC_LIBRARY_SUFFIX}")
+    endif()
+else()
+    # For Unix-like systems
+    set(_signal_lib_name "${CMAKE_SHARED_LIBRARY_PREFIX}signal-protocol-c${CMAKE_SHARED_LIBRARY_SUFFIX}")
+endif()
+
+set(_signal_lib_path "${SIGNAL_INSTALL_PREFIX}/lib/${_signal_lib_name}")
 add_library(signal_protocol STATIC IMPORTED GLOBAL)
 add_dependencies(signal_protocol signal_protocol_ext)
 set_target_properties(signal_protocol PROPERTIES
-    IMPORTED_LOCATION ${_signal_static_lib}
+    IMPORTED_LOCATION ${_signal_lib_path}
     INTERFACE_INCLUDE_DIRECTORIES "${SIGNAL_INSTALL_PREFIX}/include")
 
 add_library(Signal::protocol ALIAS signal_protocol)
