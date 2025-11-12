@@ -44,15 +44,13 @@ set(_signal_cmake_args
     -DCMAKE_INSTALL_PREFIX=${SIGNAL_INSTALL_PREFIX}
     -DBUILD_TESTING=OFF
     -DCOVERAGE=OFF
-    -DCMAKE_POSITION_INDEPENDENT_CODE=ON)
+    -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+    -DBUILD_SHARED_LIBS=ON)  # 统一使用共享库
 
-# Windows builds should use shared libraries for CFFI compatibility
+# Windows特定配置
 if(WIN32)
-    list(APPEND _signal_cmake_args -DBUILD_SHARED_LIBS=ON)
     # Windows doesn't need separate math library
     list(APPEND _signal_cmake_args -DM_LIB="")
-else()
-    list(APPEND _signal_cmake_args -DBUILD_SHARED_LIBS=OFF)
 endif()
 
 if(NOT CMAKE_CONFIGURATION_TYPES)
@@ -80,8 +78,8 @@ if(WIN32)
     add_custom_command(TARGET signal_protocol_ext POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory ${SIGNAL_INSTALL_PREFIX}/bin
         COMMAND ${CMAKE_COMMAND} -E copy_if_different 
-            ${SIGNAL_INSTALL_PREFIX}/lib/signal-protocol-c.dll 
-            ${SIGNAL_INSTALL_PREFIX}/bin/signal-protocol-c.dll
+            ${SIGNAL_INSTALL_PREFIX}/lib/${_signal_dll_name}
+            ${SIGNAL_INSTALL_PREFIX}/bin/${_signal_dll_name}
         COMMENT "Installing signal-protocol-c.dll to bin directory"
     )
 endif()
@@ -90,17 +88,17 @@ file(MAKE_DIRECTORY "${SIGNAL_INSTALL_PREFIX}/include")
 file(MAKE_DIRECTORY "${SIGNAL_INSTALL_PREFIX}/lib")
 file(MAKE_DIRECTORY "${SIGNAL_INSTALL_PREFIX}/bin")
 
-# Choose the correct library based on platform and build type
+# 根据平台设置库文件名
 if(WIN32)
-    # For Windows shared builds, the DLL goes to bin/ and LIB to lib/
-    if(BUILD_SHARED_LIBS)
-        set(_signal_lib_name "signal-protocol-c.lib")
-    else()
-        set(_signal_lib_name "${CMAKE_STATIC_LIBRARY_PREFIX}signal-protocol-c${CMAKE_STATIC_LIBRARY_SUFFIX}")
-    endif()
+    set(_signal_lib_name "signal-protocol-c.lib")
+    set(_signal_dll_name "signal-protocol-c.dll")
+elseif(APPLE)
+    set(_signal_lib_name "libsignal-protocol-c.dylib")
+    set(_signal_dll_name "libsignal-protocol-c.dylib")
 else()
-    # For Unix-like systems
-    set(_signal_lib_name "${CMAKE_SHARED_LIBRARY_PREFIX}signal-protocol-c${CMAKE_SHARED_LIBRARY_SUFFIX}")
+    # Linux和其他Unix系统
+    set(_signal_lib_name "libsignal-protocol-c.so")
+    set(_signal_dll_name "libsignal-protocol-c.so")
 endif()
 
 set(_signal_lib_path "${SIGNAL_INSTALL_PREFIX}/lib/${_signal_lib_name}")

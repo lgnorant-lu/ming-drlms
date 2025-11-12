@@ -69,6 +69,13 @@ src/ming_drlms/_version.py
 src/ming_drlms/bin/
 
 # ==================================
+# Package Managers
+# ==================================
+vcpkg.json
+vcpkg/
+vcpkg-cache/
+
+# ==================================
 # Runtime Data & Logs
 # ==================================
 /artifacts/

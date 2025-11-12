@@ -94,8 +94,10 @@ jobs:
           path: |
             ${{ env.VCPKG_ROOT }}
             ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
-          key: ${{ runner.os }}-vcpkg-${{ hashFiles('.github/workflows/build-and-test.yml', '.github/vcpkg-windows-ports.txt') }}
+          key: |
+            ${{ runner.os }}-vcpkg-v2024.12.01-${{ hashFiles('.github/workflows/build-and-test.yml', '.github/vcpkg-windows-ports.txt') }}
           restore-keys: |
+            ${{ runner.os }}-vcpkg-v2024.12.01-
             ${{ runner.os }}-vcpkg-
 
       - name: Bootstrap vcpkg (Windows)
@@ -103,17 +105,30 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          $desiredVersion = "2024.12.01"
+          
           if (Test-Path $Env:VCPKG_ROOT) {
             if (-not (Test-Path (Join-Path $Env:VCPKG_ROOT '.git'))) {
               Remove-Item $Env:VCPKG_ROOT -Recurse -Force
             }
           }
+          
           if (-not (Test-Path $Env:VCPKG_ROOT)) {
-            git clone https://github.com/microsoft/vcpkg.git $Env:VCPKG_ROOT
+            Write-Host "Cloning vcpkg version $desiredVersion..."
+            git clone --depth 1 --branch $desiredVersion https://github.com/microsoft/vcpkg.git $Env:VCPKG_ROOT
           } else {
-            git -C $Env:VCPKG_ROOT pull
+            Write-Host "Checking vcpkg version..."
+            cd $Env:VCPKG_ROOT
+            $currentTag = git describe --tags --abbrev=0 2>$null
+            if ($currentTag -ne "v$desiredVersion") {
+              Write-Host "Updating vcpkg from $currentTag to v$desiredVersion..."
+              git fetch --depth 1 origin tag "v$desiredVersion"
+              git checkout "v$desiredVersion"
+            }
           }
+          
           & (Join-Path $Env:VCPKG_ROOT 'bootstrap-vcpkg.bat')
+          Write-Host "vcpkg version: $(& $Env:VCPKG_ROOT\vcpkg.exe version)"
 
       - name: Install vcpkg dependencies (Windows)
         if: matrix.os == 'windows-latest'
@@ -131,9 +146,16 @@ jobs:
           if (-not $ports) {
             throw "vcpkg ports list is empty"
           }
+          
+          Write-Host "Installing dependencies with parallel builds..."
           $env:VCPKG_FEATURE_FLAGS = 'binarycaching'
           $env:VCPKG_BINARY_SOURCES = $Env:VCPKG_BINARY_SOURCES
-          & "$Env:VCPKG_ROOT\vcpkg.exe" install $ports --clean-after-build
+          
+          # Use parallel builds with optimized settings
+          & "$Env:VCPKG_ROOT\vcpkg.exe" install $ports --triplet x64-windows --x-manifest-root=$Env:GITHUB_WORKSPACE --recurse --verbose
+          
+          Write-Host "Installed packages:"
+          & "$Env:VCPKG_ROOT\vcpkg.exe" list
 
       - name: Install Python dependencies
         run: |
