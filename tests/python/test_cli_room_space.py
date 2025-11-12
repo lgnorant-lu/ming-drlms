@@ -799,8 +799,14 @@ def test_room_service_publish_behavior() -> None:
         @contextmanager
         def _ctx():
             class DummyClient:
-                def publish(self, user, room_name, payload, ephemeral):
-                    recordings["call"] = (user, room_name, payload, ephemeral)
+                def publish(self, user, room_name, payload, ephemeral, **extra):
+                    recordings["call"] = (
+                        user,
+                        room_name,
+                        payload,
+                        ephemeral,
+                        extra.get("encrypted_payload"),
+                    )
 
             yield DummyClient()
 

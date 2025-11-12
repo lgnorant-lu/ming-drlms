@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import Callable, Iterator, List, Optional
 
 from ming_drlms.core.mproto_v2_client import (
@@ -9,6 +10,9 @@ from ming_drlms.core.mproto_v2_client import (
     MP2Error,
     RoomEvent,
 )
+from ming_drlms.core.pysignal import SignalBridgeError
+from ming_drlms.core.e2ee_store import LocalKeyStore
+from ming_drlms.core.e2ee_runtime import E2EEngine, proto_type_from_lib
 
 from ..mproto_runtime import create_mp2_client
 from ..utils import tcp_connect, recv_line, login
@@ -72,16 +76,47 @@ class RoomService:
         since_id: int,
         token_store: Optional[object],
         timeout: float,
+        e2ee_peer: Optional[str] = None,
+        e2ee_store: Optional[Path | str] = None,
     ) -> Iterator[RoomEvent]:
         try:
+            key_store = self._build_key_store(e2ee_store) if e2ee_peer else None
             with self._client_factory(
                 host,
                 port,
                 timeout=timeout,
                 token_store_path=token_store,
             ) as client:
-                for event in client.subscribe(user, room, since_id=since_id):
-                    yield event
+                engine = None
+                if e2ee_peer:
+                    if key_store is None:
+                        raise RoomServiceError("未配置密钥仓库路径")
+                    try:
+                        engine = E2EEngine(
+                            username=user,
+                            key_store=key_store,
+                            mp2_client=client,
+                        )
+                    except SignalBridgeError as exc:
+                        raise RoomServiceError(str(exc)) from exc
+                try:
+                    for event in client.subscribe(user, room, since_id=since_id):
+                        if engine is not None:
+                            try:
+                                result = engine.decrypt(event)
+                            except SignalBridgeError as exc:
+                                raise RoomServiceError(f"E2EE 解密失败: {exc}") from exc
+                            event = replace(
+                                event,
+                                payload=result.plaintext,
+                                payload_type=proto_type_from_lib(
+                                    result.info.message_type
+                                ),
+                            )
+                        yield event
+                finally:
+                    if engine is not None:
+                        engine.close()
         except (AuthenticationError, MP2Error, OSError) as exc:
             raise RoomServiceError(str(exc)) from exc
 
@@ -96,15 +131,44 @@ class RoomService:
         ephemeral: bool,
         token_store: Optional[object],
         timeout: float,
+        e2ee_peer: Optional[str] = None,
+        e2ee_store: Optional[Path | str] = None,
     ) -> PublishResult:
         try:
+            key_store = self._build_key_store(e2ee_store) if e2ee_peer else None
             with self._client_factory(
                 host,
                 port,
                 timeout=timeout,
                 token_store_path=token_store,
             ) as client:
-                client.publish(user, room, payload, ephemeral=ephemeral)
+                engine = None
+                ciphertext = payload
+                encrypted_proto = None
+                if e2ee_peer:
+                    if key_store is None:
+                        raise RoomServiceError("未配置密钥仓库路径")
+                    try:
+                        engine = E2EEngine(
+                            username=user,
+                            key_store=key_store,
+                            mp2_client=client,
+                        )
+                        encrypted_proto = engine.encrypt(e2ee_peer, payload)
+                        ciphertext = bytes(encrypted_proto.ciphertext)
+                    except SignalBridgeError as exc:
+                        raise RoomServiceError(str(exc)) from exc
+                try:
+                    client.publish(
+                        user,
+                        room,
+                        ciphertext,
+                        ephemeral=ephemeral,
+                        encrypted_payload=encrypted_proto,
+                    )
+                finally:
+                    if engine is not None:
+                        engine.close()
         except (AuthenticationError, MP2Error, OSError) as exc:
             raise RoomServiceError(str(exc)) from exc
         return PublishResult(bytes_sent=len(payload), ephemeral=ephemeral)
@@ -174,6 +238,16 @@ class RoomService:
                 raise RoomServiceError("ROOMINFO not returned")
             room_name, details = self._parse_roominfo(info_payload)
             return RoomInfo(name=room_name, details=details, raw=raw_lines)
+
+    @staticmethod
+    def _build_key_store(path: Optional[Path | str]) -> LocalKeyStore:
+        if path is None:
+            return LocalKeyStore()
+        if isinstance(path, Path):
+            resolved = path.expanduser()
+        else:
+            resolved = Path(path).expanduser()
+        return LocalKeyStore(resolved)
 
     def create_room(
         self,

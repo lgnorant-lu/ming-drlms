@@ -5,6 +5,8 @@ M-Proto-v2 Phase 3 Room Operations Test Script
 Tests authenticated room subscription and publishing operations.
 """
 
+__test__ = False
+
 import socket
 import struct
 import hashlib

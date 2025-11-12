@@ -45,6 +45,100 @@ static void send_generate_keys_response(platform_socket_t fd, int code,
     free(buf);
 }
 
+static void send_generate_keys_response_full(
+    platform_socket_t fd, uint32_t registration_id, uint32_t device_id,
+    const unsigned char *identity_public, size_t identity_public_len,
+    const unsigned char *identity_private, size_t identity_private_len,
+    const SQLiteE2EEPreKey *pre_keys, size_t pre_key_count,
+    uint32_t signed_pre_key_id, const unsigned char *signed_public,
+    size_t signed_public_len, const unsigned char *signed_private,
+    size_t signed_private_len, const unsigned char *signature,
+    size_t signature_len, uint64_t timestamp) {
+    Mingdrlms__V2__E2EEGenerateKeysResponse resp =
+        MINGDRLMS__V2__E2_EEGENERATE_KEYS_RESPONSE__INIT;
+    resp.code = 0;
+    resp.message = "ok";
+    resp.registration_id = registration_id;
+    resp.pre_key_count = (uint32_t)pre_key_count;
+    resp.device_id = device_id;
+
+    Mingdrlms__V2__SignalKeyPair identity_pair =
+        MINGDRLMS__V2__SIGNAL_KEY_PAIR__INIT;
+    identity_pair.public_key.data = (uint8_t *)identity_public;
+    identity_pair.public_key.len = identity_public_len;
+    identity_pair.private_key.data = (uint8_t *)identity_private;
+    identity_pair.private_key.len = identity_private_len;
+    resp.identity_key = &identity_pair;
+
+    Mingdrlms__V2__SignalSignedPreKey signed_pre_key_msg =
+        MINGDRLMS__V2__SIGNAL_SIGNED_PRE_KEY__INIT;
+    Mingdrlms__V2__SignalKeyPair signed_pair =
+        MINGDRLMS__V2__SIGNAL_KEY_PAIR__INIT;
+    signed_pair.public_key.data = (uint8_t *)signed_public;
+    signed_pair.public_key.len = signed_public_len;
+    signed_pair.private_key.data = (uint8_t *)signed_private;
+    signed_pair.private_key.len = signed_private_len;
+    signed_pre_key_msg.id = signed_pre_key_id;
+    signed_pre_key_msg.key = &signed_pair;
+    signed_pre_key_msg.signature.data = (uint8_t *)signature;
+    signed_pre_key_msg.signature.len = signature_len;
+    signed_pre_key_msg.timestamp = timestamp;
+    resp.signed_pre_key = &signed_pre_key_msg;
+
+    Mingdrlms__V2__SignalPreKey *pre_key_objs = NULL;
+    Mingdrlms__V2__SignalKeyPair *pre_key_pairs = NULL;
+    Mingdrlms__V2__SignalPreKey **pre_key_ptrs = NULL;
+
+    if (pre_key_count > 0) {
+        pre_key_objs = (Mingdrlms__V2__SignalPreKey *)calloc(
+            pre_key_count, sizeof(*pre_key_objs));
+        pre_key_pairs = (Mingdrlms__V2__SignalKeyPair *)calloc(
+            pre_key_count, sizeof(*pre_key_pairs));
+        pre_key_ptrs = (Mingdrlms__V2__SignalPreKey **)calloc(
+            pre_key_count, sizeof(*pre_key_ptrs));
+        if (!pre_key_objs || !pre_key_pairs || !pre_key_ptrs) {
+            free(pre_key_objs);
+            free(pre_key_pairs);
+            free(pre_key_ptrs);
+            send_generate_keys_response(fd, 500, "response allocation failed",
+                                        0, 0);
+            return;
+        }
+        for (size_t i = 0; i < pre_key_count; ++i) {
+            mingdrlms__v2__signal_pre_key__init(&pre_key_objs[i]);
+            mingdrlms__v2__signal_key_pair__init(&pre_key_pairs[i]);
+            pre_key_objs[i].id = pre_keys[i].pre_key_id;
+            pre_key_objs[i].key = &pre_key_pairs[i];
+            pre_key_pairs[i].public_key.data = pre_keys[i].public_key;
+            pre_key_pairs[i].public_key.len = pre_keys[i].public_key_len;
+            pre_key_pairs[i].private_key.data = pre_keys[i].private_key;
+            pre_key_pairs[i].private_key.len = pre_keys[i].private_key_len;
+            pre_key_ptrs[i] = &pre_key_objs[i];
+        }
+        resp.n_pre_keys = pre_key_count;
+        resp.pre_keys = pre_key_ptrs;
+    }
+
+    size_t packed =
+        mingdrlms__v2__e2_eegenerate_keys_response__get_packed_size(&resp);
+    unsigned char *buf = (unsigned char *)malloc(packed);
+    if (buf) {
+        mingdrlms__v2__e2_eegenerate_keys_response__pack(&resp, buf);
+        (void)mp2_protocol_send_frame(
+            fd,
+            MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_E2EE_GENERATE_KEYS_RESPONSE,
+            buf, (uint32_t)packed);
+        free(buf);
+    } else {
+        send_generate_keys_response(fd, 500, "response allocation failed", 0,
+                                    0);
+    }
+
+    free(pre_key_ptrs);
+    free(pre_key_pairs);
+    free(pre_key_objs);
+}
+
 static void send_prekey_bundle_response(platform_socket_t fd, int code,
                                         const char *message,
                                         const SQLiteE2EEPreKeyBundle *bundle) {
@@ -290,12 +384,13 @@ int mp2_e2ee_handle_generate_keys(platform_socket_t fd, const uint8_t *payload,
     }
     signal_buffer *signature_buf =
         session_signed_pre_key_get_signature(signed_pre_key);
+    size_t signature_len = signal_buffer_len(signature_buf);
     signed_pub_copy = dup_buffer(signal_buffer_data(signed_pub_buf),
                                  signal_buffer_len(signed_pub_buf));
     signed_priv_copy = dup_buffer(signal_buffer_data(signed_priv_buf),
                                   signal_buffer_len(signed_priv_buf));
-    signature_copy = dup_buffer(signal_buffer_data(signature_buf),
-                                signal_buffer_len(signature_buf));
+    signature_copy =
+        dup_buffer(signal_buffer_data(signature_buf), signature_len);
     signal_buffer_free(signature_buf);
     signature_buf = NULL;
     if (!signed_pub_copy || !signed_priv_copy || !signature_copy) {
@@ -322,15 +417,21 @@ int mp2_e2ee_handle_generate_keys(platform_socket_t fd, const uint8_t *payload,
             storage, req->user_name, E2EE_DEVICE_ID,
             session_signed_pre_key_get_id(signed_pre_key), signed_pub_copy,
             signal_buffer_len(signed_pub_buf), signed_priv_copy,
-            signal_buffer_len(signed_priv_buf), signature_copy,
-            signal_buffer_len(signature_buf), timestamp) != 0) {
+            signal_buffer_len(signed_priv_buf), signature_copy, signature_len,
+            timestamp) != 0) {
         send_generate_keys_response(fd, 500, "store signed pre-key failed", 0,
                                     0);
         goto cleanup_pre_keys;
     }
 
-    send_generate_keys_response(fd, 0, "ok", registration_id,
-                                (uint32_t)pre_key_count);
+    send_generate_keys_response_full(
+        fd, registration_id, E2EE_DEVICE_ID, identity_public_copy,
+        signal_buffer_len(identity_public_buf), identity_private_copy,
+        signal_buffer_len(identity_private_buf), pre_keys, pre_key_count,
+        session_signed_pre_key_get_id(signed_pre_key), signed_pub_copy,
+        signal_buffer_len(signed_pub_buf), signed_priv_copy,
+        signal_buffer_len(signed_priv_buf), signature_copy, signature_len,
+        timestamp);
 
 cleanup_pre_keys:
     for (size_t i = 0; i < pre_key_count; ++i) {

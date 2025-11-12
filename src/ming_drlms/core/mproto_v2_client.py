@@ -59,6 +59,31 @@ class RoomEvent:
     timestamp: str | None = None
     file: RoomFileMeta | None = None
     payload_type: int | None = None
+    sender: str | None = None
+    sender_device_id: int | None = None
+    sender_registration_id: int | None = None
+    pre_key_id: int | None = None
+    signed_pre_key_id: int | None = None
+
+
+@dataclass(slots=True)
+class SignalKeyPair:
+    public_key: bytes
+    private_key: bytes
+
+
+@dataclass(slots=True)
+class SignalPreKey:
+    id: int
+    key: SignalKeyPair
+
+
+@dataclass(slots=True)
+class SignalSignedPreKey:
+    id: int
+    key: SignalKeyPair
+    signature: bytes
+    timestamp: int
 
 
 @dataclass(slots=True)
@@ -67,6 +92,10 @@ class E2EEGenerateKeysResult:
     message: str
     registration_id: int
     pre_key_count: int
+    device_id: int
+    identity_key: SignalKeyPair | None
+    signed_pre_key: SignalSignedPreKey | None
+    pre_keys: tuple[SignalPreKey, ...]
 
 
 @dataclass(slots=True)
@@ -249,6 +278,7 @@ class MP2Client:
         payload: bytes,
         *,
         ephemeral: bool = False,
+        encrypted_payload: Optional[room_pb2.SignalEncryptedPayload] = None,
     ) -> None:
         record = self.ensure_access_token(username)
         self.connect()
@@ -257,10 +287,20 @@ class MP2Client:
         req = room_pb2.RoomPublishRequest()
         req.room_name = room_name
         req.access_token = record.access_token
-        payload_msg = room_pb2.SignalEncryptedPayload()
-        payload_msg.type = room_pb2.SignalCiphertextType.SIGNAL_CIPHERTEXT_TYPE_MESSAGE
-        payload_msg.ciphertext = payload
-        payload_msg.sender = username
+        if encrypted_payload is None:
+            payload_msg = room_pb2.SignalEncryptedPayload()
+            payload_msg.type = (
+                room_pb2.SignalCiphertextType.SIGNAL_CIPHERTEXT_TYPE_MESSAGE
+            )
+            payload_msg.ciphertext = payload
+            payload_msg.sender = username
+        else:
+            payload_msg = room_pb2.SignalEncryptedPayload()
+            payload_msg.CopyFrom(encrypted_payload)
+            if not payload_msg.ciphertext:
+                payload_msg.ciphertext = payload
+            if not payload_msg.sender:
+                payload_msg.sender = username
         req.payload.CopyFrom(payload_msg)
         req.ephemeral = bool(ephemeral)
         write_frame(
@@ -327,6 +367,27 @@ class MP2Client:
                         if hasattr(event.payload, "type")
                         else None
                     )
+                    sender = event.payload.sender or None
+                    sender_device_id = (
+                        int(event.payload.sender_device_id)
+                        if getattr(event.payload, "sender_device_id", 0)
+                        else None
+                    )
+                    sender_registration_id = (
+                        int(event.payload.sender_registration_id)
+                        if getattr(event.payload, "sender_registration_id", 0)
+                        else None
+                    )
+                    pre_key_id = (
+                        int(event.payload.pre_key_id)
+                        if getattr(event.payload, "pre_key_id", 0)
+                        else None
+                    )
+                    signed_pre_key_id = (
+                        int(event.payload.signed_pre_key_id)
+                        if getattr(event.payload, "signed_pre_key_id", 0)
+                        else None
+                    )
                     yield RoomEvent(
                         room_name=event.room_name,
                         event_id=int(event.event_id),
@@ -346,6 +407,11 @@ class MP2Client:
                         else None,
                         file=file_meta,
                         payload_type=payload_type,
+                        sender=sender,
+                        sender_device_id=sender_device_id,
+                        sender_registration_id=sender_registration_id,
+                        pre_key_id=pre_key_id,
+                        signed_pre_key_id=signed_pre_key_id,
                     )
                 elif frame.msg_type == common_pb2.MSG_TYPE_ERROR_RESPONSE:
                     err = common_pb2.ErrorResponse()
@@ -380,11 +446,48 @@ class MP2Client:
         if frame.msg_type == msg_types.MSG_TYPE_E2EE_GENERATE_KEYS_RESPONSE:
             resp = e2ee_pb2.E2EEGenerateKeysResponse()
             resp.ParseFromString(frame.payload)
+            identity: SignalKeyPair | None = None
+            if resp.identity_key is not None:
+                identity = SignalKeyPair(
+                    public_key=bytes(resp.identity_key.public_key),
+                    private_key=bytes(resp.identity_key.private_key),
+                )
+
+            signed_pre_key: SignalSignedPreKey | None = None
+            if resp.signed_pre_key is not None and resp.signed_pre_key.key:
+                signed_pre_key = SignalSignedPreKey(
+                    id=int(resp.signed_pre_key.id),
+                    key=SignalKeyPair(
+                        public_key=bytes(resp.signed_pre_key.key.public_key),
+                        private_key=bytes(resp.signed_pre_key.key.private_key),
+                    ),
+                    signature=bytes(resp.signed_pre_key.signature),
+                    timestamp=int(resp.signed_pre_key.timestamp),
+                )
+
+            pre_keys: list[SignalPreKey] = []
+            for pk in resp.pre_keys:
+                if not pk.key:
+                    continue
+                pre_keys.append(
+                    SignalPreKey(
+                        id=int(pk.id),
+                        key=SignalKeyPair(
+                            public_key=bytes(pk.key.public_key),
+                            private_key=bytes(pk.key.private_key),
+                        ),
+                    )
+                )
+
             return E2EEGenerateKeysResult(
                 code=int(resp.code),
                 message=resp.message,
                 registration_id=int(resp.registration_id),
                 pre_key_count=int(resp.pre_key_count),
+                device_id=int(resp.device_id),
+                identity_key=identity,
+                signed_pre_key=signed_pre_key,
+                pre_keys=tuple(pre_keys),
             )
         if frame.msg_type == common_pb2.MSG_TYPE_ERROR_RESPONSE:
             err = common_pb2.ErrorResponse()
@@ -516,6 +619,9 @@ __all__ = [
     "MP2Error",
     "AuthenticationError",
     "RoomEvent",
+    "SignalKeyPair",
+    "SignalPreKey",
+    "SignalSignedPreKey",
     "E2EEGenerateKeysResult",
     "E2EEPreKeyBundle",
     "login_flow",
