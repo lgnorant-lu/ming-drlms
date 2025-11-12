@@ -33,6 +33,11 @@ void mp2_protocol_free_frame(mp2_frame_t *frame);
 
 int mp2_protocol_random_bytes(unsigned char *buf, size_t len);
 
+/* Track which sockets are MP2 to avoid mixing protocols on fanout */
+void mp2_protocol_register_fd(platform_socket_t fd);
+void mp2_protocol_unregister_fd(platform_socket_t fd);
+int mp2_protocol_is_fd_mp2(platform_socket_t fd);
+
 #ifdef __cplusplus
 }
 #endif

@@ -90,7 +90,8 @@ static int detect_mp2_protocol_on_socket(platform_socket_t fd) {
     unsigned char hdr[4];
 #if defined(_WIN32)
     DWORD tv_ms = 100;
-    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv_ms, sizeof(tv_ms));
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv_ms,
+               sizeof(tv_ms));
 #else
     struct timeval tv;
     tv.tv_sec = 0;
@@ -100,12 +101,14 @@ static int detect_mp2_protocol_on_socket(platform_socket_t fd) {
     int n = recv(fd, (char *)hdr, 4, MSG_PEEK);
     if (n == 4) {
         /* MP2 magic is 0xDEADBEEF in network byte order */
-        if (hdr[0] == 0xDE && hdr[1] == 0xAD && hdr[2] == 0xBE && hdr[3] == 0xEF) {
+        if (hdr[0] == 0xDE && hdr[1] == 0xAD && hdr[2] == 0xBE &&
+            hdr[3] == 0xEF) {
             return 1; /* MP2 */
         }
         return 0; /* looks like text */
     }
-    /* On timeout or partial read, default to text to keep legacy tests stable */
+    /* On timeout or partial read, default to text to keep legacy tests stable
+     */
     return 0;
 }
 
@@ -583,7 +586,8 @@ static void *handle_client(void *arg) {
         data_dir = ".";
 
     int use_mp2 = mp2_protocol_is_enabled() ? 1 : 0;
-    /* Override by peeking the first bytes on the socket to avoid protocol mix-up */
+    /* Override by peeking the first bytes on the socket to avoid protocol
+     * mix-up */
     if (use_mp2) {
         use_mp2 = detect_mp2_protocol_on_socket(fd) ? 1 : 0;
     } else {
@@ -604,6 +608,7 @@ static void *handle_client(void *arg) {
         (void)legacy_handle_session(&session);
         mp2_auth_on_disconnect(fd);
     } else {
+        mp2_protocol_register_fd(fd);
         mp2_frame_t frame;
         memset(&frame, 0, sizeof(frame));
         while (mp2_protocol_read_frame(fd, &frame) == 0) {
@@ -624,6 +629,9 @@ static void *handle_client(void *arg) {
         g_active_conn--;
     }
     platform_mutex_unlock(&g_conn_mu);
+
+    /* Ensure fd is unregistered from MP2 registry */
+    mp2_protocol_unregister_fd(fd);
 
     free(ctx);
     return NULL;

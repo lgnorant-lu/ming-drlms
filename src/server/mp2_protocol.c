@@ -19,6 +19,41 @@
 #include <bcrypt.h>
 #endif
 
+/* --- FD registry to avoid mixing protocols on fanout --- */
+#define MP2_FD_MAX 4096
+static platform_socket_t g_mp2_fds[MP2_FD_MAX];
+static int g_mp2_fds_count = 0;
+
+static int mp2_registry_find(platform_socket_t fd) {
+    for (int i = 0; i < g_mp2_fds_count; ++i) {
+        if (g_mp2_fds[i] == fd)
+            return i;
+    }
+    return -1;
+}
+
+void mp2_protocol_register_fd(platform_socket_t fd) {
+    if (fd == PLATFORM_INVALID_SOCKET)
+        return;
+    if (mp2_registry_find(fd) >= 0)
+        return;
+    if (g_mp2_fds_count < MP2_FD_MAX) {
+        g_mp2_fds[g_mp2_fds_count++] = fd;
+    }
+}
+
+void mp2_protocol_unregister_fd(platform_socket_t fd) {
+    int idx = mp2_registry_find(fd);
+    if (idx < 0)
+        return;
+    g_mp2_fds[idx] = g_mp2_fds[g_mp2_fds_count - 1];
+    g_mp2_fds_count -= 1;
+}
+
+int mp2_protocol_is_fd_mp2(platform_socket_t fd) {
+    return mp2_registry_find(fd) >= 0 ? 1 : 0;
+}
+
 static void mp2_protocol_sleep_microseconds(unsigned long long usec) {
 #if defined(_WIN32)
     if (usec == 0) {
@@ -230,6 +265,11 @@ int mp2_protocol_read_frame(platform_socket_t fd, mp2_frame_t *out_frame) {
 int mp2_protocol_send_frame(platform_socket_t fd, uint16_t msg_type,
                             const unsigned char *payload,
                             uint32_t payload_len) {
+    /* Skip if this fd is not registered as MP2 (prevents binary leaking into
+     * text sockets) */
+    if (!mp2_protocol_is_fd_mp2(fd)) {
+        return 0;
+    }
     unsigned char header[12];
     uint32_t magic_net = htonl(MP2_PROTOCOL_MAGIC);
     uint16_t version_net = htons(MP2_PROTOCOL_VERSION);
