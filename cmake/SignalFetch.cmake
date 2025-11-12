@@ -103,11 +103,9 @@ set_target_properties(signal_protocol PROPERTIES
 if(WIN32)
     add_custom_command(TARGET signal_protocol_ext POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory ${SIGNAL_INSTALL_PREFIX}/lib
-        COMMAND if exist "${SIGNAL_INSTALL_PREFIX}/lib/libsignal-protocol-c.a" (
-            ${CMAKE_COMMAND} -E copy_if_different "${SIGNAL_INSTALL_PREFIX}/lib/libsignal-protocol-c.a" "${SIGNAL_INSTALL_PREFIX}/lib/signal-protocol-c.lib"
-        ) else (
-            echo "Checking for signal-protocol-c.lib..."
-        )
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${SIGNAL_INSTALL_PREFIX}/lib/libsignal-protocol-c.a"
+            "${SIGNAL_INSTALL_PREFIX}/lib/signal-protocol-c.lib"
         COMMENT "Ensuring signal-protocol-c.lib is available on Windows"
     )
 endif()

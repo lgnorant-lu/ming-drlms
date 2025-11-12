@@ -3306,20 +3306,23 @@ static const ProtobufCFieldDescriptor
         {
             "user_id", 1, PROTOBUF_C_LABEL_NONE, PROTOBUF_C_TYPE_STRING,
             0, /* quantifier_offset */
-            offsetof(Mingdrlms__V2__RoomMember, user_id), NULL, NULL, 0, NULL,
-            NULL /* reserved1,2,3 */
+            offsetof(Mingdrlms__V2__RoomMember, user_id), NULL,
+            &protobuf_c_empty_string, 0, /* flags */
+            NULL, NULL, NULL             /* reserved1,2,3 */
         },
         {
             "device_id", 2, PROTOBUF_C_LABEL_NONE, PROTOBUF_C_TYPE_UINT32,
             0, /* quantifier_offset */
-            offsetof(Mingdrlms__V2__RoomMember, device_id), NULL, NULL, 0, NULL,
-            NULL /* reserved1,2,3 */
+            offsetof(Mingdrlms__V2__RoomMember, device_id), NULL, NULL,
+            0,               /* flags */
+            NULL, NULL, NULL /* reserved1,2,3 */
         },
         {
             "timestamp", 3, PROTOBUF_C_LABEL_NONE, PROTOBUF_C_TYPE_STRING,
             0, /* quantifier_offset */
-            offsetof(Mingdrlms__V2__RoomMember, timestamp), NULL, NULL, 0, NULL,
-            NULL /* reserved1,2,3 */
+            offsetof(Mingdrlms__V2__RoomMember, timestamp), NULL,
+            &protobuf_c_empty_string, 0, /* flags */
+            NULL, NULL, NULL             /* reserved1,2,3 */
         },
 };
 
@@ -3357,13 +3360,15 @@ static const ProtobufCFieldDescriptor
             "room_name", 1, PROTOBUF_C_LABEL_NONE, PROTOBUF_C_TYPE_STRING,
             0, /* quantifier_offset */
             offsetof(Mingdrlms__V2__RoomMemberListRequest, room_name), NULL,
-            NULL, 0, NULL, NULL /* reserved1,2,3 */
+            &protobuf_c_empty_string, 0, /* flags */
+            NULL, NULL, NULL             /* reserved1,2,3 */
         },
         {
             "access_token", 2, PROTOBUF_C_LABEL_NONE, PROTOBUF_C_TYPE_STRING,
             0, /* quantifier_offset */
             offsetof(Mingdrlms__V2__RoomMemberListRequest, access_token), NULL,
-            NULL, 0, NULL, NULL /* reserved1,2,3 */
+            &protobuf_c_empty_string, 0, /* flags */
+            NULL, NULL, NULL             /* reserved1,2,3 */
         },
 };
 
@@ -3403,20 +3408,22 @@ static const ProtobufCFieldDescriptor
             "room_name", 1, PROTOBUF_C_LABEL_NONE, PROTOBUF_C_TYPE_STRING,
             0, /* quantifier_offset */
             offsetof(Mingdrlms__V2__RoomMemberListResponse, room_name), NULL,
-            NULL, 0, NULL, NULL /* reserved1,2,3 */
+            &protobuf_c_empty_string, 0, /* flags */
+            NULL, NULL, NULL             /* reserved1,2,3 */
         },
         {
             "members", 2, PROTOBUF_C_LABEL_REPEATED, PROTOBUF_C_TYPE_MESSAGE,
             offsetof(Mingdrlms__V2__RoomMemberListResponse, n_members),
             offsetof(Mingdrlms__V2__RoomMemberListResponse, members),
-            &mingdrlms__v2__room_member__descriptor, NULL, 0, NULL,
-            NULL /* reserved1,2,3 */
+            &mingdrlms__v2__room_member__descriptor, NULL, 0, /* flags */
+            NULL, NULL, NULL /* reserved1,2,3 */
         },
         {
             "total", 3, PROTOBUF_C_LABEL_NONE, PROTOBUF_C_TYPE_UINT64,
             0, /* quantifier_offset */
             offsetof(Mingdrlms__V2__RoomMemberListResponse, total), NULL, NULL,
-            0, NULL, NULL /* reserved1,2,3 */
+            0,               /* flags */
+            NULL, NULL, NULL /* reserved1,2,3 */
         },
 };
 

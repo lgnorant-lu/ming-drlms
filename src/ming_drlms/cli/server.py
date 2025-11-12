@@ -208,6 +208,7 @@ def server_up(
         DRLMS_PORT=cfg.port,
         DRLMS_DATA_DIR=str(cfg.data_dir),
         DRLMS_AUTH_STRICT=1 if cfg.strict else 0,
+        DRLMS_ENABLE_MPROTO_V2=0,  # Always disable MP2 for CLI server, use text protocol
         DRLMS_MAX_CONN=cfg.max_conn,
         DRLMS_RATE_UP_BPS=cfg.rate_up_bps,
         DRLMS_RATE_DOWN_BPS=cfg.rate_down_bps,
