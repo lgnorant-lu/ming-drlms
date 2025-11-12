@@ -39,7 +39,15 @@ static void mp2_protocol_sleep_microseconds(unsigned long long usec) {
 
 int mp2_protocol_is_enabled(void) {
     const char *env = getenv("DRLMS_ENABLE_MPROTO_V2");
-    return (env && (*env == '1' || *env == 'y' || *env == 'Y')) ? 1 : 0;
+    int enabled = (env && (*env == '1' || *env == 'y' || *env == 'Y')) ? 1 : 0;
+    // Debug: print protocol selection for CI troubleshooting
+    static int once = 0;
+    if (!once) {
+        fprintf(stderr, "[DEBUG] MP2 protocol: env='%s', enabled=%d\n",
+                env ? env : "NULL", enabled);
+        once = 1;
+    }
+    return enabled;
 }
 
 int mp2_protocol_is_debug_enabled(void) {

@@ -138,24 +138,33 @@ jobs:
           if (-not (Test-Path $Env:VCPKG_ROOT)) {
             throw "VCPKG_ROOT is not initialized"
           }
-          $portsFile = Join-Path $Env:GITHUB_WORKSPACE '.github/vcpkg-windows-ports.txt'
-          if (-not (Test-Path $portsFile)) {
-            throw "vcpkg ports list not found: $portsFile"
+          $manifestFile = Join-Path $Env:GITHUB_WORKSPACE 'vcpkg.json'
+          if (-not (Test-Path $manifestFile)) {
+            throw "vcpkg.json not found: $manifestFile"
           }
-          $ports = Get-Content $portsFile | Where-Object { $_ -and -not $_.StartsWith('#') }
-          if (-not $ports) {
-            throw "vcpkg ports list is empty"
-          }
-          
-          Write-Host "Installing dependencies with parallel builds..."
+
+          Write-Host "Installing dependencies with manifest mode..."
           $env:VCPKG_FEATURE_FLAGS = 'binarycaching'
           $env:VCPKG_BINARY_SOURCES = $Env:VCPKG_BINARY_SOURCES
-          
-          # Use parallel builds with optimized settings
-          & "$Env:VCPKG_ROOT\vcpkg.exe" install $ports --triplet x64-windows --x-manifest-root=$Env:GITHUB_WORKSPACE --recurse --verbose
-          
+
+          # Use manifest mode for better reproducibility
+          & "$Env:VCPKG_ROOT\vcpkg.exe" install --triplet x64-windows --x-manifest-root=$Env:GITHUB_WORKSPACE --recurse --verbose
+
           Write-Host "Installed packages:"
           & "$Env:VCPKG_ROOT\vcpkg.exe" list
+
+      - name: Configure OpenSSL for Python CFFI (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $opensslRoot = Join-Path $Env:VCPKG_ROOT 'installed/x64-windows'
+          if (Test-Path $opensslRoot) {
+            Add-Content -Path $Env:GITHUB_ENV -Value "OPENSSL_ROOT_DIR=$opensslRoot"
+            Write-Host "Set OPENSSL_ROOT_DIR=$opensslRoot for Python CFFI"
+          } else {
+            Write-Warning "OpenSSL root not found at $opensslRoot"
+          }
 
       - name: Install Python dependencies
         run: |

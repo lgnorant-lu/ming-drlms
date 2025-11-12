@@ -41,25 +41,51 @@ choco install -y git cmake ninja
 
 Windows 平台需要以下第三方依赖：SQLite、Argon2、OpenSSL。推荐使用 [vcpkg](https://github.com/microsoft/vcpkg) 统一管理。
 
-### 安装 vcpkg
+### vcpkg 安装与配置
 
 ```powershell
 git clone https://github.com/microsoft/vcpkg.git C:\tools\vcpkg
 C:\tools\vcpkg\bootstrap-vcpkg.bat
 ```
 
-将 `vcpkg` 集成至 CMake：
+#### 选项 A：Manifest 模式（推荐）
 
-```powershell
-C:\tools\vcpkg\vcpkg integrate install
+在项目根目录创建 `vcpkg.json`：
+
+```json
+{
+  "name": "ming-drlms",
+  "version-string": "1.0.0",
+  "dependencies": [
+    "sqlite3:x64-windows",
+    "argon2:x64-windows",
+    "openssl:x64-windows",
+    "protobuf-c:x64-windows"
+  ],
+  "builtin-baseline": "2024.12.01"
+}
 ```
 
-或在项目根目录创建 `vcpkg.json` 并通过 `cmake` 命令行参数指定 `-DCMAKE_TOOLCHAIN_FILE=C:/tools/vcpkg/scripts/buildsystems/vcpkg.cmake`。
-
-### 安装依赖
+CMake 配置时指定 manifest 根目录：
 
 ```powershell
-C:\tools\vcpkg\vcpkg install sqlite3:x64-windows argon2:x64-windows openssl:x64-windows
+cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=C:/tools/vcpkg/scripts/buildsystems/vcpkg.cmake -DVCPKG_TARGET_TRIPLET=x64-windows
+```
+
+#### 选项 B：传统模式
+
+```powershell
+# 全局集成 vcpkg
+C:\tools\vcpkg\vcpkg integrate install
+
+# 或仅为项目指定 toolchain
+cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=C:/tools/vcpkg/scripts/buildsystems/vcpkg.cmake -DVCPKG_TARGET_TRIPLET=x64-windows
+```
+
+手动安装依赖：
+
+```powershell
+C:\tools\vcpkg\vcpkg install sqlite3:x64-windows argon2:x64-windows openssl:x64-windows protobuf-c:x64-windows
 ```
 
 #### OpenSSL配置 (CFFI构建必需)
@@ -111,6 +137,10 @@ pacman -S mingw-w64-ucrt-x86_64-openssl mingw-w64-ucrt-x86_64-sqlite mingw-w64-u
 | Argon2 构建失败 | vcpkg 版本过旧 | 更新 vcpkg：`git pull && bootstrap-vcpkg.bat` |
 | OpenSSL 路径冲突 | 同时存在多个 OpenSSL 版本 | 确保 `PATH` 与 CMake 缓存中仅指向所需版本，清理 `build` 目录后重新配置 |
 | CFFI OpenSSL 头文件缺失 | `openssl/evp.h` 找不到 | 设置 `OPENSSL_ROOT_DIR` 环境变量指向OpenSSL安装目录，确认 `include/openssl/evp.h` 存在 |
+| vcpkg manifest 模式失败 | `vcpkg.json` 缺失或格式错误 | 确保 `vcpkg.json` 在项目根目录且格式正确；检查 vcpkg 版本是否支持 manifest |
+| Windows spike 构建失败 | MinGW/MSYS2 与 MSVC 工具链冲突 | 使用 MSVC 工具链构建 spike；避免混用不同工具链的产物 |
+| signal-protocol-c.lib 找不到 | 库文件名不匹配 | 检查 `signal-protocol-c.lib` 或 `signal-protocol-c-static.lib` 是否存在；确认 vcpkg triplet 为 `x64-windows` |
+| CMake 生成器选择不当 | 使用了不兼容的生成器 | MSVC 推荐使用 `Visual Studio 17 2022` 或 `Ninja`；避免在 MSVC 环境下使用 `Unix Makefiles` |
 
 ## 6. 下一步
 

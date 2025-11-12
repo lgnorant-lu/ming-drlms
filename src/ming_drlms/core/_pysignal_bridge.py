@@ -283,26 +283,26 @@ def load_bridge() -> Tuple[FFI, object]:
                     if str(lib_dir) not in lib_dirs:
                         lib_dirs.append(str(lib_dir))
                     break
-        else:  # Linux
-            # For Linux CI environments
-            root = Path(__file__).resolve().parents[3]
-            build_root = root / "build"
-            lib_candidates = [
-                build_root / "_deps" / "signal-install" / "lib",
-                build_root / "RelWithDebInfo",
-                build_root / "Debug",
-                Path("/usr/lib"),
-                Path("/usr/local/lib"),
-            ]
+    else:  # Linux
+        # For Linux CI environments
+        root = Path(__file__).resolve().parents[3]
+        build_root = root / "build"
+        lib_candidates = [
+            build_root / "_deps" / "signal-install" / "lib",
+            build_root / "RelWithDebInfo",
+            build_root / "Debug",
+            Path("/usr/lib"),
+            Path("/usr/local/lib"),
+        ]
 
-            for lib_dir in lib_candidates:
-                if lib_dir.exists():
-                    lib_file = lib_dir / "libsignal-protocol-c.so"
-                    if lib_file.exists():
-                        lib_dirs = link_args.setdefault("library_dirs", [])
-                        if str(lib_dir) not in lib_dirs:
-                            lib_dirs.append(str(lib_dir))
-                        break
+        for lib_dir in lib_candidates:
+            if lib_dir.exists():
+                lib_file = lib_dir / "libsignal-protocol-c.so"
+                if lib_file.exists():
+                    lib_dirs = link_args.setdefault("library_dirs", [])
+                    if str(lib_dir) not in lib_dirs:
+                        lib_dirs.append(str(lib_dir))
+                    break
 
     try:
         module = ffi.verify(
@@ -448,6 +448,12 @@ def _detect_openssl_prefix(
     if env_root:
         base = Path(env_root)
         candidates.append((base / "include", base / "lib"))
+        # Debug: print detected paths
+        if os.name == "nt":
+            print(
+                f"[DEBUG] OPENSSL_ROOT_DIR candidate: {base / 'include' / 'openssl' / 'evp.h'}",
+                file=sys.stderr,
+            )
 
     vcpkg_root = os.environ.get("VCPKG_ROOT")
     if vcpkg_root:
@@ -461,6 +467,13 @@ def _detect_openssl_prefix(
         for triplet in triplets:
             prefix = base / "installed" / triplet
             candidates.append((prefix / "include", prefix / "lib"))
+            # Debug: print detected paths
+            if os.name == "nt":
+                evp_path = prefix / "include" / "openssl" / "evp.h"
+                print(
+                    f"[DEBUG] VCPKG {triplet} candidate: {evp_path} (exists: {evp_path.exists()})",
+                    file=sys.stderr,
+                )
 
     drive = Path(signal_lib_path).anchor
     if drive:

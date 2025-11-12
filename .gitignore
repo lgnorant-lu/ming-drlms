@@ -71,7 +71,6 @@ src/ming_drlms/bin/
 # ==================================
 # Package Managers
 # ==================================
-vcpkg.json
 vcpkg/
 vcpkg-cache/
 

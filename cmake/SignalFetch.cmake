@@ -97,6 +97,10 @@ file(MAKE_DIRECTORY "${SIGNAL_INSTALL_PREFIX}/bin")
 if(WIN32)
     # Windows静态库通常命名为.lib，但CMake可能生成.a
     set(_signal_lib_name "signal-protocol-c.lib")
+    # 回退到-static后缀的库名（某些情况下CMake会生成这个）
+    if(NOT EXISTS "${SIGNAL_INSTALL_PREFIX}/lib/${_signal_lib_name}")
+        set(_signal_lib_name "signal-protocol-c-static.lib")
+    endif()
 elseif(APPLE)
     set(_signal_lib_name "libsignal-protocol-c.a")
 else()
@@ -114,15 +118,10 @@ set_target_properties(signal_protocol PROPERTIES
 if(WIN32)
     add_custom_command(TARGET signal_protocol_ext POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory ${SIGNAL_INSTALL_PREFIX}/lib
-        # Check for correct .lib file, fail if only .a exists (incompatible toolchain)
-        COMMAND if exist "${SIGNAL_INSTALL_PREFIX}/lib/signal-protocol-c.lib" (
-            echo "Found signal-protocol-c.lib - OK"
-        ) else if exist "${SIGNAL_INSTALL_PREFIX}/lib/libsignal-protocol-c.a" (
-            echo "ERROR: Found libsignal-protocol-c.a but no .lib file. This indicates MinGW toolchain output which is incompatible with MSVC. Please ensure the external project uses the same toolchain as the main build." >&2
-            exit 1
-        ) else (
-            echo "WARNING: No static library found for signal-protocol-c" >&2
-        )
+        # Use cmake script mode to avoid shell syntax issues
+        COMMAND ${CMAKE_COMMAND}
+            -DSIGNAL_LIB_DIR=${SIGNAL_INSTALL_PREFIX}/lib
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/CheckWindowsLib.cmake
         COMMENT "Ensuring signal-protocol-c.lib is available on Windows"
     )
 endif()

@@ -147,7 +147,7 @@ else()
 endif()
 
 # Add custom message types for room member list API
-target_compile_definitions(log_collector_server PRIVATE
+target_compile_definitions(log_collector_server PRIVATE 
     MSG_TYPE_ROOM_MEMBER_LIST_REQUEST=504
     MSG_TYPE_ROOM_MEMBER_LIST_RESPONSE=505
     MSG_TYPE_ERROR_RESPONSE=500

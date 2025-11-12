@@ -59,28 +59,88 @@ jobs:
 
   build-windows:
     runs-on: windows-latest
-    defaults:
-      run:
-        shell: msys2 {0}
     steps:
       - uses: actions/checkout@v4
-      - name: Setup MSYS2
-        uses: msys2/setup-msys2@v2
+      - name: Set up MSVC developer command prompt
+        uses: ilammy/msvc-dev-cmd@v1
         with:
-          update: true
-          install: >-
-            base-devel
-            mingw-w64-x86_64-toolchain
-            mingw-w64-x86_64-cmake
-            mingw-w64-x86_64-openssl
+          arch: x64
+      - name: Configure vcpkg root
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $customRoot = Join-Path $Env:RUNNER_TEMP 'vcpkg'
+          $binaryCache = Join-Path $Env:RUNNER_TEMP 'vcpkg-binary-cache'
+          if (-not (Test-Path $binaryCache)) {
+            New-Item -ItemType Directory -Path $binaryCache | Out-Null
+          }
+          Add-Content -Path $Env:GITHUB_ENV -Value "VCPKG_ROOT=$customRoot"
+          Add-Content -Path $Env:GITHUB_ENV -Value ("CMAKE_TOOLCHAIN_FILE={0}" -f (Join-Path $customRoot 'scripts/buildsystems/vcpkg.cmake'))
+          Add-Content -Path $Env:GITHUB_ENV -Value "VCPKG_TARGET_TRIPLET=x64-windows"
+          Add-Content -Path $Env:GITHUB_ENV -Value "VCPKG_DEFAULT_BINARY_CACHE=$binaryCache"
+          Add-Content -Path $Env:GITHUB_ENV -Value "VCPKG_BINARY_SOURCES=clear;files,$binaryCache,readwrite"
+      - name: Restore vcpkg cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.VCPKG_ROOT }}
+            ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+          key: |
+            ${{ runner.os }}-vcpkg-v2024.12.01-spike-${{ hashFiles('vcpkg.json') }}
+          restore-keys: |
+            ${{ runner.os }}-vcpkg-v2024.12.01-spike-
+            ${{ runner.os }}-vcpkg-v2024.12.01-
+            ${{ runner.os }}-vcpkg-
+      - name: Bootstrap vcpkg
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $desiredVersion = "master"
+          if (Test-Path $Env:VCPKG_ROOT) {
+            if (-not (Test-Path (Join-Path $Env:VCPKG_ROOT '.git'))) {
+              Remove-Item $Env:VCPKG_ROOT -Recurse -Force
+            }
+          }
+          if (-not (Test-Path $Env:VCPKG_ROOT)) {
+            Write-Host "Cloning vcpkg version $desiredVersion..."
+            git clone --depth 1 --branch $desiredVersion https://github.com/microsoft/vcpkg.git $Env:VCPKG_ROOT
+          } else {
+            Write-Host "Checking vcpkg version..."
+            cd $Env:VCPKG_ROOT
+            $currentTag = git describe --tags --abbrev=0 2>$null
+            if ($currentTag -ne "v$desiredVersion") {
+              Write-Host "Updating vcpkg from $currentTag to v$desiredVersion..."
+              git fetch --depth 1 origin tag "v$desiredVersion"
+              git checkout "v$desiredVersion"
+            }
+          }
+          & (Join-Path $Env:VCPKG_ROOT 'bootstrap-vcpkg.bat')
+          Write-Host "vcpkg version: $(& $Env:VCPKG_ROOT\vcpkg.exe version)"
+      - name: Install vcpkg dependencies
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not (Test-Path $Env:VCPKG_ROOT)) {
+            throw "VCPKG_ROOT is not initialized"
+          }
+          $manifestFile = Join-Path $Env:GITHUB_WORKSPACE 'vcpkg.json'
+          if (-not (Test-Path $manifestFile)) {
+            throw "vcpkg.json not found: $manifestFile"
+          }
+          Write-Host "Installing dependencies with manifest mode..."
+          $env:VCPKG_FEATURE_FLAGS = 'binarycaching'
+          $env:VCPKG_BINARY_SOURCES = $Env:VCPKG_BINARY_SOURCES
+          & "$Env:VCPKG_ROOT\vcpkg.exe" install --triplet x64-windows --x-manifest-root=$Env:GITHUB_WORKSPACE --recurse --verbose
+          Write-Host "Installed packages:"
+          & "$Env:VCPKG_ROOT\vcpkg.exe" list
       - name: Configure
-        run: cmake -S . -B build -G "Unix Makefiles" -DENABLE_SIGNAL_SPIKE=ON -DBUILD_SERVER=OFF
+        run: cmake -S . -B build -DENABLE_SIGNAL_SPIKE=ON -DBUILD_SERVER=OFF
       - name: Build
-        run: cmake --build build --target test_signal_spike -j2
+        run: cmake --build build --target test_signal_spike --config Release
       - name: Run
         run: |
           set -e
-          ./build/test_signal_spike.exe | tee spike.log
+          ./build/Release/test_signal_spike.exe | tee spike.log
           status=${PIPESTATUS[0]}
           grep -Fq "Signal E2E Loop OK" spike.log
           grep_status=$?
