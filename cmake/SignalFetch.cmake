@@ -88,15 +88,14 @@ elseif(APPLE)
     # On macOS, ensure the library is in the correct location and has proper install names
     add_custom_command(TARGET signal_protocol_ext POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory ${SIGNAL_INSTALL_PREFIX}/lib
-        COMMAND install_name_tool -id @rpath/${_signal_lib_name}
-            ${SIGNAL_INSTALL_PREFIX}/lib/${_signal_lib_name}
+        COMMAND sh -c "if [ -f ${SIGNAL_INSTALL_PREFIX}/lib/${_signal_lib_name} ]; then install_name_tool -id @rpath/${_signal_lib_name} ${SIGNAL_INSTALL_PREFIX}/lib/${_signal_lib_name}; else echo 'Library file not found: ${SIGNAL_INSTALL_PREFIX}/lib/${_signal_lib_name}'; fi"
         COMMENT "Setting install name for macOS dylib"
     )
 else()
     # On Linux, create symlink for versioned library if needed
     add_custom_command(TARGET signal_protocol_ext POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory ${SIGNAL_INSTALL_PREFIX}/lib
-        COMMAND ln -sf ${SIGNAL_INSTALL_PREFIX}/lib/libsignal-protocol-c.so
+        COMMAND ${CMAKE_COMMAND} -E create_symlink libsignal-protocol-c.so
             ${SIGNAL_INSTALL_PREFIX}/lib/libsignal-protocol-c.so.2
         COMMENT "Creating versioned symlink for Linux shared library"
     )

@@ -43,9 +43,10 @@ rooms_instance_broadcast_presence_event(Room *room, const char *username,
     snprintf(room_name_buffer, sizeof(room_name_buffer), "%s", room->name);
     event.room_name = room_name_buffer;
     event.event_id = time(NULL); // Use timestamp as event ID
-    event.kind = (event_kind == 2)
-                     ? MINGDRLMS__V2__ROOM_EVENT_KIND__MEMBER_JOINED
-                     : MINGDRLMS__V2__ROOM_EVENT_KIND__MEMBER_LEFT;
+    event.kind =
+        (event_kind == 2)
+            ? MINGDRLMS__V2__ROOM_EVENT_KIND__ROOM_EVENT_KIND_MEMBER_JOINED
+            : MINGDRLMS__V2__ROOM_EVENT_KIND__ROOM_EVENT_KIND_MEMBER_LEFT;
 
     // Create content with user information
     static char content_buffer[512];

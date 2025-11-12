@@ -171,7 +171,44 @@ if(BUILD_SERVER)
     else()
         find_package(unofficial-sqlite3 CONFIG QUIET)
         if(NOT unofficial-sqlite3_FOUND)
-            message(STATUS "unofficial-sqlite3 not found - SQLite3 support will be disabled for CI compatibility")
+            message(STATUS "unofficial-sqlite3 not found - providing dummy SQLite headers for CI compatibility")
+            # Create dummy sqlite3.h for CI builds
+            set(_dummy_sqlite_dir "${CMAKE_BINARY_DIR}/dummy_sqlite")
+            file(MAKE_DIRECTORY "${_dummy_sqlite_dir}")
+            file(WRITE "${_dummy_sqlite_dir}/sqlite3.h" [=[
+#ifndef SQLITE3_H
+#define SQLITE3_H
+
+#include <stdint.h>
+#include <stddef.h>
+
+// Dummy sqlite3.h for CI builds when SQLite is not available
+// This allows compilation to proceed but will disable SQLite functionality
+
+typedef struct sqlite3 sqlite3;
+typedef struct sqlite3_stmt sqlite3_stmt;
+
+typedef int (*sqlite3_callback)(void*,int,char**,char**);
+
+#define SQLITE_OK           0   /* Successful result */
+#define SQLITE_ERROR        1   /* Generic error */
+#define SQLITE_BUSY         5   /* The database file is locked */
+#define SQLITE_ROW          100 /* sqlite3_step() has another row ready */
+#define SQLITE_DONE         101 /* sqlite3_step() has finished executing */
+
+int sqlite3_open(const char *filename, sqlite3 **ppDb);
+int sqlite3_close(sqlite3 *db);
+int sqlite3_exec(sqlite3*, const char *sql, sqlite3_callback, void*, char**);
+int sqlite3_prepare_v2(sqlite3*, const char*, int, sqlite3_stmt**, const char**);
+int sqlite3_step(sqlite3_stmt* pStmt);
+int sqlite3_finalize(sqlite3_stmt* pStmt);
+int sqlite3_bind_int(sqlite3_stmt*, int, int);
+int sqlite3_bind_text(sqlite3_stmt*, int, const char*, int, void(*)(void*));
+const char* sqlite3_errmsg(sqlite3*);
+
+#endif // SQLITE3_H
+]=])
+            include_directories("${_dummy_sqlite_dir}")
             set(HAVE_SYSTEM_SQLITE3 0)
         endif()
     endif()
