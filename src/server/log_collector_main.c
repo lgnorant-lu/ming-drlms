@@ -27,8 +27,10 @@
 #include <windows.h>
 #include <direct.h>
 #include <openssl/sha.h>
+#include <winsock2.h>
 #else
 #include <openssl/sha.h>
+#include <sys/time.h>
 #endif
 
 #define DEFAULT_PORT 15034
@@ -83,6 +85,29 @@ extern user_cred_t g_users[256];
 extern int g_users_count;
 extern void rooms_apply_policy_on_owner_offline_if_needed(Room *room,
                                                           long long rate_bps);
+
+static int detect_mp2_protocol_on_socket(platform_socket_t fd) {
+    unsigned char hdr[4];
+#if defined(_WIN32)
+    DWORD tv_ms = 100;
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv_ms, sizeof(tv_ms));
+#else
+    struct timeval tv;
+    tv.tv_sec = 0;
+    tv.tv_usec = 100000;
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+#endif
+    int n = recv(fd, (char *)hdr, 4, MSG_PEEK);
+    if (n == 4) {
+        /* MP2 magic is 0xDEADBEEF in network byte order */
+        if (hdr[0] == 0xDE && hdr[1] == 0xAD && hdr[2] == 0xBE && hdr[3] == 0xEF) {
+            return 1; /* MP2 */
+        }
+        return 0; /* looks like text */
+    }
+    /* On timeout or partial read, default to text to keep legacy tests stable */
+    return 0;
+}
 
 static int ensure_dir(const char *path) {
     struct stat st;
@@ -557,7 +582,18 @@ static void *handle_client(void *arg) {
     if (!data_dir || !*data_dir)
         data_dir = ".";
 
-    if (!mp2_protocol_is_enabled()) {
+    int use_mp2 = mp2_protocol_is_enabled() ? 1 : 0;
+    /* Override by peeking the first bytes on the socket to avoid protocol mix-up */
+    if (use_mp2) {
+        use_mp2 = detect_mp2_protocol_on_socket(fd) ? 1 : 0;
+    } else {
+        /* If env disables MP2 but peer speaks MP2, allow MP2 */
+        if (detect_mp2_protocol_on_socket(fd)) {
+            use_mp2 = 1;
+        }
+    }
+
+    if (!use_mp2) {
         LegacySession session;
         memset(&session, 0, sizeof session);
         session.fd = fd;

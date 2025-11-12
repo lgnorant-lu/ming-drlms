@@ -475,6 +475,23 @@ def _detect_openssl_prefix(
                     file=sys.stderr,
                 )
 
+    # Add per-build vcpkg_installed prefixes used by CMake manifest builds in CI
+    repo_root = Path(signal_lib_path).resolve().parents[3]
+    build_prefixes = [
+        repo_root / "build" / "vcpkg_installed" / "x64-windows",
+        repo_root / "build" / "server_cli" / "vcpkg_installed" / "x64-windows",
+    ]
+    for prefix in build_prefixes:
+        include_dir = prefix / "include"
+        lib_dir = prefix / "lib"
+        candidates.append((include_dir, lib_dir))
+        if os.name == "nt":
+            evp_path = include_dir / "openssl" / "evp.h"
+            print(
+                f"[DEBUG] CI build vcpkg_installed candidate: {evp_path} (exists: {evp_path.exists()})",
+                file=sys.stderr,
+            )
+
     drive = Path(signal_lib_path).anchor
     if drive:
         drive_root = Path(drive)
