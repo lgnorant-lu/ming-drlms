@@ -243,8 +243,8 @@ def load_bridge() -> Tuple[FFI, object]:
 
     link_args = _build_link_args(lib_path, openssl_lib)
 
-    # Try multiple DLL locations for CI compatibility
-    if os.name == "nt":
+    # Try multiple library locations for CI compatibility
+    if os.name == "nt":  # Windows
         # For CI environments, try loading from build directory first
         root = Path(__file__).resolve().parents[3]
         build_root = root / "build"
@@ -263,6 +263,46 @@ def load_bridge() -> Tuple[FFI, object]:
                 if str(bin_dir) not in lib_dirs:
                     lib_dirs.append(str(bin_dir))
                 break
+    elif sys.platform == "darwin":  # macOS
+        # For macOS CI environments, try multiple locations
+        root = Path(__file__).resolve().parents[3]
+        build_root = root / "build"
+        lib_candidates = [
+            build_root / "_deps" / "signal-install" / "lib",
+            build_root / "RelWithDebInfo",
+            build_root / "Debug",
+            "/opt/homebrew/lib",  # Homebrew default
+            "/usr/local/lib",  # MacPorts default
+        ]
+
+        for lib_dir in lib_candidates:
+            if lib_dir.exists():
+                lib_file = lib_dir / "libsignal-protocol-c.dylib"
+                if lib_file.exists():
+                    lib_dirs = link_args.setdefault("library_dirs", [])
+                    if str(lib_dir) not in lib_dirs:
+                        lib_dirs.append(str(lib_dir))
+                    break
+    else:  # Linux
+        # For Linux CI environments
+        root = Path(__file__).resolve().parents[3]
+        build_root = root / "build"
+        lib_candidates = [
+            build_root / "_deps" / "signal-install" / "lib",
+            build_root / "RelWithDebInfo",
+            build_root / "Debug",
+            "/usr/lib",
+            "/usr/local/lib",
+        ]
+
+        for lib_dir in lib_candidates:
+            if lib_dir.exists():
+                lib_file = lib_dir / "libsignal-protocol-c.so"
+                if lib_file.exists():
+                    lib_dirs = link_args.setdefault("library_dirs", [])
+                    if str(lib_dir) not in lib_dirs:
+                        lib_dirs.append(str(lib_dir))
+                    break
 
     try:
         module = ffi.verify(

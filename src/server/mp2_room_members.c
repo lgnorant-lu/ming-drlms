@@ -7,6 +7,7 @@ M-Proto-v2 Room Member List API implementation
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "platform/platform.h"
 #include "mp2_protocol.h"
@@ -16,6 +17,23 @@ M-Proto-v2 Room Member List API implementation
 #include "generated/schema/v2/common.pb-c.h"
 #include "generated/schema/v2/room.pb-c.h"
 #endif
+
+// Define message type constant if not available
+#ifndef MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ROOM_MEMBER_LIST_RESPONSE
+#define MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ROOM_MEMBER_LIST_RESPONSE 505
+#endif
+
+// Forward declaration of room instance structure
+typedef struct rooms_instance_s rooms_instance_t;
+
+/**
+ * Find room instance by name (simplified for now)
+ */
+static rooms_instance_t *rooms_inst_find(const char *room_name) {
+    // TODO: Implement actual room lookup
+    // For now, return NULL to indicate room not found
+    return NULL;
+}
 
 /**
  * Send room member list response to client
