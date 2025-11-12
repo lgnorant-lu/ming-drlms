@@ -195,6 +195,29 @@ if [[ "${IS_WINDOWS}" -eq 1 ]]; then
   esac
   export PATH
   LOADER_ENV=(env PATH="${RUNTIME_PATH}:${BUILD_DIR}:${PATH}")
+
+  # Ensure OpenSSL DLLs are available for CFFI modules
+  printf '%s\n' "--> Ensuring OpenSSL DLLs are available for CFFI bridge..."
+  openssl_found=0
+  for openssl_dir in "${RUNTIME_PATH}" "${BUILD_DIR}"; do
+    if [[ -f "${openssl_dir}/libcrypto-3-x64.dll" || -f "${openssl_dir}/libssl-3-x64.dll" ]]; then
+      openssl_found=1
+      printf '%s\n' "[info] OpenSSL DLLs found in ${openssl_dir}"
+      break
+    fi
+  done
+  
+  if [[ "${openssl_found}" -eq 0 ]]; then
+    printf '%s\n' "[warn] OpenSSL DLLs not found in build directory - CFFI bridge may fail"
+    # Try to find system OpenSSL DLLs
+    if command -v openssl >/dev/null 2>&1; then
+      openssl_path=$(openssl version -d 2>/dev/null | cut -d'"' -f2)
+      if [[ -n "${openssl_path}" && -d "${openssl_path}" ]]; then
+        cp -f "${openssl_path}/"*.dll "${RUNTIME_PATH}/" 2>/dev/null || true
+        printf '%s\n' "[info] Copied OpenSSL DLLs from ${openssl_path}"
+      fi
+    fi
+  fi
 elif [[ "${IS_DARWIN}" -eq 1 ]]; then
   export DYLD_LIBRARY_PATH="${BUILD_DIR}:${DYLD_LIBRARY_PATH:-}"
   export DYLD_FALLBACK_LIBRARY_PATH="${BUILD_DIR}:${DYLD_FALLBACK_LIBRARY_PATH:-}"

@@ -42,10 +42,18 @@ endif()
 
 set(_signal_cmake_args
     -DCMAKE_INSTALL_PREFIX=${SIGNAL_INSTALL_PREFIX}
-    -DBUILD_SHARED_LIBS=OFF
     -DBUILD_TESTING=OFF
     -DCOVERAGE=OFF
     -DCMAKE_POSITION_INDEPENDENT_CODE=ON)
+
+# Windows builds should use shared libraries for CFFI compatibility
+if(WIN32)
+    list(APPEND _signal_cmake_args -DBUILD_SHARED_LIBS=ON)
+    # Windows doesn't need separate math library
+    list(APPEND _signal_cmake_args -DM_LIB="")
+else()
+    list(APPEND _signal_cmake_args -DBUILD_SHARED_LIBS=OFF)
+endif()
 
 if(NOT CMAKE_CONFIGURATION_TYPES)
     # Single-config generators honour CMAKE_BUILD_TYPE

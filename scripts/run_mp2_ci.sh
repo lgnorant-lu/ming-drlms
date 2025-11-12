@@ -24,6 +24,26 @@ done
 if [[ -z "$SERVER_BIN" ]]; then
   echo "[info] Building server binary..."
   (cd "${ROOT_DIR}" && cmake -S . -B build >/dev/null && cmake --build build -j >/dev/null)
+  
+  # Handle Windows OpenSSL DLLs for CFFI compatibility
+  if [[ "${OSTYPE}" == "msys" || "${OSTYPE}" == "cygwin" || "$(uname -s)" == "MINGW"* ]]; then
+    echo "[info] Ensuring OpenSSL DLLs are available for Windows build..."
+    BUILD_DIR="${ROOT_DIR}/build"
+    for config in "RelWithDebInfo" "Debug" "Release" ""; do
+      RUNTIME_DIR="${BUILD_DIR}/${config}"
+      [[ -z "${config}" ]] && RUNTIME_DIR="${BUILD_DIR}"
+      if [[ -f "${RUNTIME_DIR}/log_collector_server.exe" || -f "${RUNTIME_DIR}/log_collector_server" ]]; then
+        # Copy OpenSSL DLLs if they exist in build directory
+        for dll in "${BUILD_DIR}/"libcrypto-*.dll "${BUILD_DIR}/"libssl-*.dll; do
+          if [[ -f "${dll}" ]]; then
+            cp -f "${dll}" "${RUNTIME_DIR}/" 2>/dev/null || true
+          fi
+        done
+        break
+      fi
+    done
+  fi
+  
   for cand in "${SERVER_BIN_CANDIDATES[@]}"; do
     if [[ -x "$cand" ]]; then SERVER_BIN="$cand"; break; fi
   done

@@ -302,8 +302,12 @@ def _validate_signal_prefix(prefix: Path) -> Tuple[Optional[Path], Optional[Path
         header_ok = True
 
     lib_dir = prefix / "lib"
+    bin_dir = prefix / "bin"
     if os.name == "nt":
-        candidates = list(lib_dir.glob("signal-protocol-c.lib"))
+        # Look for both static (.lib) and shared (.dll) libraries on Windows
+        candidates = list(lib_dir.glob("signal-protocol-c.lib")) + list(
+            bin_dir.glob("signal-protocol-c.dll")
+        )
     else:
         candidates = list(lib_dir.glob("libsignal-protocol-c.*"))
     lib_path = candidates[0] if candidates else None
@@ -315,11 +319,23 @@ def _validate_signal_prefix(prefix: Path) -> Tuple[Optional[Path], Optional[Path
 
 def _build_link_args(lib_path: Path, openssl_lib: Optional[Path] = None) -> dict:
     lib_path = Path(lib_path)
-    link_args: dict = {"extra_objects": [str(lib_path)]}
+    link_args: dict = {}
+
     if os.name == "nt":
         lib_dirs = link_args.setdefault("library_dirs", [])
         if str(lib_path.parent) not in lib_dirs:
             lib_dirs.append(str(lib_path.parent))
+
+        # Handle DLL vs LIB files differently
+        if lib_path.suffix.lower() == ".dll":
+            # For DLL files, add to library search path and link by name
+            libs = link_args.setdefault("libraries", [])
+            if "signal-protocol-c" not in libs:
+                libs.append("signal-protocol-c")
+        else:
+            # For LIB files, use as extra_objects (existing behavior)
+            link_args["extra_objects"] = [str(lib_path)]
+
         compile_args = link_args.setdefault("extra_compile_args", [])
         if "/std:c11" not in compile_args:
             compile_args.append("/std:c11")
@@ -334,6 +350,7 @@ def _build_link_args(lib_path: Path, openssl_lib: Optional[Path] = None) -> dict
                     libs.append(name)
         link_args.setdefault("extra_link_args", []).append("/NODEFAULTLIB:MSVCRTD")
     else:
+        link_args["extra_objects"] = [str(lib_path)]
         extra = ["-lcrypto", "-lm"]
         link_args.setdefault("extra_link_args", []).extend(extra)
     return link_args
