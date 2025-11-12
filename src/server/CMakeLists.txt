@@ -147,9 +147,10 @@ else()
 endif()
 
 # Add custom message types for room member list API
-target_compile_definitions(log_collector_server PRIVATE 
+target_compile_definitions(log_collector_server PRIVATE
     MSG_TYPE_ROOM_MEMBER_LIST_REQUEST=504
     MSG_TYPE_ROOM_MEMBER_LIST_RESPONSE=505
+    MSG_TYPE_ERROR_RESPONSE=500
 )
 
 # 设置编译特性来降低警告严格度
@@ -184,8 +185,10 @@ set(SERVER_LIBS
 
 if(HAVE_SYSTEM_SQLITE3)
     list(APPEND SERVER_LIBS SQLite::SQLite3)
-else()
+elseif(TARGET unofficial::sqlite3::sqlite3)
     list(APPEND SERVER_LIBS unofficial::sqlite3::sqlite3)
+else()
+    message(WARNING "No SQLite3 library available - SQLite functionality will be disabled")
 endif()
 
 if(UNIX AND NOT APPLE)
@@ -206,6 +209,21 @@ endif()
 
 if(ENABLE_COVERAGE AND COVERAGE_LIBS)
     list(APPEND SERVER_LIBS ${COVERAGE_LIBS})
+endif()
+
+# Set RPATH for Signal Protocol library
+if(APPLE)
+    set_target_properties(log_collector_server PROPERTIES
+        BUILD_WITH_INSTALL_RPATH TRUE
+        INSTALL_RPATH "@executable_path/../lib;@executable_path/../../_deps/signal-install/lib"
+        INSTALL_RPATH_USE_LINK_PATH TRUE
+    )
+elseif(UNIX)
+    set_target_properties(log_collector_server PROPERTIES
+        BUILD_WITH_INSTALL_RPATH TRUE
+        INSTALL_RPATH "$ORIGIN/../lib:$ORIGIN/../../_deps/signal-install/lib"
+        INSTALL_RPATH_USE_LINK_PATH TRUE
+    )
 endif()
 
 target_link_libraries(log_collector_server PRIVATE ${SERVER_LIBS})

@@ -1187,6 +1187,10 @@ PROTOBUF_C__END_DECLS
         , NULL, 0, NULL, 0                                                     \
     }
 
+/* --- message init functions --- */
+
+void mingdrlms__v2__room_member__init(Mingdrlms__V2__RoomMember *message);
+
 /* --- message pack/unpack functions --- */
 
 size_t mingdrlms__v2__room_member__get_packed_size(

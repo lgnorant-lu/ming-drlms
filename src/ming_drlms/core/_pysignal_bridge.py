@@ -325,12 +325,22 @@ def _locate_signal_artifacts() -> Tuple[Optional[Path], Optional[Path]]:
 
     root = Path(__file__).resolve().parents[3]
     build_root = root / "build"
-    search_dirs = [build_root]
+
+    # Add CI-specific paths
+    ci_paths = [
+        Path("/home/runner/work") / root.name / root.name / "build",  # Linux/macOS CI
+        Path("D:/a") / root.name / "build",  # Windows CI
+    ]
+
+    search_dirs = [build_root] + ci_paths
     if build_root.is_dir():
         for child in build_root.iterdir():
             if child.is_dir():
                 search_dirs.append(child)
+
     for base in search_dirs:
+        if not base.exists():
+            continue
         signal_dir = base / "_deps"
         if signal_dir.is_dir():
             for candidate in signal_dir.glob("**/signal-install"):

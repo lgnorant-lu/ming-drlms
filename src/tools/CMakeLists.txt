@@ -74,4 +74,19 @@ if(ENABLE_SIGNAL_SPIKE)
     if(UNIX)
         target_link_libraries(test_signal_spike PRIVATE m)
     endif()
+
+    # Set RPATH for Signal Protocol library
+    if(APPLE)
+        set_target_properties(test_signal_spike PROPERTIES
+            BUILD_WITH_INSTALL_RPATH TRUE
+            INSTALL_RPATH "@executable_path/../../_deps/signal-install/lib"
+            INSTALL_RPATH_USE_LINK_PATH TRUE
+        )
+    elseif(UNIX)
+        set_target_properties(test_signal_spike PROPERTIES
+            BUILD_WITH_INSTALL_RPATH TRUE
+            INSTALL_RPATH "$ORIGIN/../../_deps/signal-install/lib"
+            INSTALL_RPATH_USE_LINK_PATH TRUE
+        )
+    endif()
 endif()

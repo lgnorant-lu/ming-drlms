@@ -74,15 +74,31 @@ ExternalProject_Add(signal_protocol_ext
     LOG_BUILD ON
     LOG_INSTALL ON)
 
-# For Windows, ensure both DLL and LIB files are installed to correct directories
+# Ensure proper library installation for all platforms
 if(WIN32)
     # After the external project install, move/copy DLL to bin directory
     add_custom_command(TARGET signal_protocol_ext POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory ${SIGNAL_INSTALL_PREFIX}/bin
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different 
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
             ${SIGNAL_INSTALL_PREFIX}/lib/${_signal_dll_name}
             ${SIGNAL_INSTALL_PREFIX}/bin/${_signal_dll_name}
         COMMENT "Installing signal-protocol-c.dll to bin directory"
+    )
+elseif(APPLE)
+    # On macOS, ensure the library is in the correct location and has proper install names
+    add_custom_command(TARGET signal_protocol_ext POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${SIGNAL_INSTALL_PREFIX}/lib
+        COMMAND install_name_tool -id @rpath/${_signal_lib_name}
+            ${SIGNAL_INSTALL_PREFIX}/lib/${_signal_lib_name}
+        COMMENT "Setting install name for macOS dylib"
+    )
+else()
+    # On Linux, create symlink for versioned library if needed
+    add_custom_command(TARGET signal_protocol_ext POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${SIGNAL_INSTALL_PREFIX}/lib
+        COMMAND ln -sf ${SIGNAL_INSTALL_PREFIX}/lib/libsignal-protocol-c.so
+            ${SIGNAL_INSTALL_PREFIX}/lib/libsignal-protocol-c.so.2
+        COMMENT "Creating versioned symlink for Linux shared library"
     )
 endif()
 
