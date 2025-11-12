@@ -184,6 +184,7 @@ jobs:
       - name: Run Python unit tests
         env:
           QT_QPA_PLATFORM: offscreen
+          PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: python
         run: python -m pytest -m "not integration" tests/python
 
       - name: Run coverage and integration suite
