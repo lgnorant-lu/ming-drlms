@@ -10,7 +10,9 @@ dynamic = ["version"]
 description = "CLI wrapper for DRLMS server/agent with pretty UX"
 readme = "README.md"
 authors = [{ name = "lgnorant-lu", email = "zhouzihan825@gmail.com" }]
-license = { file = "LICENSE" }
+# 依据 PEP 621 使用 SPDX 字符串并在同段声明许可证文件，兼容 setuptools 校验
+license = "MIT"
+license-files = ["LICENSE"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: POSIX :: Linux",
@@ -44,7 +46,6 @@ ming-drlms-gui = "ming_drlms_gui.app:main"
 [tool.setuptools]
 package-dir = {"" = "src"}
 include-package-data = true
-license-files = ["LICENSE"]
 
 [tool.setuptools.package-data]
 "ming_drlms" = ["cli_help/*.md"]
