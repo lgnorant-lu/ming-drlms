@@ -95,7 +95,7 @@ jobs:
             ${{ env.VCPKG_ROOT }}
             ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
           key: |
-            ${{ runner.os }}-vcpkg-v2024.12.01-${{ hashFiles('.github/workflows/build-and-test.yml', '.github/vcpkg-windows-ports.txt') }}
+            ${{ runner.os }}-vcpkg-v2024.12.01-${{ hashFiles('vcpkg.json') }}
           restore-keys: |
             ${{ runner.os }}-vcpkg-v2024.12.01-
             ${{ runner.os }}-vcpkg-

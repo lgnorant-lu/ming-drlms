@@ -86,9 +86,8 @@ jobs:
             ${{ env.VCPKG_ROOT }}
             ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
           key: |
-            ${{ runner.os }}-vcpkg-v2024.12.01-spike-${{ hashFiles('vcpkg.json') }}
+            ${{ runner.os }}-vcpkg-v2024.12.01-${{ hashFiles('vcpkg.json') }}
           restore-keys: |
-            ${{ runner.os }}-vcpkg-v2024.12.01-spike-
             ${{ runner.os }}-vcpkg-v2024.12.01-
             ${{ runner.os }}-vcpkg-
       - name: Bootstrap vcpkg
