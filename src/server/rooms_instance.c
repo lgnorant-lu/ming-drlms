@@ -57,7 +57,7 @@ rooms_instance_broadcast_presence_event(Room *room, const char *username,
 
     snprintf(content_buffer, sizeof(content_buffer),
              "{\"user\": \"%s\", \"timestamp\": \"%s\"}", username, timestamp);
-    event.content = content_buffer;
+    event.display_token = content_buffer;
 
     // Pack the event
     size_t event_size = mingdrlms__v2__room_event__get_packed_size(&event);
