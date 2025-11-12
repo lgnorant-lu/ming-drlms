@@ -407,8 +407,26 @@ class RoomService:
     def _safe_int(value: str) -> int:
         try:
             return int(value)
-        except Exception:
+        except ValueError:
             return 0
+
+    def get_members(
+        self,
+        *,
+        host: str,
+        port: int,
+        user: str,
+        password: str,
+        room: str,
+    ) -> CommandResult:
+        """Get the list of members in a room."""
+        return self._execute_simple_command(
+            host=host,
+            port=port,
+            user=user,
+            password=password,
+            command=f"ROOMMEMBERS|{room}\n",
+        )
 
 
 __all__ = [

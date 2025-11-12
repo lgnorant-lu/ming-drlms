@@ -407,6 +407,67 @@ def room_transfer(
         print(line)
 
 
+@room_app.command("members", help="显示房间成员列表")
+def room_members(
+    room: str = typer.Option(..., "--room", "-r", help="房间名"),
+    host: str = typer.Option("127.0.0.1", "--host", "-H"),
+    port: int = typer.Option(8080, "--port", "-p"),
+    user: str = typer.Option("alice", "--user", "-u"),
+    password: str = typer.Option("password", "--password", "-P"),
+    json_output: bool = typer.Option(False, "--json", help="JSON格式输出"),
+):
+    room = _option_value(room, "room")
+    host = _option_value(host, "host")
+    port = _option_value(port, "port")
+    user = _option_value(user, "user")
+    password = _option_value(password, "password")
+    try:
+        result = room_service.get_members(
+            host=host,
+            port=port,
+            user=user,
+            password=password,
+            room=room,
+        )
+    except RoomServiceError as exc:
+        print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1)
+
+    if json_output:
+        # Parse and display as JSON
+        for line in result.lines:
+            if line.startswith("ROOMMEMBERS|"):
+                # This would need proper JSON parsing in real implementation
+                print(line)
+            elif line == "OK":
+                print('{"status": "success", "room": "' + room + '"}')
+            else:
+                print(line)
+    else:
+        # Display as table
+        table = Table(title=f"房间成员: {room}")
+        table.add_column("用户ID", style="cyan")
+        table.add_column("设备ID", style="magenta")
+        table.add_column("加入时间", style="green")
+
+        for line in result.lines:
+            if line.startswith("ROOMMEMBERS|"):
+                # Parse the response format: ROOMMEMBERS|room_name|user_id|device_id|timestamp|...
+                parts = line.split("|")
+                if len(parts) >= 4:
+                    user_id = parts[2]
+                    device_id = parts[3]
+                    timestamp = parts[4] if len(parts) > 4 else "N/A"
+                    table.add_row(user_id, device_id, timestamp)
+            elif line == "OK":
+                print("成功获取房间成员列表")
+            else:
+                print(line)
+
+        if len(table.rows) > 0:
+            print(table)
+
+
 __all__ = [
     "room_app",
     "room_sub",
@@ -416,4 +477,5 @@ __all__ = [
     "room_set_policy",
     "room_set_storage_policy",
     "room_transfer",
+    "room_members",
 ]

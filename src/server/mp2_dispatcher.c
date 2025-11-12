@@ -5,6 +5,7 @@
 #include "mp2_e2ee.h"
 #include "mp2_protocol.h"
 #include "mp2_rooms.h"
+#include "mp2_room_members.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -241,6 +242,8 @@ int mp2_dispatcher_handle_frame(platform_socket_t fd, const mp2_frame_t *frame,
     case MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_E2EE_PREKEY_BUNDLE_REQUEST:
         return mp2_e2ee_handle_prekey_bundle(fd, frame->payload,
                                              frame->payload_len);
+    case MSG_TYPE_ROOM_MEMBER_LIST_REQUEST:
+        return mp2_room_members_handle_list_request(fd, frame);
     case MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_S2S_PUB_REQUEST:
         mp2_dispatcher_handle_s2s_publish(fd, frame);
         return 0;

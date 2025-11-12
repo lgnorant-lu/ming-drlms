@@ -11,6 +11,7 @@ set(SERVER_SOURCES
     mp2_rooms_history.c
     mp2_rooms_files.c
     mp2_rooms.c
+    mp2_room_members.c
     server_users.c
     rooms_utils.c
     rooms_social.c
@@ -144,6 +145,12 @@ else()
         -w
     )
 endif()
+
+# Add custom message types for room member list API
+target_compile_definitions(log_collector_server PRIVATE 
+    MSG_TYPE_ROOM_MEMBER_LIST_REQUEST=504
+    MSG_TYPE_ROOM_MEMBER_LIST_RESPONSE=505
+)
 
 # 设置编译特性来降低警告严格度
 set_target_properties(log_collector_server PROPERTIES

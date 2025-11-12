@@ -10,6 +10,8 @@
 #include "federation.h"
 #include "sqlite_storage.h"
 #include "rooms_gc.h"
+#include "mp2_protocol.h"
+#include "mp2_room_members.h"
 extern int rooms_is_sqlite_enabled(void);
 extern SQLiteStorage *rooms_get_sqlite_storage(void);
 extern void room_update_aggregates_locked(Room *room);
@@ -17,6 +19,54 @@ extern void rfc3339_time_local(char *buf, size_t cap);
 extern void dummy_sha256_hex(char *out_hex, size_t out_sz);
 extern long rooms_get_ignite_pending_ttl(void);
 extern long rooms_get_ignite_active_ttl(void);
+
+/**
+ * Broadcast presence event to all room subscribers
+ */
+static void
+rooms_instance_broadcast_presence_event(Room *room, const char *username,
+                                        int event_kind /* 2=JOINED, 3=LEFT */) {
+    if (!room || !username || *username == '\0') {
+        return;
+    }
+
+    // Only broadcast for room events if this is a room instance (not a specific
+    // instance) We need to broadcast to all instances of this room
+    for (RoomInstance *inst = room->instances; inst; inst = inst->next) {
+        // Create presence event payload (simplified - would need proper
+        // protobuf in real implementation)
+        static char event_buffer[256];
+        static char timestamp[32];
+
+        // Create timestamp
+        time_t now = time(NULL);
+        struct tm *tm_info = gmtime(&now);
+        strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ", tm_info);
+
+        // Format presence event (this is a simplified format)
+        // In a real implementation, this would be a proper protobuf RoomEvent
+        // with kind=MEMBER_JOINED/LEFT
+        snprintf(event_buffer, sizeof(event_buffer),
+                 "{\"event_type\": \"presence\", \"user\": \"%s\", \"action\": "
+                 "\"%s\", \"timestamp\": \"%s\"}",
+                 username, event_kind == 2 ? "joined" : "left", timestamp);
+
+        // Broadcast to all subscribers in this instance
+        platform_mutex_lock(&inst->mu);
+        for (size_t i = 0; i < inst->subs_len; ++i) {
+            Subscriber *sub = &inst->subs[i];
+            if (sub->fd != PLATFORM_INVALID_SOCKET) {
+                // Send the presence event as a text message
+                // In the real implementation, this would be a proper RoomEvent
+                // with the new MEMBER_JOINED/LEFT kind
+                mp2_protocol_send_frame(
+                    sub->fd, MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ROOM_EVENT,
+                    (unsigned char *)event_buffer, strlen(event_buffer));
+            }
+        }
+        platform_mutex_unlock(&inst->mu);
+    }
+}
 
 void rooms_clear_all_subscribers(Room *room, int close_fds) {
     if (!room)
@@ -148,6 +198,13 @@ int rooms_inst_add_subscriber(Room *room, RoomInstance *instance,
             rooms_get_sqlite_storage(), room->name, total_instances_snapshot,
             total_subs_snapshot, last_event_snapshot);
     }
+
+    // Broadcast MEMBER_JOINED event to all room subscribers
+    if (username && *username) {
+        rooms_instance_broadcast_presence_event(room, username,
+                                                2); // 2 = MEMBER_JOINED
+    }
+
     return 0;
 }
 
@@ -170,8 +227,12 @@ int rooms_inst_remove_subscriber(Room *room, RoomInstance *instance,
     }
     platform_mutex_lock(&instance->mu);
     int removed = 0;
+    char removed_username[64] = {0};
     for (size_t i = 0; i < instance->subs_len; ++i) {
         if (instance->subs[i].fd == fd) {
+            // Save the username before removing
+            strncpy(removed_username, instance->subs[i].user,
+                    sizeof(removed_username) - 1);
             rooms_instance_remove_sub_locked(instance, i);
             removed = 1;
             break;
@@ -233,6 +294,13 @@ int rooms_inst_remove_subscriber(Room *room, RoomInstance *instance,
             rooms_get_sqlite_storage(), room->name, total_instances_snapshot,
             total_subs_snapshot, last_event_snapshot);
     }
+
+    // Broadcast MEMBER_LEFT event to all room subscribers
+    if (removed_username[0] != '\0') {
+        rooms_instance_broadcast_presence_event(room, removed_username,
+                                                3); // 3 = MEMBER_LEFT
+    }
+
     return 0;
 }
 

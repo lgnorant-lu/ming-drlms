@@ -1129,3 +1129,6 @@ extern const ProtobufCMessageDescriptor
 PROTOBUF_C__END_DECLS
 
 #endif /* PROTOBUF_C_schema_2fv2_2froom_2eproto__INCLUDED */
+
+/* RoomMember message definitions need to be added here */
+/* This file should be regenerated with protoc-c when available */
