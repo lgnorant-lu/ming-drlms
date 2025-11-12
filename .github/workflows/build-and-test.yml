@@ -200,10 +200,6 @@ jobs:
       - name: Smoke Test M-Proto-v2 Handler
         if: matrix.os == 'ubuntu-latest'
         shell: bash
-        env:
-          DRLMS_ENABLE_MPROTO_V2: "1"
-          SMOKE_HOST: 127.0.0.1
-          SMOKE_PORT: 19090
         run: |
           set -euo pipefail
           # Use coverage build dir from previous step
@@ -225,6 +221,8 @@ jobs:
           SERVER=$(find_server "${BIN_DIR}") || { echo "[error] server not found"; exit 1; }
           echo "Using server: ${SERVER}"
           # Launch server in background, capture stdout/stderr
+          SMOKE_HOST=127.0.0.1
+          SMOKE_PORT=19090
           : > mp2_server.out
           : > mp2_server.err
           ( env DRLMS_ENABLE_MPROTO_V2=1 DRLMS_PORT="${SMOKE_PORT}" "${SERVER}" > mp2_server.out 2> mp2_server.err & echo $! > mp2_server.pid )
