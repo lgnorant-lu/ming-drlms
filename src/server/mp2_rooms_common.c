@@ -145,8 +145,12 @@ int mp2_rooms_prepare_publish_ctx(platform_socket_t client_fd,
     RoomInstance *instance = NULL;
 
     platform_mutex_lock(&room->mu);
-    fprintf(stderr, "[DEBUG] mp2_rooms_prepare_publish_ctx: checking room %s, total_instances=%zu\n",
-            room_name ? room_name : "NULL", room->total_instances);
+    fprintf(stderr, "[DEBUG] mp2_rooms_prepare_publish_ctx: checking room %s, total_instances=%zu, instances=%p\n",
+            room_name ? room_name : "NULL", room->total_instances, room->instances);
+    if (room->instances) {
+        fprintf(stderr, "[DEBUG] mp2_rooms_prepare_publish_ctx: first instance=%p, subs_len=%zu\n",
+                room->instances, room->instances->subs_len);
+    }
     instance = rooms_inst_find_by_fd_locked(room, client_fd, &inst_uuid);
     if (!instance) {
         platform_mutex_unlock(&room->mu);
