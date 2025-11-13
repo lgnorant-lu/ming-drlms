@@ -255,22 +255,22 @@ def load_bridge() -> Tuple[FFI, object]:
             if bin_dir.exists():
                 dll_dir = str(bin_dir)
                 current_path = os.environ.get("PATH", "")
-            if dll_dir not in current_path:
-                os.environ["PATH"] = dll_dir + os.pathsep + current_path
-                print(
-                    f"[DEBUG] Added DLL directory to PATH: {dll_dir} (exists: {Path(dll_dir).exists()})",
-                    file=sys.stderr,
-                )
+                if dll_dir not in current_path:
+                    os.environ["PATH"] = dll_dir + os.pathsep + current_path
+                    print(
+                        f"[DEBUG] Added DLL directory to PATH: {dll_dir} (exists: {Path(dll_dir).exists()})",
+                        file=sys.stderr,
+                    )
                 print(
                     f"[DEBUG] Checking for signal-protocol-c.dll at: {dll_path} (exists: {dll_path.exists()})",
                     file=sys.stderr,
                 )
-            if dll_path.exists():
-                print(
-                    f"[DEBUG] Found signal-protocol-c.dll at: {dll_path}",
-                    file=sys.stderr,
-                )
-                break
+                if dll_path.exists():
+                    print(
+                        f"[DEBUG] Found signal-protocol-c.dll at: {dll_path}",
+                        file=sys.stderr,
+                    )
+                    break
 
         print(
             f"[DEBUG] Final PATH after modifications: {os.environ['PATH']}",

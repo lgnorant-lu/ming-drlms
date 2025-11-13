@@ -162,6 +162,7 @@ def server_up(
     strict: bool = typer.Option(True, "--strict/--no-strict", "-S"),
     max_conn: int = typer.Option(128, "--max-conn", "-m"),
     config: Path = typer.Option(None, "--config", "-c", help="config yaml path"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show server output"),
 ):
     """Start server in background with health check."""
     maybe_banner()
@@ -263,14 +264,23 @@ def server_up(
             [p for p in path_parts[1:] if p] + [path_parts[0]]
         )
     SERVER_LOG.parent.mkdir(parents=True, exist_ok=True)
-    with open(SERVER_LOG, "w") as lf:
+    if verbose:
+        # Show server output directly
         p = subprocess.Popen(
             [str(server_bin)],
             env=env,
-            stdout=lf,
-            stderr=subprocess.STDOUT,
             start_new_session=True,
         )
+    else:
+        # Redirect to log file
+        with open(SERVER_LOG, "w") as lf:
+            p = subprocess.Popen(
+                [str(server_bin)],
+                env=env,
+                stdout=lf,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
     for _ in range(30):
         if is_listening(port) and p.poll() is None:
             SERVER_PID.write_text(str(p.pid))

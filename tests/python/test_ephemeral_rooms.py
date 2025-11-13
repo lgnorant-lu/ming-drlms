@@ -121,7 +121,7 @@ def test_ephemeral_room_history_lifecycle(tmp_path: Path, runner: CliRunner):
 
     up = runner.invoke(
         app,
-        ["server-up", "-p", str(port), "-d", str(data_dir), "--no-strict"],
+        ["server-up", "-p", str(port), "-d", str(data_dir), "--no-strict", "--verbose"],
     )
     assert up.exit_code in (0, None), up.output
 
