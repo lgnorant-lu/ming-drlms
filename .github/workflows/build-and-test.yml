@@ -113,10 +113,10 @@ jobs:
             Write-Host "Checking vcpkg version..."
             cd $Env:VCPKG_ROOT
             $currentTag = git describe --tags --abbrev=0 2>$null
-            if ($currentTag -ne "v$desiredVersion") {
-              Write-Host "Updating vcpkg from $currentTag to v$desiredVersion..."
-              git fetch --depth 1 origin tag "v$desiredVersion"
-              git checkout "v$desiredVersion"
+            if ($currentTag -ne $desiredVersion) {
+              Write-Host "Updating vcpkg from $currentTag to $desiredVersion..."
+              git fetch --depth 1 origin tag $desiredVersion
+              git checkout $desiredVersion
             }
           }
           
