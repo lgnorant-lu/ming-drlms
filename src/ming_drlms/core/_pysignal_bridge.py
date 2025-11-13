@@ -238,6 +238,7 @@ def load_bridge() -> Tuple[FFI, object]:
         build_root = root / "build"
         bin_candidates = [
             build_root / "_deps" / "signal-install" / "bin",
+            build_root / "vcpkg_installed" / "x64-windows" / "bin",
             build_root / "RelWithDebInfo",
             build_root / "Debug",
             build_root,
@@ -245,7 +246,9 @@ def load_bridge() -> Tuple[FFI, object]:
 
         for bin_dir in bin_candidates:
             dll_path = bin_dir / "signal-protocol-c.dll"
-            if dll_path.exists():
+            # Add directory if it exists (even if this candidate doesn't contain the signal DLL,
+            # it may contain OpenSSL and other runtime DLLs)
+            if bin_dir.exists():
                 dll_dir = str(bin_dir)
                 current_path = os.environ.get("PATH", "")
                 if dll_dir not in current_path:
@@ -254,6 +257,7 @@ def load_bridge() -> Tuple[FFI, object]:
                         f"[DEBUG] Added DLL directory to PATH: {dll_dir}",
                         file=sys.stderr,
                     )
+            if dll_path.exists():
                 break
 
     ffi = FFI()

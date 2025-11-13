@@ -442,8 +442,28 @@ static int legacy_handle_publish_text(LegacySession *session,
     int ctx_rc = mp2_rooms_prepare_publish_ctx(session->fd, session->user,
                                                room_name, &ctx);
     if (ctx_rc != 0 || !ctx.instance) {
-        free(payload);
-        return legacy_sendf(session->fd, "ERR|PUBT|prepare failed\n");
+        // Fallback: assign an instance without attaching this fd as a
+        // subscriber
+        Room *fb_room = rooms_get_or_create(room_name, NULL);
+        if (fb_room) {
+            InstanceUUID inst_uuid;
+            RoomInstance *inst = NULL;
+            int is_new_instance = 0;
+            if (rooms_assign_instance(fb_room, NULL, &inst_uuid, &inst,
+                                      &is_new_instance) == ROOM_ASSIGN_OK &&
+                inst) {
+                memset(&ctx, 0, sizeof ctx);
+                ctx.room = fb_room;
+                ctx.instance = inst;
+                ctx.instance_uuid = inst_uuid;
+                snprintf(ctx.display_token, sizeof ctx.display_token, "%s",
+                         session->user ? session->user : "");
+            }
+        }
+        if (!ctx.instance) {
+            free(payload);
+            return legacy_sendf(session->fd, "ERR|PUBT|prepare failed\n");
+        }
     }
     char ts[64];
     rfc3339_time_local(ts, sizeof ts);
@@ -458,9 +478,9 @@ static int legacy_handle_publish_text(LegacySession *session,
                           (unsigned long long)event_id);
 
     // Broadcast to all instances in the room
-    rooms_fanout_text_to_room(room_name, ts, session->user, event_id,
-                             payload, payload_len, sha_lower,
-                             session->rate_down_bps, session->fd);
+    rooms_fanout_text_to_room(room_name, ts, session->user, event_id, payload,
+                              payload_len, sha_lower, session->rate_down_bps,
+                              session->fd);
     free(payload);
     return rc;
 }
