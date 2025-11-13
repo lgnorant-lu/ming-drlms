@@ -476,10 +476,14 @@ def _detect_openssl_prefix(
                 )
 
     # Add per-build vcpkg_installed prefixes used by CMake manifest builds in CI
-    repo_root = Path(signal_lib_path).resolve().parents[3]
+    repo_root = Path(signal_lib_path).resolve().parents[3]  # This gets build/ directory
     build_prefixes = [
-        repo_root / "build" / "vcpkg_installed" / "x64-windows",
-        repo_root / "build" / "server_cli" / "vcpkg_installed" / "x64-windows",
+        repo_root
+        / "vcpkg_installed"
+        / "x64-windows",  # build/vcpkg_installed/x64-windows
+        repo_root.parent
+        / "vcpkg_installed"
+        / "x64-windows",  # root/vcpkg_installed/x64-windows
     ]
     for prefix in build_prefixes:
         include_dir = prefix / "include"

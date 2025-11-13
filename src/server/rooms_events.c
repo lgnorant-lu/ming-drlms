@@ -52,6 +52,11 @@ static void throttle_down(size_t bytes, long long rate_bps) {
 }
 
 static int send_all(platform_socket_t fd, const void *buf, size_t len) {
+    // Skip sending text data to MP2 connections - they use binary protocol
+    if (mp2_protocol_is_fd_mp2(fd)) {
+        return 0; // Not an error, just skip
+    }
+
     const unsigned char *p = (const unsigned char *)buf;
     size_t remaining = len;
     while (remaining > 0) {
