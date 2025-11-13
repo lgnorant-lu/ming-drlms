@@ -175,23 +175,8 @@ static int mp2_rooms_perform_publish(platform_socket_t client_fd,
     }
     room_event__pack(&ev, ev_buf);
 
-    size_t frame_len = 12 + ev_sz;
-    unsigned char *frame = (unsigned char *)malloc(frame_len);
-    if (!frame) {
-        free(ev_buf);
-        mp2_protocol_dbgf("fanout frame alloc failed");
-        return 0;
-    }
-    uint32_t magic_n = htonl(MP2_PROTOCOL_MAGIC);
-    uint16_t ver_n = htons(MP2_PROTOCOL_VERSION);
-    uint16_t type_n = htons(MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ROOM_EVENT);
-    uint32_t len_n = htonl((uint32_t)ev_sz);
-    memcpy(frame, &magic_n, 4);
-    memcpy(frame + 4, &ver_n, 2);
-    memcpy(frame + 6, &type_n, 2);
-    memcpy(frame + 8, &len_n, 4);
-    memcpy(frame + 12, ev_buf, ev_sz);
     // Broadcast MP2 frame to all subscribers in the room/instance
+    // mp2_protocol_send_frame will add the frame header, so we only send the Protobuf payload
     if (ctx.room) {
         platform_mutex_lock(&ctx.room->mu);
         for (RoomInstance *it = ctx.room->instances; it; it = it->next) {
@@ -204,7 +189,7 @@ static int mp2_rooms_perform_publish(platform_socket_t client_fd,
                         (void)mp2_protocol_send_frame(
                             sub->fd,
                             MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ROOM_EVENT,
-                            (unsigned char *)frame, (uint32_t)frame_len);
+                            ev_buf, (uint32_t)ev_sz);
                     }
                 }
             }
@@ -221,13 +206,12 @@ static int mp2_rooms_perform_publish(platform_socket_t client_fd,
                     (void)mp2_protocol_send_frame(
                         sub->fd,
                         MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ROOM_EVENT,
-                        (unsigned char *)frame, (uint32_t)frame_len);
+                        ev_buf, (uint32_t)ev_sz);
                 }
             }
         }
         platform_mutex_unlock(&instance->mu);
     }
-    free(frame);
     free(ev_buf);
 
     char inst_hex[33];
