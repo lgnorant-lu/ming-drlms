@@ -110,7 +110,13 @@ class ServerProcess:
         )
         if os.name == "nt":
             runtime_dir = cfg.data_dir.parent
-            env["PATH"] = f"{runtime_dir};{env.get('PATH', '')}"
+            # Add build directory to PATH for OpenSSL and other DLLs
+            build_dir = Path(self._binary).parent
+            env["PATH"] = f"{build_dir};{runtime_dir};{env.get('PATH', '')}"
+            print(f"[DEBUG] Windows PATH: {env['PATH']}", file=sys.stderr)
+            print(f"[DEBUG] Binary: {self._binary}", file=sys.stderr)
+            print(f"[DEBUG] Data dir: {cfg.data_dir}", file=sys.stderr)
+            print(f"[DEBUG] Log path: {cfg.log_path}", file=sys.stderr)
         self._log_path = cfg.log_path
         cfg.log_path.parent.mkdir(parents=True, exist_ok=True)
         log_fp = open(cfg.log_path, "w", encoding="utf-8")
@@ -127,7 +133,15 @@ class ServerProcess:
         )
         if not _wait_for_port(cfg.host, cfg.port):
             self.stop()
-            raise RuntimeError("server failed to start; see log for details")
+            # Read and include log content in error message
+            log_content = ""
+            try:
+                if cfg.log_path.exists():
+                    log_content = cfg.log_path.read_text(encoding="utf-8")
+            except Exception:
+                log_content = "<could not read log file>"
+            error_msg = f"server failed to start; see log for details\n--- BEGIN server.log ---\n{log_content}--- END server.log ---"
+            raise RuntimeError(error_msg)
 
     def stop(self) -> None:
         if not self._proc:
