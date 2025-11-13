@@ -16,6 +16,7 @@
 #include "mp2_rooms_common.h"
 #include "server_users.h"
 #include "rooms.h"
+#include "rooms_internal.h"
 #include "rooms_utils.h"
 #include "rooms_instance.h"
 #include "rooms_history.h"
