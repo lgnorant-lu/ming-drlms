@@ -137,15 +137,16 @@ jobs:
       - name: Build
         run: cmake --build build --target test_signal_spike --config Release
       - name: Run
+        shell: pwsh
         run: |
-          set -e
-          ./build/Release/test_signal_spike.exe | tee spike.log
-          status=${PIPESTATUS[0]}
-          grep -Fq "Signal E2E Loop OK" spike.log
-          grep_status=$?
-          if [ "$status" -ne 0 ] || [ "$grep_status" -ne 0 ]; then
-            echo "Spike run failed: status=$status grep=$grep_status" >&2
-            exit 1
-          fi
+          $ErrorActionPreference = 'Stop'
+          ./build/Release/test_signal_spike.exe | Tee-Object -FilePath spike.log
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Spike run failed: exit code $LASTEXITCODE" -ErrorAction Stop
+          }
+          $logContent = Get-Content -Path spike.log -Raw
+          if ($logContent -notlike "*Signal E2E Loop OK*") {
+            Write-Error "Spike run failed: expected log message not found" -ErrorAction Stop
+          }
 
 

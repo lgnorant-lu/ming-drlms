@@ -24,6 +24,7 @@
 #include "rooms_events.h"
 #include "rooms_utils.h"
 #include "sqlite_storage.h"
+#include "mp2_protocol.h"
 
 extern int rooms_is_sqlite_enabled(void);
 extern SQLiteStorage *rooms_get_sqlite_storage(void);
