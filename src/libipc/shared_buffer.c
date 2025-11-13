@@ -12,6 +12,7 @@
 static void platform_thread_yield(void) {
     SwitchToThread();
 }
+#if defined(_WIN32)
 static int platform_internal_generate_semaphore_name(platform_semaphore_t *sem,
                                                      const char *suffix) {
     if (!sem) {
@@ -49,6 +50,7 @@ static int platform_internal_generate_semaphore_name(platform_semaphore_t *sem,
              sem->name);
     return 0;
 }
+#endif
 #else
 #include <sched.h>
 #include <unistd.h>
@@ -221,13 +223,10 @@ int shm_init(void) {
         shared->magic = SHARED_BUFFER_MAGIC;
         shared->version = SHARED_BUFFER_VERSION;
         shared->lock = 0;
-        // Initialize sem_empty
-        shared->sem_empty.is_named = 1;
-        if (platform_internal_generate_semaphore_name(&shared->sem_empty,
-                                                      "_empty") != 0)
-            goto init_fail;
-
-        // Create security attributes to allow access from child processes
+#if defined(_WIN32)
+        // Windows-specific semaphore initialization with NULL DACL for
+        // cross-process access Create security attributes to allow access from
+        // child processes
         SECURITY_DESCRIPTOR sd;
         if (!InitializeSecurityDescriptor(&sd, SECURITY_DESCRIPTOR_REVISION)) {
             platform_win32_set_errno(GetLastError());
@@ -244,6 +243,11 @@ int shm_init(void) {
         sa.bInheritHandle = TRUE; // Allow inheritance
         sa.lpSecurityDescriptor = &sd;
 
+        // Initialize sem_empty
+        shared->sem_empty.is_named = 1;
+        if (platform_internal_generate_semaphore_name(&shared->sem_empty,
+                                                      "_empty") != 0)
+            goto init_fail;
         HANDLE empty_handle = CreateSemaphoreW(&sa, (LONG)NUM_SLOTS, LONG_MAX,
                                                shared->sem_empty.name);
         if (!empty_handle) {
@@ -264,6 +268,13 @@ int shm_init(void) {
             goto init_fail;
         }
         shared->sem_full.handle = full_handle;
+#else
+        // Non-Windows platforms use standard semaphore initialization
+        if (platform_semaphore_init(&shared->sem_empty, 1, NUM_SLOTS) != 0)
+            goto init_fail;
+        if (platform_semaphore_init(&shared->sem_full, 1, 0) != 0)
+            goto init_fail;
+#endif
         shm_segment_owner = 1;
     } else {
         shm_segment_owner = 0;
