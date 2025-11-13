@@ -164,8 +164,22 @@ class ServerProcess:
                 proc.send_signal(signal.SIGTERM)
             try:
                 proc.wait(timeout=5)
+                print(
+                    f"[DEBUG] Server process terminated with code: {proc.returncode}",
+                    file=sys.stderr,
+                )
             except subprocess.TimeoutExpired:
                 proc.kill()
+                proc.wait()
+                print(
+                    f"[DEBUG] Server process killed after timeout, exit code: {proc.returncode}",
+                    file=sys.stderr,
+                )
+        else:
+            print(
+                f"[DEBUG] Server process already exited with code: {proc.returncode}",
+                file=sys.stderr,
+            )
         # Print server log for debugging when available
         if self._log_path is not None and self._log_path.exists():
             try:
