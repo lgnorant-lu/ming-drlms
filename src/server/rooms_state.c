@@ -691,6 +691,11 @@ room_find_instance_by_uuid_locked(Room *room, const InstanceUUID *uuid) {
 static RoomInstance *room_select_instance_locked(Room *room) {
     if (!room)
         return NULL;
+    // For ephemeral rooms, prefer reusing existing instances to maintain
+    // message delivery between subscribers and publishers
+    if (room->storage_policy_template == ROOM_STORAGE_EPHEMERAL && room->instances) {
+        return room->instances; // Return first available instance
+    }
     RoomInstance *selected = NULL;
     size_t contenders = 0;
     size_t min_load = SIZE_MAX;
