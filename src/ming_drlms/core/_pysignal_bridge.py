@@ -239,6 +239,10 @@ def load_bridge() -> Tuple[FFI, object]:
         bin_candidates = [
             build_root / "_deps" / "signal-install" / "bin",
             build_root / "vcpkg_installed" / "x64-windows" / "bin",
+            build_root / "vcpkg_installed" / "x64-windows" / "debug" / "bin",
+            # Also add system vcpkg locations that might be used in CI
+            Path("C:/vcpkg/installed/x64-windows/bin"),
+            Path("D:/a/_temp/vcpkg/installed/x64-windows/bin"),
             build_root / "RelWithDebInfo",
             build_root / "Debug",
             build_root,
@@ -251,12 +255,12 @@ def load_bridge() -> Tuple[FFI, object]:
             if bin_dir.exists():
                 dll_dir = str(bin_dir)
                 current_path = os.environ.get("PATH", "")
-                if dll_dir not in current_path:
-                    os.environ["PATH"] = dll_dir + os.pathsep + current_path
-                    print(
-                        f"[DEBUG] Added DLL directory to PATH: {dll_dir}",
-                        file=sys.stderr,
-                    )
+            if dll_dir not in current_path:
+                os.environ["PATH"] = dll_dir + os.pathsep + current_path
+                print(
+                    f"[DEBUG] Added DLL directory to PATH: {dll_dir} (exists: {Path(dll_dir).exists()})",
+                    file=sys.stderr,
+                )
                 print(
                     f"[DEBUG] Checking for signal-protocol-c.dll at: {dll_path} (exists: {dll_path.exists()})",
                     file=sys.stderr,

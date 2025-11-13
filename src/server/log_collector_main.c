@@ -463,6 +463,8 @@ static int legacy_handle_publish_text(LegacySession *session,
     fprintf(stderr, "[DEBUG] mp2_rooms_prepare_publish_ctx result: rc=%d, instance=%p\n",
             ctx_rc, ctx.instance);
     if (ctx_rc != 0 || !ctx.instance) {
+        fprintf(stderr, "[DEBUG] Using fallback publish logic for fd=%d room=%s\n",
+                (int)session->fd, room_name);
         // Fallback: assign an instance without attaching this fd as a subscriber
         Room *fb_room = rooms_get_or_create(room_name, NULL);
         if (fb_room) {
