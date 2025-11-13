@@ -473,8 +473,8 @@ static int legacy_handle_publish_text(LegacySession *session,
                      session->user ? session->user : "");
             platform_mutex_unlock(&fb_room->mu);
         } else {
-            free(payload);
-            return legacy_sendf(session->fd, "ERR|PUBT|prepare failed\n");
+        free(payload);
+        return legacy_sendf(session->fd, "ERR|PUBT|prepare failed\n");
         }
     }
     char ts[64];
@@ -490,9 +490,12 @@ static int legacy_handle_publish_text(LegacySession *session,
                           (unsigned long long)event_id);
 
     // Broadcast to all instances in the room
-    rooms_fanout_text_to_room(room_name, ts, session->user, event_id, payload,
+    fprintf(stderr, "[DEBUG] Broadcasting PUBT event to room: %s, event_id: %llu\n",
+            room_name, (unsigned long long)event_id);
+    int broadcast_rc = rooms_fanout_text_to_room(room_name, ts, session->user, event_id, payload,
                               payload_len, sha_lower, session->rate_down_bps,
                               session->fd);
+    fprintf(stderr, "[DEBUG] Broadcast result: %d\n", broadcast_rc);
     free(payload);
     return rc;
 }

@@ -257,8 +257,21 @@ def load_bridge() -> Tuple[FFI, object]:
                         f"[DEBUG] Added DLL directory to PATH: {dll_dir}",
                         file=sys.stderr,
                     )
+                print(
+                    f"[DEBUG] Checking for signal-protocol-c.dll at: {dll_path} (exists: {dll_path.exists()})",
+                    file=sys.stderr,
+                )
             if dll_path.exists():
+                print(
+                    f"[DEBUG] Found signal-protocol-c.dll at: {dll_path}",
+                    file=sys.stderr,
+                )
                 break
+
+        print(
+            f"[DEBUG] Final PATH after modifications: {os.environ['PATH']}",
+            file=sys.stderr,
+        )
 
     ffi = FFI()
     ffi.cdef(_CDEF)
