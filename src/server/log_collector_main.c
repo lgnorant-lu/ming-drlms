@@ -449,9 +449,29 @@ static int legacy_handle_publish_text(LegacySession *session,
             InstanceUUID inst_uuid;
             RoomInstance *inst = NULL;
             int is_new_instance = 0;
-            if (rooms_assign_instance(fb_room, NULL, &inst_uuid, &inst,
-                                      &is_new_instance) == ROOM_ASSIGN_OK &&
-                inst) {
+            // Prefer an existing instance that already has subscribers
+            platform_mutex_lock(&fb_room->mu);
+            RoomInstance *preferred = NULL;
+            for (RoomInstance *it = fb_room->instances; it; it = it->next) {
+                if (it->subs_len > 0) {
+                    preferred = it;
+                    break;
+                }
+            }
+            if (preferred) {
+                inst = preferred;
+                inst_uuid = preferred->instance_id;
+            }
+            platform_mutex_unlock(&fb_room->mu);
+            // If none found, assign one normally
+            if (!inst) {
+                if (rooms_assign_instance(fb_room, NULL, &inst_uuid, &inst,
+                                          &is_new_instance) != ROOM_ASSIGN_OK ||
+                    !inst) {
+                    inst = NULL;
+                }
+            }
+            if (inst) {
                 memset(&ctx, 0, sizeof ctx);
                 ctx.room = fb_room;
                 ctx.instance = inst;
