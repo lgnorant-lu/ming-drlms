@@ -286,11 +286,6 @@ def load_bridge() -> Tuple[FFI, object]:
                 lib_dirs = link_args.setdefault("library_dirs", [])
                 if str(bin_dir) not in lib_dirs:
                     lib_dirs.append(str(bin_dir))
-
-                # For Windows, also set runtime path for DLL loading
-                runtime_dirs = link_args.setdefault("runtime_library_dirs", [])
-                if str(bin_dir) not in runtime_dirs:
-                    runtime_dirs.append(str(bin_dir))
                 break
     elif sys.platform == "darwin":  # macOS
         # For macOS CI environments, try multiple locations

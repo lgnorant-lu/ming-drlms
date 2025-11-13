@@ -139,6 +139,17 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          # Prepend likely DLL directories to PATH for runtime resolution
+          $dllDirs = @(
+            (Join-Path $Env:GITHUB_WORKSPACE 'build/_deps/signal-install/bin'),
+            (Join-Path $Env:GITHUB_WORKSPACE 'build/vcpkg_installed/x64-windows/bin'),
+            (Join-Path $Env:GITHUB_WORKSPACE 'build/Release'),
+            (Join-Path $Env:GITHUB_WORKSPACE 'build/RelWithDebInfo'),
+            (Join-Path $Env:GITHUB_WORKSPACE 'build/Debug')
+          )
+          foreach ($d in $dllDirs) {
+            if (Test-Path $d) { $Env:PATH = "$d;$Env:PATH" }
+          }
           ./build/Release/test_signal_spike.exe | Tee-Object -FilePath spike.log
           if ($LASTEXITCODE -ne 0) {
             Write-Error "Spike run failed: exit code $LASTEXITCODE" -ErrorAction Stop
