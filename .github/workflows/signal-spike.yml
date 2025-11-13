@@ -94,7 +94,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $desiredVersion = "2024.12.16"
+          $desiredVersion = "2025.10.17"
           if (Test-Path $Env:VCPKG_ROOT) {
             if (-not (Test-Path (Join-Path $Env:VCPKG_ROOT '.git'))) {
               Remove-Item $Env:VCPKG_ROOT -Recurse -Force
