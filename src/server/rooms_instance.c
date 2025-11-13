@@ -40,7 +40,7 @@ rooms_instance_broadcast_presence_event(Room *room, const char *username,
     (void)event_kind;
     (void)room;
     (void)username;
-    return;
+        return;
 #else
     (void)event_kind;
     (void)room;

@@ -135,12 +135,12 @@ jobs:
           if (-not (Test-Path $manifestFile)) {
             throw "vcpkg.json not found: $manifestFile"
           }
-
+          
           Write-Host "Installing dependencies with manifest mode..."
-
+          
           # Use manifest mode for better reproducibility
           & "$Env:VCPKG_ROOT\vcpkg.exe" install --triplet x64-windows --x-manifest-root=$Env:GITHUB_WORKSPACE --recurse
-
+          
           Write-Host "Installed packages:"
           & "$Env:VCPKG_ROOT\vcpkg.exe" list
 

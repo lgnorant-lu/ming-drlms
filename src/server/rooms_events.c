@@ -764,3 +764,34 @@ int rooms_get_files_dir(const char *room_name, char *out, size_t out_cap) {
         return -1;
     return 0;
 }
+
+// Fanout TEXT event to all subscribers of all instances in a room
+int rooms_fanout_text_to_room(const char *room_name, const char *ts,
+                              const char *user, uint64_t event_id,
+                              const unsigned char *payload, size_t len,
+                              const char *sha_hex, long long rate_bps,
+                              platform_socket_t exclude_fd) {
+    if (!room_name || !ts || !user || !payload || !sha_hex)
+        return -1;
+
+    Room *room = rooms_get_or_create(room_name, NULL);
+    if (!room)
+        return -1;
+
+    platform_mutex_lock(&room->mu);
+    int rc = 0;
+
+    // Broadcast to all instances in the room
+    for (RoomInstance *inst = room->instances; inst; inst = inst->next) {
+        // Use the instance's own UUID for broadcasting
+        int inst_rc = rooms_fanout_text(inst, room_name, &inst->instance_id, ts, user,
+                                       event_id, payload, len, sha_hex,
+                                       rate_bps, exclude_fd);
+        if (inst_rc != 0 && rc == 0) {
+            rc = inst_rc;  // Return first error encountered
+        }
+    }
+
+    platform_mutex_unlock(&room->mu);
+    return rc;
+}
