@@ -227,10 +227,40 @@ def server_up(
         file=sys.stderr,
     )
     if os.name == "nt":
-        env["PATH"] = (
-            f"{server_bin.parent}{os.pathsep}{env.get('PATH', '')}"
-            if env.get("PATH")
-            else str(server_bin.parent)
+        # Ensure required DLL locations are on PATH for the spawned server
+        build_dir = _default_build_dir()
+        candidates: list[Path] = [
+            server_bin.parent,
+            build_dir / "_deps" / "signal-install" / "bin",
+            build_dir / "vcpkg_installed" / "x64-windows" / "bin",
+            # Also check common multi-config locations
+            build_dir / "RelWithDebInfo",
+            build_dir / "Release",
+            build_dir / "Debug",
+        ]
+        # Fallback build dir used by CLI builder
+        alt_build_dir = (ROOT / "build" / "server_cli").resolve()
+        candidates.extend(
+            [
+                alt_build_dir / "_deps" / "signal-install" / "bin",
+                alt_build_dir / "vcpkg_installed" / "x64-windows" / "bin",
+                alt_build_dir / "RelWithDebInfo",
+                alt_build_dir / "Release",
+                alt_build_dir / "Debug",
+            ]
+        )
+        path_parts = [env.get("PATH", "")]
+        for c in candidates:
+            try:
+                if c.exists():
+                    p = str(c)
+                    if p and p not in path_parts[0]:
+                        path_parts.append(p)
+            except Exception:
+                pass
+        # Prepend discovered paths so they take precedence
+        env["PATH"] = os.pathsep.join(
+            [p for p in path_parts[1:] if p] + [path_parts[0]]
         )
     SERVER_LOG.parent.mkdir(parents=True, exist_ok=True)
     with open(SERVER_LOG, "w") as lf:

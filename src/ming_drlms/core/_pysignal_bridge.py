@@ -232,6 +232,30 @@ def load_bridge() -> Tuple[FFI, object]:
 
     _ensure_win_distutils()
 
+    # For Windows, ensure DLL directory is in PATH for runtime loading
+    if os.name == "nt":
+        root = Path(__file__).resolve().parents[3]
+        build_root = root / "build"
+        bin_candidates = [
+            build_root / "_deps" / "signal-install" / "bin",
+            build_root / "RelWithDebInfo",
+            build_root / "Debug",
+            build_root,
+        ]
+
+        for bin_dir in bin_candidates:
+            dll_path = bin_dir / "signal-protocol-c.dll"
+            if dll_path.exists():
+                dll_dir = str(bin_dir)
+                current_path = os.environ.get("PATH", "")
+                if dll_dir not in current_path:
+                    os.environ["PATH"] = dll_dir + os.pathsep + current_path
+                    print(
+                        f"[DEBUG] Added DLL directory to PATH: {dll_dir}",
+                        file=sys.stderr,
+                    )
+                break
+
     ffi = FFI()
     ffi.cdef(_CDEF)
 
@@ -262,6 +286,11 @@ def load_bridge() -> Tuple[FFI, object]:
                 lib_dirs = link_args.setdefault("library_dirs", [])
                 if str(bin_dir) not in lib_dirs:
                     lib_dirs.append(str(bin_dir))
+
+                # For Windows, also set runtime path for DLL loading
+                runtime_dirs = link_args.setdefault("runtime_library_dirs", [])
+                if str(bin_dir) not in runtime_dirs:
+                    runtime_dirs.append(str(bin_dir))
                 break
     elif sys.platform == "darwin":  # macOS
         # For macOS CI environments, try multiple locations
