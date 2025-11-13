@@ -915,14 +915,19 @@ void rooms_apply_policy_on_owner_offline_if_needed(Room *room,
     policy_snapshot = room->policy;
     for (RoomInstance *inst = room->instances; inst; inst = inst->next) {
         platform_mutex_lock(&inst->mu);
+        fprintf(stderr, "[DEBUG] policy_check: checking instance with %zu subs\n", inst->subs_len);
         if (num_instances <
             (int)(sizeof instances_to_notify / sizeof instances_to_notify[0]))
             instances_to_notify[num_instances++] = inst;
         for (size_t i = 0; i < inst->subs_len; ++i) {
             Subscriber *sub = &inst->subs[i];
+            fprintf(stderr, "[DEBUG] policy_check: sub[%zu]: user='%s', fd=%d, owner_now='%s'\n",
+                    i, sub->user, (int)sub->fd, owner_now);
             if (owner_now[0] != '\0' && sub->user[0] != '\0' &&
-                strcmp(sub->user, owner_now) == 0)
+                strcmp(sub->user, owner_now) == 0) {
+                fprintf(stderr, "[DEBUG] policy_check: owner found present!\n");
                 owner_still_present = 1;
+            }
             if (policy_snapshot == 1 /* delegate */ &&
                 candidate_new_owner[0] == '\0') {
                 if (sub->user[0] != '\0' && owner_now[0] != '\0' &&
@@ -937,6 +942,8 @@ void rooms_apply_policy_on_owner_offline_if_needed(Room *room,
     }
     platform_mutex_unlock(&room->mu);
 
+    fprintf(stderr, "[DEBUG] policy_check: START room=%s, total_instances=%zu\n",
+            room->name, room->total_instances);
     fprintf(stderr, "[policy_check] room=%s owner='%s' present=%d policy=%d\n",
             room->name, owner_now, owner_still_present, policy_snapshot);
 

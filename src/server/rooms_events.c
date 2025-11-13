@@ -54,14 +54,19 @@ static void throttle_down(size_t bytes, long long rate_bps) {
 
 static int send_all(platform_socket_t fd, const void *buf, size_t len) {
     // Skip sending text data to MP2 connections - they use binary protocol
-    if (mp2_protocol_is_fd_mp2(fd)) {
+    int is_mp2 = mp2_protocol_is_fd_mp2(fd);
+    fprintf(stderr, "[DEBUG] send_all: fd=%d, is_mp2=%d\n", (int)fd, is_mp2);
+    if (is_mp2) {
+        fprintf(stderr, "[DEBUG] send_all: skipping MP2 fd=%d\n", (int)fd);
         return 0; // Not an error, just skip
     }
 
+    fprintf(stderr, "[DEBUG] send_all: sending %zu bytes to fd=%d\n", len, (int)fd);
     const unsigned char *p = (const unsigned char *)buf;
     size_t remaining = len;
     while (remaining > 0) {
         int written = send(fd, (const char *)p, (int)remaining, 0);
+        fprintf(stderr, "[DEBUG] send_all: wrote %d bytes, remaining %zu\n", written, remaining - (written > 0 ? written : 0));
         if (written < 0) {
 #if defined(_WIN32)
             int err = WSAGetLastError();
@@ -304,8 +309,12 @@ int rooms_fanout_text(RoomInstance *instance, const char *room_name,
     for (size_t i = 0; i < instance->subs_len; ++i) {
         Subscriber *recipient = &instance->subs[i];
         platform_socket_t fd = recipient->fd;
-        if (exclude_fd != PLATFORM_INVALID_SOCKET && fd == exclude_fd)
+        fprintf(stderr, "[DEBUG] fanout_text: checking subscriber %zu, fd=%d, exclude_fd=%d\n",
+                i, (int)fd, (int)exclude_fd);
+        if (exclude_fd != PLATFORM_INVALID_SOCKET && fd == exclude_fd) {
+            fprintf(stderr, "[DEBUG] fanout_text: excluding fd=%d\n", (int)fd);
             continue;
+        }
         char hdr[512];
         int hl = snprintf(hdr, sizeof hdr, "EVT|TEXT|%s|%s|%s|%s|%llu|%zu|%s\n",
                           room_name, instance_hex, ts, display_for_emit,

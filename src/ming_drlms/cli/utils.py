@@ -4,6 +4,7 @@ import os
 import time
 import subprocess
 import socket as _socket
+import tempfile
 from pathlib import Path
 from typing import Optional
 
@@ -147,8 +148,8 @@ if _BIN_AGENT is None:
     _BIN_AGENT = ROOT / "log_agent"
 BIN_AGENT = _BIN_AGENT
 DATA_DIR = ROOT / "server_files"
-SERVER_LOG = Path("/tmp/drlms_server.log")
-SERVER_PID = Path("/tmp/drlms_server.pid")
+SERVER_LOG = Path(tempfile.gettempdir()) / "drlms_server.log"
+SERVER_PID = Path(tempfile.gettempdir()) / "drlms_server.pid"
 
 
 def get_cli_version() -> str:
