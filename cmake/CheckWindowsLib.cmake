@@ -15,26 +15,25 @@ set(lib_file "${SIGNAL_LIB_DIR}/signal-protocol-c.lib")
 if(EXISTS "${dll_file}")
     message(STATUS "Found signal-protocol-c.dll at ${dll_file} - OK")
 
-    # Ensure import library exists, copy if needed
-    if(NOT EXISTS "${lib_file}")
-        # Try to find the import library in various locations
-        set(possible_lib_locations
-            "${bin_dir}/signal-protocol-c.lib"
-            "${SIGNAL_LIB_DIR}/../lib/signal-protocol-c.lib"
-        )
+    # For MSVC, import library is typically in the same directory as DLL
+    set(dll_dir "${bin_dir}")
+    set(implib_source "${dll_dir}/signal-protocol-c.lib")
 
-        foreach(lib_location IN LISTS possible_lib_locations)
-            if(EXISTS "${lib_location}")
-                execute_process(
-                    COMMAND ${CMAKE_COMMAND} -E copy "${lib_location}" "${lib_file}"
-                    RESULT_VARIABLE copy_result
-                )
-                if(copy_result EQUAL 0)
-                    message(STATUS "Copied import library from ${lib_location} to ${lib_file}")
-                    break()
-                endif()
+    # Ensure import library exists in lib directory for linking
+    if(NOT EXISTS "${lib_file}")
+        if(EXISTS "${implib_source}")
+            execute_process(
+                COMMAND ${CMAKE_COMMAND} -E copy "${implib_source}" "${lib_file}"
+                RESULT_VARIABLE copy_result
+            )
+            if(copy_result EQUAL 0)
+                message(STATUS "Copied import library from ${implib_source} to ${lib_file}")
+            else()
+                message(WARNING "Failed to copy import library from ${implib_source}")
             endif()
-        endforeach()
+        else()
+            message(WARNING "Import library not found at ${implib_source}")
+        endif()
     endif()
 else()
     message(WARNING "WARNING: signal-protocol-c.dll not found at ${dll_file}")
@@ -43,6 +42,6 @@ endif()
 if(EXISTS "${lib_file}")
     message(STATUS "Found signal-protocol-c.lib (import library) at ${lib_file} - OK")
 else()
-    message(WARNING "WARNING: signal-protocol-c.lib (import library) not found at ${lib_file}")
+    message(FATAL_ERROR "ERROR: signal-protocol-c.lib (import library) not found at ${lib_file}")
 endif()
 

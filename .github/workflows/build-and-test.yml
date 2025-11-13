@@ -149,12 +149,25 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $opensslRoot = Join-Path $Env:VCPKG_ROOT 'installed/x64-windows'
-          if (Test-Path $opensslRoot) {
+          # Check both cache location and build location for OpenSSL
+          $cacheOpensslRoot = Join-Path $Env:VCPKG_ROOT 'installed/x64-windows'
+          $buildOpensslRoot = Join-Path $Env:GITHUB_WORKSPACE 'build/vcpkg_installed/x64-windows'
+
+          $opensslRoot = $null
+          if (Test-Path $buildOpensslRoot) {
+            $opensslRoot = $buildOpensslRoot
+            Write-Host "Using build OpenSSL at $opensslRoot"
+          } elseif (Test-Path $cacheOpensslRoot) {
+            $opensslRoot = $cacheOpensslRoot
+            Write-Host "Using cache OpenSSL at $opensslRoot"
+          }
+
+          if ($opensslRoot) {
             Add-Content -Path $Env:GITHUB_ENV -Value "OPENSSL_ROOT_DIR=$opensslRoot"
-            Write-Host "Set OPENSSL_ROOT_DIR=$opensslRoot for Python CFFI"
+            Add-Content -Path $Env:GITHUB_ENV -Value "VCPKG_ROOT=$Env:VCPKG_ROOT"
+            Write-Host "Set OPENSSL_ROOT_DIR=$opensslRoot and VCPKG_ROOT=$Env:VCPKG_ROOT for Python CFFI"
           } else {
-            Write-Warning "OpenSSL root not found at $opensslRoot"
+            Write-Warning "OpenSSL root not found at either $cacheOpensslRoot or $buildOpensslRoot"
           }
 
       - name: Install Python dependencies
