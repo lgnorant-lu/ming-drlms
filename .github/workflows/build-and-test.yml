@@ -95,7 +95,7 @@ jobs:
             ${{ env.VCPKG_ROOT }}
             ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
           key: |
-            ${{ runner.os }}-vcpkg-classic-v2024.12.01-sqlite3-argon2-openssl-protobuf-c
+            ${{ runner.os }}-vcpkg-v2024.12.01-${{ hashFiles('vcpkg.json') }}
           restore-keys: |
             ${{ runner.os }}-vcpkg-v2024.12.01-
             ${{ runner.os }}-vcpkg-
@@ -105,7 +105,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $desiredVersion = "master"  # 使用存在的master分支
+          $desiredVersion = "2024.12.01"
           
           if (Test-Path $Env:VCPKG_ROOT) {
             if (-not (Test-Path (Join-Path $Env:VCPKG_ROOT '.git'))) {
@@ -138,13 +138,18 @@ jobs:
           if (-not (Test-Path $Env:VCPKG_ROOT)) {
             throw "VCPKG_ROOT is not initialized"
           }
-          Write-Host "Installing dependencies with classic mode..."
+          $manifestFile = Join-Path $Env:GITHUB_WORKSPACE 'vcpkg.json'
+          if (-not (Test-Path $manifestFile)) {
+            throw "vcpkg.json not found: $manifestFile"
+          }
+          
+          Write-Host "Installing dependencies with manifest mode..."
           $env:VCPKG_FEATURE_FLAGS = 'binarycaching'
           $env:VCPKG_BINARY_SOURCES = $Env:VCPKG_BINARY_SOURCES
-
-          # Use classic mode for reliable caching
-          & "$Env:VCPKG_ROOT\vcpkg.exe" install sqlite3 argon2 openssl protobuf-c --triplet x64-windows --recurse --verbose
-
+          
+          # Use manifest mode for better reproducibility
+          & "$Env:VCPKG_ROOT\vcpkg.exe" install --triplet x64-windows --x-manifest-root=$Env:GITHUB_WORKSPACE --recurse --verbose
+          
           Write-Host "Installed packages:"
           & "$Env:VCPKG_ROOT\vcpkg.exe" list
 
