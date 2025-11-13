@@ -456,9 +456,22 @@ static int legacy_handle_publish_text(LegacySession *session,
     }
     int rc = legacy_sendf(session->fd, "OK|PUBT|%llu\n",
                           (unsigned long long)event_id);
-    rooms_fanout_text(ctx.instance, room_name, &ctx.instance_uuid, ts,
-                      session->user, event_id, payload, payload_len, sha_lower,
-                      session->rate_down_bps, session->fd);
+
+    // Broadcast to all instances in the room
+    if (ctx.room) {
+        platform_mutex_lock(&ctx.room->mu);
+        for (RoomInstance *inst = ctx.room->instances; inst; inst = inst->next) {
+            rooms_fanout_text(inst, room_name, &inst->instance_id, ts,
+                              session->user, event_id, payload, payload_len, sha_lower,
+                              session->rate_down_bps, session->fd);
+        }
+        platform_mutex_unlock(&ctx.room->mu);
+    } else {
+        // Fallback to single instance broadcast
+        rooms_fanout_text(ctx.instance, room_name, &ctx.instance_uuid, ts,
+                          session->user, event_id, payload, payload_len, sha_lower,
+                          session->rate_down_bps, session->fd);
+    }
     free(payload);
     return rc;
 }

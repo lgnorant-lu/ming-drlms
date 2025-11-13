@@ -191,14 +191,41 @@ static int mp2_rooms_perform_publish(platform_socket_t client_fd,
     memcpy(frame + 6, &type_n, 2);
     memcpy(frame + 8, &len_n, 4);
     memcpy(frame + 12, ev_buf, ev_sz);
+    // Broadcast MP2 frame to all subscribers in the room/instance
     if (ctx.room) {
         platform_mutex_lock(&ctx.room->mu);
         for (RoomInstance *it = ctx.room->instances; it; it = it->next) {
-            (void)rooms_emit_to_all(it, (const char *)frame, frame_len, NULL);
+            platform_mutex_lock(&it->mu);
+            for (size_t i = 0; i < it->subs_len; ++i) {
+                Subscriber *sub = &it->subs[i];
+                if (sub->fd != PLATFORM_INVALID_SOCKET) {
+                    // Only send to MP2 connections
+                    if (mp2_protocol_is_fd_mp2(sub->fd)) {
+                        (void)mp2_protocol_send_frame(
+                            sub->fd,
+                            MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ROOM_EVENT,
+                            (unsigned char *)frame, (uint32_t)frame_len);
+                    }
+                }
+            }
+            platform_mutex_unlock(&it->mu);
         }
         platform_mutex_unlock(&ctx.room->mu);
     } else {
-        (void)rooms_emit_to_all(instance, (const char *)frame, frame_len, NULL);
+        platform_mutex_lock(&instance->mu);
+        for (size_t i = 0; i < instance->subs_len; ++i) {
+            Subscriber *sub = &instance->subs[i];
+            if (sub->fd != PLATFORM_INVALID_SOCKET) {
+                // Only send to MP2 connections
+                if (mp2_protocol_is_fd_mp2(sub->fd)) {
+                    (void)mp2_protocol_send_frame(
+                        sub->fd,
+                        MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ROOM_EVENT,
+                        (unsigned char *)frame, (uint32_t)frame_len);
+                }
+            }
+        }
+        platform_mutex_unlock(&instance->mu);
     }
     free(frame);
     free(ev_buf);
