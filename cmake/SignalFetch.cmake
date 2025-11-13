@@ -45,7 +45,7 @@ set(_signal_cmake_args
     -DBUILD_TESTING=OFF
     -DCOVERAGE=OFF
     -DCMAKE_POSITION_INDEPENDENT_CODE=ON
-    -DBUILD_SHARED_LIBS=$<IF:$<PLATFORM_ID:Windows>,ON,OFF>  # Windows需要共享库给CFFI，其他平台用静态库
+    -DBUILD_SHARED_LIBS=$<IF:$<PLATFORM_ID:Windows>,ON,OFF>
     -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=${SIGNAL_INSTALL_PREFIX}/bin
     -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=${SIGNAL_INSTALL_PREFIX}/lib)
 
@@ -95,14 +95,11 @@ file(MAKE_DIRECTORY "${SIGNAL_INSTALL_PREFIX}/bin")
 
 # 根据平台设置库文件名
 if(WIN32)
-    # Windows: shared library for CFFI
-    set(_signal_lib_name "signal-protocol-c.dll")
-    # Also check for import library if needed for linking
-    set(_signal_implib_name "signal-protocol-c.lib")
-elseif(APPLE)
-    set(_signal_lib_name "libsignal-protocol-c.dylib")
+    # Windows: shared library - use import library for linking
+    set(_signal_lib_name "signal-protocol-c.lib")
 else()
-    set(_signal_lib_name "libsignal-protocol-c.so")
+    # Unix: static library for better compatibility
+    set(_signal_lib_name "libsignal-protocol-c.a")
 endif()
 
 set(_signal_lib_path "${SIGNAL_INSTALL_PREFIX}/lib/${_signal_lib_name}")

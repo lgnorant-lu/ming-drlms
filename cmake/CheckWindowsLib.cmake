@@ -14,6 +14,28 @@ set(lib_file "${SIGNAL_LIB_DIR}/signal-protocol-c.lib")
 
 if(EXISTS "${dll_file}")
     message(STATUS "Found signal-protocol-c.dll at ${dll_file} - OK")
+
+    # Ensure import library exists, copy if needed
+    if(NOT EXISTS "${lib_file}")
+        # Try to find the import library in various locations
+        set(possible_lib_locations
+            "${bin_dir}/signal-protocol-c.lib"
+            "${SIGNAL_LIB_DIR}/../lib/signal-protocol-c.lib"
+        )
+
+        foreach(lib_location IN LISTS possible_lib_locations)
+            if(EXISTS "${lib_location}")
+                execute_process(
+                    COMMAND ${CMAKE_COMMAND} -E copy "${lib_location}" "${lib_file}"
+                    RESULT_VARIABLE copy_result
+                )
+                if(copy_result EQUAL 0)
+                    message(STATUS "Copied import library from ${lib_location} to ${lib_file}")
+                    break()
+                endif()
+            endif()
+        endforeach()
+    endif()
 else()
     message(WARNING "WARNING: signal-protocol-c.dll not found at ${dll_file}")
 endif()
