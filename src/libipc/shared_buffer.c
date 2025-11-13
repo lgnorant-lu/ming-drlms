@@ -224,32 +224,12 @@ int shm_init(void) {
         shared->version = SHARED_BUFFER_VERSION;
         shared->lock = 0;
 #if defined(_WIN32)
-        // Windows-specific semaphore initialization with NULL DACL for
-        // cross-process access Create security attributes to allow access from
-        // child processes
-        SECURITY_DESCRIPTOR sd;
-        if (!InitializeSecurityDescriptor(&sd, SECURITY_DESCRIPTOR_REVISION)) {
-            platform_win32_set_errno(GetLastError());
-            goto init_fail;
-        }
-        if (!SetSecurityDescriptorDacl(&sd, TRUE, NULL,
-                                       FALSE)) { // NULL DACL = allow all access
-            platform_win32_set_errno(GetLastError());
-            goto init_fail;
-        }
-
-        SECURITY_ATTRIBUTES sa;
-        sa.nLength = sizeof(SECURITY_ATTRIBUTES);
-        sa.bInheritHandle = TRUE; // Allow inheritance
-        sa.lpSecurityDescriptor = &sd;
-
+        // Windows-specific semaphore initialization
         // Initialize sem_empty
         shared->sem_empty.is_named = 1;
-        if (platform_internal_generate_semaphore_name(&shared->sem_empty,
-                                                      "_empty") != 0)
+        if (platform_internal_generate_semaphore_name(&shared->sem_empty, "_empty") != 0)
             goto init_fail;
-        HANDLE empty_handle = CreateSemaphoreW(&sa, (LONG)NUM_SLOTS, LONG_MAX,
-                                               shared->sem_empty.name);
+        HANDLE empty_handle = CreateSemaphoreW(NULL, (LONG)NUM_SLOTS, LONG_MAX, shared->sem_empty.name);
         if (!empty_handle) {
             platform_win32_set_errno(GetLastError());
             goto init_fail;
@@ -258,11 +238,9 @@ int shm_init(void) {
 
         // Initialize sem_full
         shared->sem_full.is_named = 1;
-        if (platform_internal_generate_semaphore_name(&shared->sem_full,
-                                                      "_full") != 0)
+        if (platform_internal_generate_semaphore_name(&shared->sem_full, "_full") != 0)
             goto init_fail;
-        HANDLE full_handle =
-            CreateSemaphoreW(&sa, 0L, LONG_MAX, shared->sem_full.name);
+        HANDLE full_handle = CreateSemaphoreW(NULL, 0L, LONG_MAX, shared->sem_full.name);
         if (!full_handle) {
             platform_win32_set_errno(GetLastError());
             goto init_fail;
