@@ -668,6 +668,16 @@ static void *handle_client(void *arg) {
     }
 
     if (!use_mp2) {
+        // Reset socket timeout for text protocol connections to prevent premature disconnection
+#if defined(_WIN32)
+        DWORD tv_reset = 0;  // No timeout for text connections
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv_reset, sizeof(tv_reset));
+#else
+        struct timeval tv_reset;
+        tv_reset.tv_sec = 0;
+        tv_reset.tv_usec = 0;  // No timeout for text connections
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv_reset, sizeof(tv_reset));
+#endif
         LegacySession session;
         memset(&session, 0, sizeof session);
         session.fd = fd;

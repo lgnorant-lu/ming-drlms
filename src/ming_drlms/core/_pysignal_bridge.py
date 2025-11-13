@@ -248,10 +248,10 @@ def load_bridge() -> Tuple[FFI, object]:
             build_root,
         ]
 
+        # First pass: find signal-protocol-c.dll and add all existing directories to PATH
+        dll_found = False
         for bin_dir in bin_candidates:
             dll_path = bin_dir / "signal-protocol-c.dll"
-            # Add directory if it exists (even if this candidate doesn't contain the signal DLL,
-            # it may contain OpenSSL and other runtime DLLs)
             if bin_dir.exists():
                 dll_dir = str(bin_dir)
                 current_path = os.environ.get("PATH", "")
@@ -265,12 +265,12 @@ def load_bridge() -> Tuple[FFI, object]:
                     f"[DEBUG] Checking for signal-protocol-c.dll at: {dll_path} (exists: {dll_path.exists()})",
                     file=sys.stderr,
                 )
-                if dll_path.exists():
+                if dll_path.exists() and not dll_found:
                     print(
                         f"[DEBUG] Found signal-protocol-c.dll at: {dll_path}",
                         file=sys.stderr,
                     )
-                    break
+                    dll_found = True
 
         print(
             f"[DEBUG] Final PATH after modifications: {os.environ['PATH']}",
