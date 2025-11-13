@@ -272,6 +272,45 @@ def load_bridge() -> Tuple[FFI, object]:
                     )
                     dll_found = True
 
+        # Preload dependent DLLs on Windows to avoid "DLL not found" during CFFI module import
+        try:
+            from ctypes import WinDLL  # type: ignore
+
+            # Preload OpenSSL first (dependency of signal-protocol-c)
+            for _d in bin_candidates:
+                if not _d.exists():
+                    continue
+                for _n in ("libcrypto-3-x64.dll", "libssl-3-x64.dll"):
+                    _p = _d / _n
+                    if _p.exists():
+                        try:
+                            WinDLL(str(_p))
+                            print(f"[DEBUG] Preloaded {_n} from {_p}", file=sys.stderr)
+                        except OSError as _e:
+                            print(
+                                f"[DEBUG] Failed to preload {_n}: {_e}", file=sys.stderr
+                            )
+            # Then preload signal-protocol-c.dll itself
+            for _d in bin_candidates:
+                if not _d.exists():
+                    continue
+                _sig = _d / "signal-protocol-c.dll"
+                if _sig.exists():
+                    try:
+                        WinDLL(str(_sig))
+                        print(
+                            f"[DEBUG] Preloaded signal-protocol-c.dll from {_sig}",
+                            file=sys.stderr,
+                        )
+                        break
+                    except OSError as _e:
+                        print(
+                            f"[DEBUG] Failed to preload signal-protocol-c.dll: {_e}",
+                            file=sys.stderr,
+                        )
+        except Exception as _ee:
+            print(f"[DEBUG] Preload phase skipped/failed: {_ee}", file=sys.stderr)
+
         print(
             f"[DEBUG] Final PATH after modifications: {os.environ['PATH']}",
             file=sys.stderr,
