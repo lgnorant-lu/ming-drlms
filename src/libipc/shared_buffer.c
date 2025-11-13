@@ -285,8 +285,10 @@ int shm_init(void) {
     // If we did initialize, semaphores are already attached
     if (!need_init) {
         // Clear handles from shared memory (they're not valid in this process)
+#if defined(_WIN32)
         shared->sem_empty.handle = NULL;
         shared->sem_full.handle = NULL;
+#endif
         // Retry semaphore attach with exponential backoff for Windows
         // robustness
         int retry_count = 0;
