@@ -79,15 +79,15 @@ jobs:
           path: |
             ${{ env.VCPKG_ROOT }}
           key: |
-            ${{ runner.os }}-vcpkg-2025-09-17-${{ hashFiles('vcpkg.json') }}
+            ${{ runner.os }}-vcpkg-2025.10.17-${{ hashFiles('vcpkg.json') }}
           restore-keys: |
-            ${{ runner.os }}-vcpkg-2025-09-17-
+            ${{ runner.os }}-vcpkg-2025.10.17-
             ${{ runner.os }}-vcpkg-
       - name: Bootstrap vcpkg
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $desiredVersion = "2025-09-17"
+          $desiredVersion = "2025.10.17"
           if (Test-Path $Env:VCPKG_ROOT) {
             if (-not (Test-Path (Join-Path $Env:VCPKG_ROOT '.git'))) {
               Remove-Item $Env:VCPKG_ROOT -Recurse -Force
