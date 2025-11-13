@@ -28,7 +28,7 @@ from ming_drlms.proto.schema.v2 import common_pb2, room_pb2
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8080
 _SOCKET_TIMEOUT = 10.0
-_SERVER_START_TIMEOUT = 8.0
+_SERVER_START_TIMEOUT = 2.0
 _PORT_REUSE_GRACE = 5.0
 
 _TEST_USER = "alice"
@@ -106,6 +106,9 @@ class ServerProcess:
                 "DRLMS_AUTH_STRICT": "1",
                 "DRLMS_ENABLE_MPROTO_V2": "1",
                 "DRLMS_JWT_SECRET": env.get("DRLMS_JWT_SECRET", "integration-secret"),
+                "DRLMS_LOG_LEVEL": "DEBUG",  # Enable debug logging
+                # Redirect stderr to stdout so we can see server errors
+                "DRLMS_STDERR_TO_STDOUT": "1",
             }
         )
         if os.name == "nt":
@@ -119,6 +122,12 @@ class ServerProcess:
             print(f"[DEBUG] Log path: {cfg.log_path}", file=sys.stderr)
         self._log_path = cfg.log_path
         cfg.log_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Pre-create data directory and subdirectories
+        cfg.data_dir.mkdir(parents=True, exist_ok=True)
+        (cfg.data_dir / "logs").mkdir(exist_ok=True)
+        (cfg.data_dir / "rooms").mkdir(exist_ok=True)
+
         log_fp = open(cfg.log_path, "w", encoding="utf-8")
         creationflags = 0
         if os.name == "nt":
