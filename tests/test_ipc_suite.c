@@ -43,6 +43,9 @@ static void sleep_ms(unsigned int ms) {
 }
 
 static int reader_main(void) {
+    // Give writer time to create semaphores and start writing
+    sleep_ms(500);
+
     if (shm_init() != 0) {
         perror("Reader: shm_init failed");
         return 1;
@@ -114,8 +117,6 @@ static int writer_main(void) {
         return 1;
     }
 
-    sleep_ms(200);
-
     const size_t large_len = 2000;
     unsigned char large_msg[2000];
     memset(large_msg, 'A', large_len);
@@ -125,6 +126,11 @@ static int writer_main(void) {
         shm_cleanup();
         return 1;
     }
+    printf("Writer: Successfully wrote large message\n");
+    // Give reader time to read
+    sleep_ms(200);
+
+    // Writer returns; cleanup is handled after child exits in parent main
 
     return 0;
 }
@@ -145,8 +151,14 @@ static int spawn_reader_process(PROCESS_INFORMATION *pi) {
     si.cb = sizeof(si);
     ZeroMemory(pi, sizeof(*pi));
 
-    if (!CreateProcessA(NULL, cmd, NULL, NULL, FALSE, 0, NULL, NULL, &si, pi))
+    if (!CreateProcessA(NULL, cmd, NULL, NULL, FALSE, 0, NULL, NULL, &si, pi)) {
+        DWORD err = GetLastError();
+        fprintf(
+            stderr,
+            "spawn_reader_process: CreateProcess failed (cmd=%s, error=%lu)\n",
+            cmd, (unsigned long)err);
         return -1;
+    }
     return 0;
 }
 
@@ -162,6 +174,9 @@ static unsigned int current_pid_component(void) {
 static unsigned int generate_shm_key(void) {
     unsigned int pid_component = current_pid_component();
     unsigned int time_component = (unsigned int)time(NULL);
+#if defined(_WIN32)
+    time_component ^= GetTickCount();
+#endif
     return 0x54455300u ^ pid_component ^ time_component;
 }
 

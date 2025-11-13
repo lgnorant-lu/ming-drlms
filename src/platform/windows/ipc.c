@@ -94,32 +94,61 @@ int platform_shm_release(platform_shm_handle_t handle) {
     return 0;
 }
 
-static LONG g_sem_counter = 0;
-
-static int
-platform_internal_generate_semaphore_name(platform_semaphore_t *sem) {
+static int platform_internal_generate_semaphore_name(platform_semaphore_t *sem,
+                                                     const char *suffix) {
     if (!sem) {
         errno = EINVAL;
         return -1;
     }
-    DWORD pid = GetCurrentProcessId();
-    DWORD tid = GetCurrentThreadId();
-    LONG seq = InterlockedIncrement(&g_sem_counter);
-    int written =
-        _snwprintf_s(sem->name, PLATFORM_SEMAPHORE_NAME_MAX, _TRUNCATE,
-                     L"Local\\drlms_sem_%08lx_%08lx_%06ld", (unsigned long)pid,
-                     (unsigned long)tid, (long)seq);
+    // Use a fixed name based on shared memory key to ensure parent/child
+    // processes share semaphores The key is derived from environment variable
+    // or default 'LOGB' (0x4c4f4742)
+    const char *env = getenv("DRLMS_SHM_KEY");
+    platform_ipc_key_t key;
+    if (!env || !*env) {
+        key = (platform_ipc_key_t)0x4c4f4742; // default 'LOGB'
+    } else {
+        char *endptr = NULL;
+        unsigned long val = strtoul(env, &endptr, 0);
+        if (endptr == env || val == 0ul || val > 0xFFFFFFFFul) {
+            key = (platform_ipc_key_t)0x4c4f4742;
+        } else {
+            key = (platform_ipc_key_t)val;
+        }
+    }
+    fprintf(stderr,
+            "platform_internal_generate_semaphore_name: key=0x%08lx, env=%s, "
+            "suffix=%s\n",
+            (unsigned long)key, env ? env : "(null)", suffix);
+    int written = _snwprintf_s(sem->name, PLATFORM_SEMAPHORE_NAME_MAX,
+                               _TRUNCATE, L"Local\\drlms_shm_sem_%08lx_%hs",
+                               (unsigned long)key, suffix);
     if (written < 0) {
         errno = EINVAL;
         return -1;
     }
+    fwprintf(stderr, L"platform_internal_generate_semaphore_name: name=%ls\n",
+             sem->name);
     return 0;
 }
 
 static HANDLE platform_internal_open_named_semaphore(const wchar_t *name) {
+    fwprintf(stderr,
+             L"platform_internal_open_named_semaphore: opening name=%ls\n",
+             name);
     HANDLE handle = OpenSemaphoreW(SEMAPHORE_ALL_ACCESS, FALSE, name);
     if (!handle) {
-        platform_win32_set_errno(GetLastError());
+        DWORD err = GetLastError();
+        fwprintf(stderr,
+                 L"platform_internal_open_named_semaphore: OpenSemaphoreW "
+                 L"failed (error=%lu)\n",
+                 (unsigned long)err);
+        platform_win32_set_errno(err);
+    } else {
+        fwprintf(
+            stderr,
+            L"platform_internal_open_named_semaphore: success, handle=%p\n",
+            handle);
     }
     return handle;
 }
@@ -134,9 +163,8 @@ int platform_semaphore_init(platform_semaphore_t *sem, int shared,
     sem->handle = NULL;
     sem->is_named = shared ? 1 : 0;
     if (sem->is_named) {
-        if (platform_internal_generate_semaphore_name(sem) != 0) {
-            return -1;
-        }
+        // Note: semaphore name should be set by caller for shared semaphores
+        // This function assumes sem->name is already set
     } else {
         sem->name[0] = L'\0';
     }
@@ -144,8 +172,13 @@ int platform_semaphore_init(platform_semaphore_t *sem, int shared,
     HANDLE handle = CreateSemaphoreW(NULL, (LONG)value, LONG_MAX,
                                      sem->is_named ? sem->name : NULL);
     if (!handle) {
-        platform_win32_set_errno(GetLastError());
-        sem->handle = NULL;
+        DWORD err = GetLastError();
+        platform_win32_set_errno(err);
+        fwprintf(stderr,
+                 L"platform_semaphore_init: CreateSemaphoreW failed (name=%ls, "
+                 L"value=%u, error=%lu)\n",
+                 sem->is_named ? sem->name : L"(unnamed)", (unsigned)value,
+                 (unsigned long)err);
         return -1;
     }
 
@@ -183,8 +216,17 @@ int platform_semaphore_wait(platform_semaphore_t *sem) {
 #else
         errno = EIO;
 #endif
+    } else if (wait_rc == WAIT_FAILED) {
+        DWORD err = GetLastError();
+        fprintf(stderr,
+                "platform_semaphore_wait: WaitForSingleObject failed "
+                "(handle=%p, error=%lu)\n",
+                sem->handle, (unsigned long)err);
+        platform_win32_set_errno(err);
     } else {
-        platform_win32_set_errno(GetLastError());
+        fprintf(stderr, "platform_semaphore_wait: unexpected wait result %lu\n",
+                (unsigned long)wait_rc);
+        errno = EIO;
     }
     return -1;
 }
@@ -202,18 +244,33 @@ int platform_semaphore_post(platform_semaphore_t *sem) {
 }
 
 int platform_semaphore_attach(platform_semaphore_t *sem) {
+    fprintf(stderr,
+            "platform_semaphore_attach: sem=%p, is_named=%d, handle=%p\n", sem,
+            sem ? sem->is_named : -1, sem ? sem->handle : NULL);
     if (!sem) {
         errno = EINVAL;
         return -1;
     }
     if (!sem->is_named) {
+        fprintf(stderr,
+                "platform_semaphore_attach: not named, returning success\n");
         if (!sem->handle) {
             errno = EINVAL;
             return -1;
         }
         return 0;
     }
-    if (!sem->handle && sem->name[0] != L'\0') {
+    fprintf(stderr,
+            "platform_semaphore_attach: named semaphore, attempting to open\n");
+    if (!sem->handle) {
+        fwprintf(stderr, L"platform_semaphore_attach: current name='%ls'\n",
+                 sem->name);
+        if (sem->name[0] == L'\0') {
+            fprintf(stderr, "platform_semaphore_attach: name is empty, this "
+                            "should not happen for named semaphores\n");
+            errno = EINVAL;
+            return -1;
+        }
         HANDLE opened = platform_internal_open_named_semaphore(sem->name);
         if (!opened) {
             return -1;
