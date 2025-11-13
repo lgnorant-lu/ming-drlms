@@ -128,6 +128,13 @@ class ServerProcess:
         (cfg.data_dir / "logs").mkdir(exist_ok=True)
         (cfg.data_dir / "rooms").mkdir(exist_ok=True)
 
+        # Verify files exist before starting server
+        users_file = cfg.data_dir / "users.txt"
+        if not users_file.exists():
+            print(f"[DEBUG] users.txt not found at {users_file}", file=sys.stderr)
+        else:
+            print(f"[DEBUG] users.txt exists at {users_file}", file=sys.stderr)
+
         log_fp = open(cfg.log_path, "w", encoding="utf-8")
         creationflags = 0
         if os.name == "nt":
