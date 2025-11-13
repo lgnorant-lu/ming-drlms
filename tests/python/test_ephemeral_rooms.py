@@ -113,7 +113,12 @@ def test_ephemeral_room_history_lifecycle(tmp_path: Path, runner: CliRunner):
     )
     assert res.exit_code == 0, res.output
 
-    # Start server
+    # Start server in text-only mode (force disable MP2)
+    import os
+
+    old_mp2 = os.environ.get("DRLMS_ENABLE_MPROTO_V2")
+    os.environ["DRLMS_ENABLE_MPROTO_V2"] = "0"
+
     up = runner.invoke(
         app,
         ["server-up", "-p", str(port), "-d", str(data_dir), "--no-strict"],
@@ -199,4 +204,9 @@ def test_ephemeral_room_history_lifecycle(tmp_path: Path, runner: CliRunner):
         )
 
     finally:
+        # Restore original MP2 setting
+        if old_mp2 is not None:
+            os.environ["DRLMS_ENABLE_MPROTO_V2"] = old_mp2
+        elif "DRLMS_ENABLE_MPROTO_V2" in os.environ:
+            del os.environ["DRLMS_ENABLE_MPROTO_V2"]
         runner.invoke(app, ["server-down"])

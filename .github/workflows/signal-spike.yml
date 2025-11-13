@@ -70,25 +70,18 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $customRoot = Join-Path $Env:RUNNER_TEMP 'vcpkg'
-          $binaryCache = Join-Path $Env:RUNNER_TEMP 'vcpkg-binary-cache'
-          if (-not (Test-Path $binaryCache)) {
-            New-Item -ItemType Directory -Path $binaryCache | Out-Null
-          }
           Add-Content -Path $Env:GITHUB_ENV -Value "VCPKG_ROOT=$customRoot"
           Add-Content -Path $Env:GITHUB_ENV -Value ("CMAKE_TOOLCHAIN_FILE={0}" -f (Join-Path $customRoot 'scripts/buildsystems/vcpkg.cmake'))
           Add-Content -Path $Env:GITHUB_ENV -Value "VCPKG_TARGET_TRIPLET=x64-windows"
-          Add-Content -Path $Env:GITHUB_ENV -Value "VCPKG_DEFAULT_BINARY_CACHE=$binaryCache"
-          Add-Content -Path $Env:GITHUB_ENV -Value "VCPKG_BINARY_SOURCES=clear;files,$binaryCache,readwrite"
       - name: Restore vcpkg cache
         uses: actions/cache@v4
         with:
           path: |
             ${{ env.VCPKG_ROOT }}
-            ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
           key: |
-            ${{ runner.os }}-vcpkg-v2024.12.01-${{ hashFiles('vcpkg.json') }}
+            ${{ runner.os }}-vcpkg-v2025.10.17-${{ hashFiles('vcpkg.json') }}
           restore-keys: |
-            ${{ runner.os }}-vcpkg-v2024.12.01-
+            ${{ runner.os }}-vcpkg-v2025.10.17-
             ${{ runner.os }}-vcpkg-
       - name: Bootstrap vcpkg
         shell: pwsh
@@ -127,9 +120,7 @@ jobs:
             throw "vcpkg.json not found: $manifestFile"
           }
           Write-Host "Installing dependencies with manifest mode..."
-          $env:VCPKG_FEATURE_FLAGS = 'binarycaching'
-          $env:VCPKG_BINARY_SOURCES = $Env:VCPKG_BINARY_SOURCES
-          & "$Env:VCPKG_ROOT\vcpkg.exe" install --triplet x64-windows --x-manifest-root=$Env:GITHUB_WORKSPACE --recurse --verbose
+          & "$Env:VCPKG_ROOT\vcpkg.exe" install --triplet x64-windows --x-manifest-root=$Env:GITHUB_WORKSPACE --recurse
           Write-Host "Installed packages:"
           & "$Env:VCPKG_ROOT\vcpkg.exe" list
       - name: Configure
