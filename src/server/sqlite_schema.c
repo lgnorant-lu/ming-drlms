@@ -48,6 +48,16 @@ int sqlite_storage_init(SQLiteStorage *storage, const char *db_path) {
         return -1;
     }
 
+    // Enable WAL mode for better concurrency support
+    rc =
+        sqlite3_exec(storage->db, "PRAGMA journal_mode=WAL;", NULL, NULL, NULL);
+    if (rc != SQLITE_OK) {
+        fprintf(stderr, "Failed to enable WAL mode: %s\n",
+                sqlite3_errmsg(storage->db));
+        sqlite3_close(storage->db);
+        return -1;
+    }
+
     if (platform_mutex_init(&storage->mu) != 0) {
         sqlite3_close(storage->db);
         return -1;
