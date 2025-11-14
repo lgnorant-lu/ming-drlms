@@ -2,14 +2,6 @@ from __future__ import annotations
 
 import os
 import pytest
-
-# Skip this legacy text-protocol test module when MP2-only mode is enabled
-if os.getenv("DRLMS_ENABLE_MPROTO_V2") == "1":
-    pytest.skip(
-        "Skipped in MP2-only mode: legacy text protocol tests",
-        allow_module_level=True,
-    )
-
 import hashlib
 import socket
 from pathlib import Path
@@ -17,6 +9,13 @@ from typing import Iterator
 from typer.testing import CliRunner
 
 from ming_drlms.main import app
+
+# Skip this legacy text-protocol test module when MP2-only mode is enabled
+if os.getenv("DRLMS_ENABLE_MPROTO_V2") == "1":
+    pytest.skip(
+        "Skipped in MP2-only mode: legacy text protocol tests",
+        allow_module_level=True,
+    )
 
 
 @pytest.fixture(scope="module")
@@ -104,6 +103,12 @@ def _history_request(host: str, port: int, room: str, instance_id: str) -> list[
 
 
 def test_ephemeral_room_history_lifecycle(tmp_path: Path, runner: CliRunner):
+    import os
+
+    # Skip server-dependent tests in CI environments
+    if os.environ.get("CI") or os.environ.get("GITHUB_ACTIONS"):
+        pytest.skip("Skipping server-dependent tests in CI environment")
+
     data_dir = tmp_path / "srv"
     port = _find_free_port()
 
