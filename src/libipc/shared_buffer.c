@@ -224,15 +224,21 @@ int shm_init(void) {
         shared->version = SHARED_BUFFER_VERSION;
         shared->lock = 0;
         // Initialize semaphores using platform functions
+#if defined(_WIN32)
         shared->sem_empty.is_named = 1;
-        if (platform_internal_generate_semaphore_name(&shared->sem_empty, "_empty") != 0)
+        if (platform_internal_generate_semaphore_name(&shared->sem_empty,
+                                                     "_empty") != 0)
             goto init_fail;
+#endif
         if (platform_semaphore_init(&shared->sem_empty, 1, NUM_SLOTS) != 0)
             goto init_fail;
 
+#if defined(_WIN32)
         shared->sem_full.is_named = 1;
-        if (platform_internal_generate_semaphore_name(&shared->sem_full, "_full") != 0)
+        if (platform_internal_generate_semaphore_name(&shared->sem_full,
+                                                     "_full") != 0)
             goto init_fail;
+#endif
         if (platform_semaphore_init(&shared->sem_full, 1, 0) != 0)
             goto init_fail;
         shm_segment_owner = 1;

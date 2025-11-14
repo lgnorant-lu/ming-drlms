@@ -113,9 +113,42 @@ class ServerProcess:
         )
         if os.name == "nt":
             runtime_dir = cfg.data_dir.parent
-            # Add build directory to PATH for OpenSSL and other DLLs
+            # Add build directory and dependency folders to PATH for required DLLs
             build_dir = Path(self._binary).parent
-            env["PATH"] = f"{build_dir};{runtime_dir};{env.get('PATH', '')}"
+            multiconfig_names = {"relwithdebinfo", "release", "debug", "minsizerel"}
+            build_root = (
+                build_dir.parent
+                if build_dir.name.lower() in multiconfig_names
+                else build_dir
+            )
+
+            collected_paths: list[str] = []
+
+            def _maybe_add(path_str: str) -> None:
+                if not path_str:
+                    return
+                if path_str not in collected_paths:
+                    collected_paths.append(path_str)
+
+            candidate_dirs = [
+                build_dir,
+                runtime_dir,
+                build_root,
+                build_root / "_deps" / "signal-install" / "bin",
+                build_root / "vcpkg_installed" / "x64-windows" / "bin",
+                build_root / "RelWithDebInfo",
+                build_root / "Release",
+                build_root / "Debug",
+                build_root / "MinSizeRel",
+            ]
+            for candidate in candidate_dirs:
+                try:
+                    if candidate.exists():
+                        _maybe_add(str(candidate))
+                except Exception:
+                    continue
+            collected_paths.append(env.get("PATH", ""))
+            env["PATH"] = os.pathsep.join(filter(None, collected_paths))
             print(f"[DEBUG] Windows PATH: {env['PATH']}", file=sys.stderr)
             print(f"[DEBUG] Binary: {self._binary}", file=sys.stderr)
             print(f"[DEBUG] Data dir: {cfg.data_dir}", file=sys.stderr)
