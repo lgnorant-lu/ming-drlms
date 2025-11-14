@@ -223,36 +223,18 @@ int shm_init(void) {
         shared->magic = SHARED_BUFFER_MAGIC;
         shared->version = SHARED_BUFFER_VERSION;
         shared->lock = 0;
-#if defined(_WIN32)
-        // Windows-specific semaphore initialization
-        // Initialize sem_empty
+        // Initialize semaphores using platform functions
         shared->sem_empty.is_named = 1;
         if (platform_internal_generate_semaphore_name(&shared->sem_empty, "_empty") != 0)
             goto init_fail;
-        HANDLE empty_handle = CreateSemaphoreW(NULL, (LONG)NUM_SLOTS, LONG_MAX, shared->sem_empty.name);
-        if (!empty_handle) {
-            platform_win32_set_errno(GetLastError());
+        if (platform_semaphore_init(&shared->sem_empty, 1, NUM_SLOTS) != 0)
             goto init_fail;
-        }
-        shared->sem_empty.handle = empty_handle;
 
-        // Initialize sem_full
         shared->sem_full.is_named = 1;
         if (platform_internal_generate_semaphore_name(&shared->sem_full, "_full") != 0)
             goto init_fail;
-        HANDLE full_handle = CreateSemaphoreW(NULL, 0L, LONG_MAX, shared->sem_full.name);
-        if (!full_handle) {
-            platform_win32_set_errno(GetLastError());
-            goto init_fail;
-        }
-        shared->sem_full.handle = full_handle;
-#else
-        // Non-Windows platforms use standard semaphore initialization
-        if (platform_semaphore_init(&shared->sem_empty, 1, NUM_SLOTS) != 0)
-            goto init_fail;
         if (platform_semaphore_init(&shared->sem_full, 1, 0) != 0)
             goto init_fail;
-#endif
         shm_segment_owner = 1;
     } else {
         shm_segment_owner = 0;
