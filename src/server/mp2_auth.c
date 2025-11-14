@@ -24,6 +24,7 @@
 #endif
 
 #ifdef HAVE_PROTOBUF_C
+
 #include "generated/schema/v2/auth.pb-c.h"
 #include "generated/schema/v2/common.pb-c.h"
 

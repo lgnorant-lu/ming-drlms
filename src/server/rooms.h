@@ -7,7 +7,7 @@
 
 #include "platform/platform.h"
 
-typedef struct {
+typedef struct InstanceUUID {
     unsigned char bytes[16];
 } InstanceUUID;
 

@@ -242,7 +242,7 @@ int mp2_dispatcher_handle_frame(platform_socket_t fd, const mp2_frame_t *frame,
     case MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_E2EE_PREKEY_BUNDLE_REQUEST:
         return mp2_e2ee_handle_prekey_bundle(fd, frame->payload,
                                              frame->payload_len);
-    case MSG_TYPE_ROOM_MEMBER_LIST_REQUEST:
+    case 232:
         mp2_room_members_handle_list_request(fd, frame);
         return 0;
     case MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_S2S_PUB_REQUEST:

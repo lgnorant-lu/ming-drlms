@@ -30,6 +30,11 @@ def runner() -> CliRunner:
     return CliRunner()
 
 
+class _MembersStubMixin:
+    def get_room_members_mp2(self, **kwargs):  # type: ignore[no-untyped-def]
+        return []
+
+
 def test_emit_payload_handles_newline(capsys: pytest.CaptureFixture[str]) -> None:
     space._emit_payload("hello")
     space._emit_payload("world\n")
@@ -135,7 +140,7 @@ def test_room_sub_limit(monkeypatch: pytest.MonkeyPatch, runner: CliRunner) -> N
         RoomEvent(room_name="r1", event_id=2, payload=b"bye\n", display_token="tok2"),
     ]
 
-    class StubService:
+    class StubService(_MembersStubMixin):
         def subscribe(self, **kwargs):
             yield from events
 
@@ -151,7 +156,7 @@ def test_room_sub_limit(monkeypatch: pytest.MonkeyPatch, runner: CliRunner) -> N
 def test_room_sub_service_error(
     monkeypatch: pytest.MonkeyPatch, runner: CliRunner
 ) -> None:
-    class StubService:
+    class StubService(_MembersStubMixin):
         def subscribe(self, **kwargs):
             raise RoomServiceError("boom")
 
@@ -168,7 +173,7 @@ def test_room_sub_json_with_binary(
         room_name="r1", event_id=1, payload=b"\xff\x00", display_token="tok"
     )
 
-    class StubService:
+    class StubService(_MembersStubMixin):
         def subscribe(self, **kwargs):
             yield event
 
@@ -188,7 +193,7 @@ def test_room_sub_plain_binary(
         room_name="r1", event_id=1, payload=b"\xff\x00", display_token="tok"
     )
 
-    class StubService:
+    class StubService(_MembersStubMixin):
         def subscribe(self, **kwargs):
             yield event
 
@@ -203,7 +208,7 @@ def test_room_sub_empty_payload(
 ) -> None:
     event = RoomEvent(room_name="r1", event_id=1, payload=b"\n", display_token="tok")
 
-    class StubService:
+    class StubService(_MembersStubMixin):
         def subscribe(self, **kwargs):
             yield event
 
@@ -216,7 +221,7 @@ def test_room_sub_empty_payload(
 def test_room_sub_keyboard_interrupt(
     monkeypatch: pytest.MonkeyPatch, runner: CliRunner
 ) -> None:
-    class StubService:
+    class StubService(_MembersStubMixin):
         def subscribe(self, **kwargs):
             raise KeyboardInterrupt
 
@@ -226,7 +231,7 @@ def test_room_sub_keyboard_interrupt(
 
 
 def test_room_sub_os_error(monkeypatch: pytest.MonkeyPatch, runner: CliRunner) -> None:
-    class StubService:
+    class StubService(_MembersStubMixin):
         def subscribe(self, **kwargs):
             raise OSError("network down")
 
@@ -373,6 +378,77 @@ def test_room_transfer_success(
     assert result.exit_code == 0
     assert "ACK" in result.output
     assert "OK|TRANSFER" in result.output
+
+
+def test_room_members_success(
+    monkeypatch: pytest.MonkeyPatch, runner: CliRunner
+) -> None:
+    from ming_drlms.core.mproto_v2_client import RoomMember
+
+    members = [
+        RoomMember(user_id="alice", device_id=1, timestamp="2023-01-01T10:00:00Z"),
+        RoomMember(user_id="bob", device_id=2, timestamp="2023-01-01T10:05:00Z"),
+    ]
+
+    class StubService:
+        def get_room_members_mp2(self, **kwargs):
+            return members
+
+    monkeypatch.setattr(room, "room_service", StubService())
+    result = runner.invoke(app, ["room", "members", "--room", "r1"])
+    assert result.exit_code == 0
+    assert "alice" in result.output
+    assert "bob" in result.output
+    assert "1" in result.output
+    assert "2" in result.output
+
+
+def test_room_members_json_output(
+    monkeypatch: pytest.MonkeyPatch, runner: CliRunner
+) -> None:
+    from ming_drlms.core.mproto_v2_client import RoomMember
+
+    members = [
+        RoomMember(user_id="alice", device_id=1, timestamp="2023-01-01T10:00:00Z"),
+    ]
+
+    class StubService:
+        def get_room_members_mp2(self, **kwargs):
+            return members
+
+    monkeypatch.setattr(room, "room_service", StubService())
+    result = runner.invoke(app, ["room", "members", "--room", "r1", "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output.strip())
+    assert data["room"] == "r1"
+    assert len(data["members"]) == 1
+    assert data["members"][0]["user_id"] == "alice"
+
+
+def test_room_members_empty_room(
+    monkeypatch: pytest.MonkeyPatch, runner: CliRunner
+) -> None:
+    class StubService:
+        def get_room_members_mp2(self, **kwargs):
+            return []
+
+    monkeypatch.setattr(room, "room_service", StubService())
+    result = runner.invoke(app, ["room", "members", "--room", "empty"])
+    assert result.exit_code == 0
+    assert "没有成员" in result.output
+
+
+def test_room_members_service_error(
+    monkeypatch: pytest.MonkeyPatch, runner: CliRunner
+) -> None:
+    class StubService:
+        def get_room_members_mp2(self, **kwargs):
+            raise RoomServiceError("connection failed")
+
+    monkeypatch.setattr(room, "room_service", StubService())
+    result = runner.invoke(app, ["room", "members", "--room", "r1"])
+    assert result.exit_code == 1
+    assert "connection failed" in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -712,70 +788,53 @@ def test_space_chat_basic(
 
 def test_space_chat_login_failure(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    state = {"rooms": {}}
-
-    monkeypatch.setattr(space, "load_state", lambda: state)
-    monkeypatch.setattr(space, "save_state", lambda s: None)
-    monkeypatch.setattr(space, "get_last_event_id", lambda s, key: 0)
-    monkeypatch.setattr(space, "set_last_event_id", lambda *args, **kwargs: None)
-
-    class DummyConn:
-        def __init__(self):
-            self.sent = []
-            self.closed = False
-
-        def sendall(self, data):
-            self.sent.append(data)
-
-        def settimeout(self, _):
-            pass
-
-        def close(self):
-            self.closed = True
-
-    conn = DummyConn()
-    monkeypatch.setattr(space, "tcp_connect", lambda host, port: conn)
-    monkeypatch.setattr(space, "login", lambda *args, **kwargs: False)
-    monkeypatch.setattr(space, "recv_line", lambda *args, **kwargs: "")
-    monkeypatch.setattr(space, "recv_exact", lambda *args, **kwargs: b"")
-
-    fake_stdin = type("FakeInput", (), {"readline": lambda self: ""})()
-    monkeypatch.setattr(sys, "stdin", fake_stdin)
+):
+    dummy_sock = DummySocket()
+    monkeypatch.setattr(space, "tcp_connect", lambda host, port: dummy_sock)
+    monkeypatch.setattr(space, "login", lambda conn, user, password: False)
+    monkeypatch.setattr(space, "recv_line", lambda conn: "")
+    monkeypatch.setattr(space, "recv_exact", lambda conn, length: b"")
     monkeypatch.setattr(space, "sys", sys)
+    monkeypatch.setattr(sys, "stdin", io.StringIO(""))
 
     space.space_chat(
         room="room",
         host="127.0.0.1",
         port=8080,
         user="alice",
-        password="password",
+        password="pw",
         since_id=0,
     )
+
     out = capsys.readouterr().out
     assert "login failed" in out
+    assert dummy_sock.closed
 
 
-# ---------------------------------------------------------------------------
-# Service layer tests for RoomService and SpaceService
-# ---------------------------------------------------------------------------
+def make_recv_exact():
+    def _recv_exact(sock: "DummySocket", length: int) -> bytes:
+        return sock.payloads.pop(0) if sock.payloads else b""
+
+    return _recv_exact
 
 
 class DummySocket:
-    def __init__(self, lines=None, payloads=None):
+    def __init__(
+        self, *, lines: list[str] | None = None, payloads: list[bytes] | None = None
+    ):
         self.lines = list(lines or [])
         self.payloads = list(payloads or [])
-        self.sent = []
+        self.sent: list[bytes] = []
         self.closed = False
 
-    def sendall(self, data):
+    def sendall(self, data: bytes) -> None:
         self.sent.append(data)
 
-    def settimeout(self, _):
-        pass
-
-    def close(self):
+    def close(self) -> None:
         self.closed = True
+
+    def settimeout(self, _):
+        return None
 
 
 def make_recv_line():
@@ -783,13 +842,6 @@ def make_recv_line():
         return sock.lines.pop(0) if sock.lines else ""
 
     return _recv_line
-
-
-def make_recv_exact():
-    def _recv_exact(sock: DummySocket, length: int) -> bytes:
-        return sock.payloads.pop(0) if sock.payloads else b""
-
-    return _recv_exact
 
 
 def test_room_service_publish_behavior() -> None:

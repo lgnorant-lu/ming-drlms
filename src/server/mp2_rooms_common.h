@@ -3,6 +3,14 @@
 
 #include <stdint.h>
 #include "platform/platform.h"
+// #include "rooms.h"
+// #include "rooms_instance.h"
+#ifdef HAVE_PROTOBUF_C
+#include "generated/schema/v2/room.pb-c.h"
+#endif
+
+typedef struct Room Room;
+typedef struct InstanceUUID InstanceUUID;
 
 // Forward declaration to avoid forcing protobuf-c includes in headers
 struct ProtobufCMessage;
@@ -32,5 +40,14 @@ int mp2_rooms_validate_sha256_hex(const char *hex);
 void mp2_rooms_hex_to_lower(char *dst, size_t dst_cap, const char *src);
 
 long long mp2_rooms_get_max_upload_bytes(void);
+
+void mp2_rooms_broadcast_presence_event(
+    Room *room, const InstanceUUID *instance_uuid, const char *username,
+    platform_socket_t skip_fd,
+#ifdef HAVE_PROTOBUF_C
+    Mingdrlms__V2__RoomEventKind event_kind);
+#else
+    int event_kind);
+#endif // HAVE_PROTOBUF_C
 
 #endif // MP2_ROOMS_COMMON_H

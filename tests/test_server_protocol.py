@@ -302,6 +302,10 @@ def _assert_publish_fanout(host: str, port: int, root: Path) -> None:
             publisher.publish(_TEST_USER, room, payload)
         event = _next_event(events)
         assert isinstance(event, RoomEvent)
+        event_kind = getattr(event, "kind", room_pb2.ROOM_EVENT_KIND_TEXT)
+        assert event_kind == room_pb2.ROOM_EVENT_KIND_TEXT
+        print(f"[debug] expected payload: {payload!r}")
+        print(f"[debug] actual payload:   {event.payload!r}")
         assert event.payload == payload
         assert event.room_name == room
         assert isinstance(event.event_id, int)

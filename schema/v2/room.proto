@@ -96,6 +96,7 @@ message RoomEvent {
   string sha256_hex = 8;
   string timestamp = 9; // RFC3339
   string instance_id = 10;
+  RoomPresenceEvent presence = 11;
 }
 
 // Room metadata -----------------------------------------------------------
@@ -275,6 +276,11 @@ message RoomMemberListResponse {
   string room_name = 1;
   repeated RoomMember members = 2;
   uint64 total = 3;
+}
+
+message RoomPresenceEvent {
+  RoomMember member = 1;
+  string instance_id = 2;
 }
 
 

@@ -63,13 +63,13 @@ typedef struct _Mingdrlms__V2__RoomFileDownloadChunk
     Mingdrlms__V2__RoomFileDownloadChunk;
 typedef struct _Mingdrlms__V2__RoomFileDownloadDone
     Mingdrlms__V2__RoomFileDownloadDone;
-
-/* Room members and presence APIs */
 typedef struct _Mingdrlms__V2__RoomMember Mingdrlms__V2__RoomMember;
 typedef struct _Mingdrlms__V2__RoomMemberListRequest
     Mingdrlms__V2__RoomMemberListRequest;
 typedef struct _Mingdrlms__V2__RoomMemberListResponse
     Mingdrlms__V2__RoomMemberListResponse;
+typedef struct _Mingdrlms__V2__RoomPresenceEvent
+    Mingdrlms__V2__RoomPresenceEvent;
 
 /* --- enums --- */
 
@@ -232,6 +232,7 @@ struct _Mingdrlms__V2__RoomEvent {
      */
     char *timestamp;
     char *instance_id;
+    Mingdrlms__V2__RoomPresenceEvent *presence;
 };
 #define MINGDRLMS__V2__ROOM_EVENT__INIT                                        \
     {                                                                          \
@@ -240,7 +241,7 @@ struct _Mingdrlms__V2__RoomEvent {
             (char *)protobuf_c_empty_string,                                   \
             MINGDRLMS__V2__ROOM_EVENT_KIND__ROOM_EVENT_KIND_TEXT, NULL, 0,     \
             (char *)protobuf_c_empty_string, (char *)protobuf_c_empty_string,  \
-            (char *)protobuf_c_empty_string                                    \
+            (char *)protobuf_c_empty_string, NULL                              \
     }
 
 struct _Mingdrlms__V2__RoomInfoRequest {
@@ -566,22 +567,33 @@ struct _Mingdrlms__V2__RoomFileDownloadDone {
         , (char *)protobuf_c_empty_string, 0                                   \
     }
 
-/* RoomMember message definitions */
 struct _Mingdrlms__V2__RoomMember {
     ProtobufCMessage base;
     char *user_id;
     uint32_t device_id;
+    /*
+     * RFC3339, when they joined
+     */
     char *timestamp;
 };
+#define MINGDRLMS__V2__ROOM_MEMBER__INIT                                       \
+    {                                                                          \
+        PROTOBUF_C_MESSAGE_INIT(&mingdrlms__v2__room_member__descriptor)       \
+        , (char *)protobuf_c_empty_string, 0, (char *)protobuf_c_empty_string  \
+    }
 
-/* RoomMemberListRequest message definitions */
 struct _Mingdrlms__V2__RoomMemberListRequest {
     ProtobufCMessage base;
     char *room_name;
     char *access_token;
 };
+#define MINGDRLMS__V2__ROOM_MEMBER_LIST_REQUEST__INIT                          \
+    {                                                                          \
+        PROTOBUF_C_MESSAGE_INIT(                                               \
+            &mingdrlms__v2__room_member_list_request__descriptor)              \
+        , (char *)protobuf_c_empty_string, (char *)protobuf_c_empty_string     \
+    }
 
-/* RoomMemberListResponse message definitions */
 struct _Mingdrlms__V2__RoomMemberListResponse {
     ProtobufCMessage base;
     char *room_name;
@@ -589,6 +601,24 @@ struct _Mingdrlms__V2__RoomMemberListResponse {
     Mingdrlms__V2__RoomMember **members;
     uint64_t total;
 };
+#define MINGDRLMS__V2__ROOM_MEMBER_LIST_RESPONSE__INIT                         \
+    {                                                                          \
+        PROTOBUF_C_MESSAGE_INIT(                                               \
+            &mingdrlms__v2__room_member_list_response__descriptor)             \
+        , (char *)protobuf_c_empty_string, 0, NULL, 0                          \
+    }
+
+struct _Mingdrlms__V2__RoomPresenceEvent {
+    ProtobufCMessage base;
+    Mingdrlms__V2__RoomMember *member;
+    char *instance_id;
+};
+#define MINGDRLMS__V2__ROOM_PRESENCE_EVENT__INIT                               \
+    {                                                                          \
+        PROTOBUF_C_MESSAGE_INIT(                                               \
+            &mingdrlms__v2__room_presence_event__descriptor)                   \
+        , NULL, (char *)protobuf_c_empty_string                                \
+    }
 
 /* Mingdrlms__V2__SignalEncryptedPayload methods */
 void mingdrlms__v2__signal_encrypted_payload__init(
@@ -1029,6 +1059,68 @@ mingdrlms__v2__room_file_download_done__unpack(ProtobufCAllocator *allocator,
 void mingdrlms__v2__room_file_download_done__free_unpacked(
     Mingdrlms__V2__RoomFileDownloadDone *message,
     ProtobufCAllocator *allocator);
+/* Mingdrlms__V2__RoomMember methods */
+void mingdrlms__v2__room_member__init(Mingdrlms__V2__RoomMember *message);
+size_t mingdrlms__v2__room_member__get_packed_size(
+    const Mingdrlms__V2__RoomMember *message);
+size_t
+mingdrlms__v2__room_member__pack(const Mingdrlms__V2__RoomMember *message,
+                                 uint8_t *out);
+size_t mingdrlms__v2__room_member__pack_to_buffer(
+    const Mingdrlms__V2__RoomMember *message, ProtobufCBuffer *buffer);
+Mingdrlms__V2__RoomMember *
+mingdrlms__v2__room_member__unpack(ProtobufCAllocator *allocator, size_t len,
+                                   const uint8_t *data);
+void mingdrlms__v2__room_member__free_unpacked(
+    Mingdrlms__V2__RoomMember *message, ProtobufCAllocator *allocator);
+/* Mingdrlms__V2__RoomMemberListRequest methods */
+void mingdrlms__v2__room_member_list_request__init(
+    Mingdrlms__V2__RoomMemberListRequest *message);
+size_t mingdrlms__v2__room_member_list_request__get_packed_size(
+    const Mingdrlms__V2__RoomMemberListRequest *message);
+size_t mingdrlms__v2__room_member_list_request__pack(
+    const Mingdrlms__V2__RoomMemberListRequest *message, uint8_t *out);
+size_t mingdrlms__v2__room_member_list_request__pack_to_buffer(
+    const Mingdrlms__V2__RoomMemberListRequest *message,
+    ProtobufCBuffer *buffer);
+Mingdrlms__V2__RoomMemberListRequest *
+mingdrlms__v2__room_member_list_request__unpack(ProtobufCAllocator *allocator,
+                                                size_t len,
+                                                const uint8_t *data);
+void mingdrlms__v2__room_member_list_request__free_unpacked(
+    Mingdrlms__V2__RoomMemberListRequest *message,
+    ProtobufCAllocator *allocator);
+/* Mingdrlms__V2__RoomMemberListResponse methods */
+void mingdrlms__v2__room_member_list_response__init(
+    Mingdrlms__V2__RoomMemberListResponse *message);
+size_t mingdrlms__v2__room_member_list_response__get_packed_size(
+    const Mingdrlms__V2__RoomMemberListResponse *message);
+size_t mingdrlms__v2__room_member_list_response__pack(
+    const Mingdrlms__V2__RoomMemberListResponse *message, uint8_t *out);
+size_t mingdrlms__v2__room_member_list_response__pack_to_buffer(
+    const Mingdrlms__V2__RoomMemberListResponse *message,
+    ProtobufCBuffer *buffer);
+Mingdrlms__V2__RoomMemberListResponse *
+mingdrlms__v2__room_member_list_response__unpack(ProtobufCAllocator *allocator,
+                                                 size_t len,
+                                                 const uint8_t *data);
+void mingdrlms__v2__room_member_list_response__free_unpacked(
+    Mingdrlms__V2__RoomMemberListResponse *message,
+    ProtobufCAllocator *allocator);
+/* Mingdrlms__V2__RoomPresenceEvent methods */
+void mingdrlms__v2__room_presence_event__init(
+    Mingdrlms__V2__RoomPresenceEvent *message);
+size_t mingdrlms__v2__room_presence_event__get_packed_size(
+    const Mingdrlms__V2__RoomPresenceEvent *message);
+size_t mingdrlms__v2__room_presence_event__pack(
+    const Mingdrlms__V2__RoomPresenceEvent *message, uint8_t *out);
+size_t mingdrlms__v2__room_presence_event__pack_to_buffer(
+    const Mingdrlms__V2__RoomPresenceEvent *message, ProtobufCBuffer *buffer);
+Mingdrlms__V2__RoomPresenceEvent *
+mingdrlms__v2__room_presence_event__unpack(ProtobufCAllocator *allocator,
+                                           size_t len, const uint8_t *data);
+void mingdrlms__v2__room_presence_event__free_unpacked(
+    Mingdrlms__V2__RoomPresenceEvent *message, ProtobufCAllocator *allocator);
 /* --- per-message closures --- */
 
 typedef void (*Mingdrlms__V2__SignalEncryptedPayload_Closure)(
@@ -1091,6 +1183,14 @@ typedef void (*Mingdrlms__V2__RoomFileDownloadChunk_Closure)(
     const Mingdrlms__V2__RoomFileDownloadChunk *message, void *closure_data);
 typedef void (*Mingdrlms__V2__RoomFileDownloadDone_Closure)(
     const Mingdrlms__V2__RoomFileDownloadDone *message, void *closure_data);
+typedef void (*Mingdrlms__V2__RoomMember_Closure)(
+    const Mingdrlms__V2__RoomMember *message, void *closure_data);
+typedef void (*Mingdrlms__V2__RoomMemberListRequest_Closure)(
+    const Mingdrlms__V2__RoomMemberListRequest *message, void *closure_data);
+typedef void (*Mingdrlms__V2__RoomMemberListResponse_Closure)(
+    const Mingdrlms__V2__RoomMemberListResponse *message, void *closure_data);
+typedef void (*Mingdrlms__V2__RoomPresenceEvent_Closure)(
+    const Mingdrlms__V2__RoomPresenceEvent *message, void *closure_data);
 
 /* --- services --- */
 
@@ -1158,71 +1258,14 @@ extern const ProtobufCMessageDescriptor
     mingdrlms__v2__room_file_download_chunk__descriptor;
 extern const ProtobufCMessageDescriptor
     mingdrlms__v2__room_file_download_done__descriptor;
-
 extern const ProtobufCMessageDescriptor mingdrlms__v2__room_member__descriptor;
 extern const ProtobufCMessageDescriptor
     mingdrlms__v2__room_member_list_request__descriptor;
 extern const ProtobufCMessageDescriptor
     mingdrlms__v2__room_member_list_response__descriptor;
+extern const ProtobufCMessageDescriptor
+    mingdrlms__v2__room_presence_event__descriptor;
 
 PROTOBUF_C__END_DECLS
-
-/* --- initializer functions --- */
-
-#define MINGDRLMS__V2__ROOM_MEMBER__INIT                                       \
-    {                                                                          \
-        PROTOBUF_C_MESSAGE_INIT(&mingdrlms__v2__room_member__descriptor)       \
-        , NULL, 0, NULL                                                        \
-    }
-
-#define MINGDRLMS__V2__ROOM_MEMBER_LIST_REQUEST__INIT                          \
-    {                                                                          \
-        PROTOBUF_C_MESSAGE_INIT(                                               \
-            &mingdrlms__v2__room_member_list_request__descriptor)              \
-        , NULL, NULL                                                           \
-    }
-
-#define MINGDRLMS__V2__ROOM_MEMBER_LIST_RESPONSE__INIT                         \
-    {                                                                          \
-        PROTOBUF_C_MESSAGE_INIT(                                               \
-            &mingdrlms__v2__room_member_list_response__descriptor)             \
-        , NULL, 0, NULL, 0                                                     \
-    }
-
-/* --- message init functions --- */
-
-void mingdrlms__v2__room_member__init(Mingdrlms__V2__RoomMember *message);
-
-/* --- message pack/unpack functions --- */
-
-size_t mingdrlms__v2__room_member__get_packed_size(
-    const Mingdrlms__V2__RoomMember *message);
-size_t
-mingdrlms__v2__room_member__pack(const Mingdrlms__V2__RoomMember *message,
-                                 uint8_t *out);
-size_t mingdrlms__v2__room_member__unpack(ProtobufCAllocator *allocator,
-                                          size_t len, const uint8_t *data);
-void mingdrlms__v2__room_member__free_unpacked(
-    Mingdrlms__V2__RoomMember *message, ProtobufCAllocator *allocator);
-
-size_t mingdrlms__v2__room_member_list_request__get_packed_size(
-    const Mingdrlms__V2__RoomMemberListRequest *message);
-size_t mingdrlms__v2__room_member_list_request__pack(
-    const Mingdrlms__V2__RoomMemberListRequest *message, uint8_t *out);
-size_t mingdrlms__v2__room_member_list_request__unpack(
-    ProtobufCAllocator *allocator, size_t len, const uint8_t *data);
-void mingdrlms__v2__room_member_list_request__free_unpacked(
-    Mingdrlms__V2__RoomMemberListRequest *message,
-    ProtobufCAllocator *allocator);
-
-size_t mingdrlms__v2__room_member_list_response__get_packed_size(
-    const Mingdrlms__V2__RoomMemberListResponse *message);
-size_t mingdrlms__v2__room_member_list_response__pack(
-    const Mingdrlms__V2__RoomMemberListResponse *message, uint8_t *out);
-size_t mingdrlms__v2__room_member_list_response__unpack(
-    ProtobufCAllocator *allocator, size_t len, const uint8_t *data);
-void mingdrlms__v2__room_member_list_response__free_unpacked(
-    Mingdrlms__V2__RoomMemberListResponse *message,
-    ProtobufCAllocator *allocator);
 
 #endif /* PROTOBUF_C_schema_2fv2_2froom_2eproto__INCLUDED */

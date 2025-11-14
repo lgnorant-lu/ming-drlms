@@ -1,6 +1,10 @@
 # Protobuf-c detection helper
 # Tries pkg-config -> system library -> vcpkg -> bundled pre-generated sources
 
+if(NOT DEFINED DRLMS_FORCE_BUNDLED_PROTOBUF_C)
+    option(DRLMS_FORCE_BUNDLED_PROTOBUF_C "Always compile against the bundled protobuf-c runtime" ON)
+endif()
+
 set(PROTOBUF_C_FOUND FALSE)
 set(PROTOBUF_C_LIBRARIES "")
 set(PROTOBUF_C_INCLUDE_DIRS "")
@@ -8,6 +12,7 @@ set(PROTOBUF_C_DETECTION_METHOD "")
 set(PROTOBUF_C_SOURCES "")
 set(PROTOBUF_C_HEADERS "")
 set(PROTOBUF_C_USE_PREGENSETS FALSE)
+set(PROTOBUF_C_USE_BUNDLED_RUNTIME FALSE)
 
 message(STATUS "Configuring protobuf-c support")
 
@@ -193,6 +198,28 @@ if(NOT PROTOBUF_C_FOUND AND EXISTS "${_protobuf_pregen_dir}/common.pb-c.c")
         "${_protobuf_pregen_dir}/federation.pb-c.h"
         "${_protobuf_pregen_dir}/e2ee.pb-c.h"
         "${_protobuf_local_include}/protobuf-c/protobuf-c.h")
+endif()
+
+# Always prefer the bundled runtime when requested so that we control protobuf-c features.
+if(DRLMS_FORCE_BUNDLED_PROTOBUF_C)
+    set(PROTOBUF_C_FOUND TRUE)
+    set(HAVE_PROTOBUF_C 1)
+    set(PROTOBUF_C_USE_BUNDLED_RUNTIME TRUE)
+    set(PROTOBUF_C_LIBRARIES "")
+    set(_bundled_include_dirs
+        "${PROJECT_SOURCE_DIR}/src/external/protobuf-c/include"
+        "${PROJECT_SOURCE_DIR}/src/external/protobuf-c")
+    if(PROTOBUF_C_INCLUDE_DIRS)
+        list(INSERT PROTOBUF_C_INCLUDE_DIRS 0 ${_bundled_include_dirs})
+    else()
+        set(PROTOBUF_C_INCLUDE_DIRS ${_bundled_include_dirs})
+    endif()
+    if(PROTOBUF_C_DETECTION_METHOD)
+        set(PROTOBUF_C_DETECTION_METHOD "${PROTOBUF_C_DETECTION_METHOD};bundled-runtime")
+    else()
+        set(PROTOBUF_C_DETECTION_METHOD "bundled-runtime")
+    endif()
+    message(STATUS "protobuf-c runtime: forcing bundled implementation")
 endif()
 
 if(PROTOBUF_C_FOUND)

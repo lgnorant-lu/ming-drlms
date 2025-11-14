@@ -11,7 +11,10 @@ M-Proto-v2 Room Member List API implementation
 
 #include "platform/platform.h"
 #include "mp2_protocol.h"
+#include "mp2_rooms_common.h"
 #include "rooms_instance.h"
+#include "rooms.h"
+#include "rooms_internal.h"
 
 #ifdef HAVE_PROTOBUF_C
 #include "generated/schema/v2/common.pb-c.h"
@@ -24,16 +27,14 @@ M-Proto-v2 Room Member List API implementation
 #endif
 
 #ifndef MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ROOM_MEMBER_LIST_RESPONSE
-#define MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ROOM_MEMBER_LIST_RESPONSE 505
+#define MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ROOM_MEMBER_LIST_RESPONSE 233
 #endif
 
 /**
- * Find room instance by name (simplified for now)
+ * Find room by name (get or create if needed)
  */
-static RoomInstance *rooms_inst_find(const char *room_name) {
-    // TODO: Implement actual room lookup
-    // For now, return NULL to indicate room not found
-    return NULL;
+static Room *rooms_find(const char *room_name) {
+    return rooms_get_or_create(room_name, NULL);
 }
 
 /**
@@ -99,113 +100,199 @@ static void mp2_room_members_send_response(
 #endif
 }
 
+typedef struct {
+    char *user_id;
+    uint32_t device_id;
+    char *timestamp;
+} RoomMemberSnapshot;
+
+static void mp2_room_members_format_time(time_t when, char *out, size_t cap) {
+    if (!out || cap == 0) {
+        return;
+    }
+    if (when <= 0) {
+        out[0] = '\0';
+        return;
+    }
+    struct tm tm_info;
+#if defined(_WIN32)
+    if (gmtime_s(&tm_info, &when) != 0) {
+#else
+    if (!gmtime_r(&when, &tm_info)) {
+#endif
+        out[0] = '\0';
+        return;
+    }
+    strftime(out, cap, "%Y-%m-%dT%H:%M:%SZ", &tm_info);
+}
+
+static int mp2_room_members_snapshot_push(RoomMemberSnapshot **snapshots,
+                                          size_t *len, size_t *cap,
+                                          const char *user_id,
+                                          uint32_t device_id,
+                                          time_t joined_at) {
+    if (!user_id || !*user_id)
+        return 0;
+    if (*len >= *cap) {
+        size_t new_cap = *cap ? *cap * 2 : 8;
+        RoomMemberSnapshot *res = (RoomMemberSnapshot *)realloc(
+            *snapshots, new_cap * sizeof(**snapshots));
+        if (!res)
+            return -1;
+        *snapshots = res;
+        *cap = new_cap;
+    }
+    char *user_copy = strdup(user_id);
+    if (!user_copy)
+        return -1;
+    char ts_buf[32];
+    mp2_room_members_format_time(joined_at, ts_buf, sizeof(ts_buf));
+    char *timestamp_copy = strdup(ts_buf);
+    if (!timestamp_copy) {
+        free(user_copy);
+        return -1;
+    }
+    (*snapshots)[*len].user_id = user_copy;
+    (*snapshots)[*len].device_id = device_id;
+    (*snapshots)[*len].timestamp = timestamp_copy;
+    (*len)++;
+    return 0;
+}
+
 /**
  * Handle room member list request from authenticated client
  */
 void mp2_room_members_handle_list_request(platform_socket_t fd,
                                           const mp2_frame_t *frame) {
 #ifdef HAVE_PROTOBUF_C
+    fprintf(stderr, "ROOM_MEMBER_LIST_REQUEST payload_len=%u",
+            frame->payload_len);
+    for (unsigned int i = 0; i < frame->payload_len && i < 16; ++i) {
+        fprintf(stderr, " %02x", frame->payload[i]);
+    }
+    fprintf(stderr, "\n");
     Mingdrlms__V2__RoomMemberListRequest *req =
         (Mingdrlms__V2__RoomMemberListRequest *)
             mingdrlms__v2__room_member_list_request__unpack(
                 NULL, frame->payload_len, frame->payload);
-
     if (!req || !req->room_name || !req->access_token) {
         if (req) {
             mingdrlms__v2__room_member_list_request__free_unpacked(req, NULL);
         }
-        mp2_protocol_send_frame(
-            fd, MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ERROR_RESPONSE,
-            (unsigned char *)"Malformed request", 17);
+        mp2_rooms_send_error(
+            fd, 400, "Malformed request",
+            MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ERROR_RESPONSE);
         return;
     }
 
-    // Validate access token (simplified - should check against user database)
-    // For now, we'll assume any non-empty token is valid for demo purposes
-    if (strlen(req->access_token) == 0) {
+    char requester[64] = {0};
+    int auth_code = 0;
+    const char *auth_message = NULL;
+    if (mp2_rooms_extract_username(req->access_token, requester,
+                                   sizeof(requester), &auth_code,
+                                   &auth_message) != 0) {
+        mp2_rooms_send_error(
+            fd, auth_code, auth_message ? auth_message : "invalid access token",
+            MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ERROR_RESPONSE);
         mingdrlms__v2__room_member_list_request__free_unpacked(req, NULL);
-        mp2_protocol_send_frame(
-            fd, MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ERROR_RESPONSE,
-            (unsigned char *)"Invalid access token", 20);
         return;
     }
 
-    // Get room instance
-    struct RoomInstance *room = rooms_inst_find(req->room_name);
+    Room *room = rooms_find(req->room_name);
     if (!room) {
-        mingdrlms__v2__room_member_list_request__free_unpacked(req, NULL);
-        mp2_protocol_send_frame(
-            fd, MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ERROR_RESPONSE,
-            (unsigned char *)"Room not found", 14);
-        return;
-    }
-
-    // Get current subscriber count
-    size_t member_count = room->subs_len;
-
-    if (member_count == 0) {
-        // No members in room
-        mp2_room_members_send_response(fd, 200, "Success", req->room_name, NULL,
-                                       NULL, NULL, 0);
+        mp2_rooms_send_error(
+            fd, 404, "Room not found",
+            MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ERROR_RESPONSE);
         mingdrlms__v2__room_member_list_request__free_unpacked(req, NULL);
         return;
     }
 
-    // Allocate arrays for member data
-    const char **user_ids = malloc(sizeof(const char *) * member_count);
-    uint32_t *device_ids = malloc(sizeof(uint32_t) * member_count);
-    const char **timestamps = malloc(sizeof(const char *) * member_count);
+    RoomMemberSnapshot *snapshots = NULL;
+    size_t snapshot_len = 0;
+    size_t snapshot_cap = 0;
+    int collect_error = 0;
 
-    if (!user_ids || !device_ids || !timestamps) {
-        if (user_ids)
-            free(user_ids);
-        if (device_ids)
-            free(device_ids);
-        if (timestamps)
-            free(timestamps);
-        mingdrlms__v2__room_member_list_request__free_unpacked(req, NULL);
-        mp2_protocol_send_frame(
-            fd, MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ERROR_RESPONSE,
-            (unsigned char *)"Memory allocation failed", 23);
-        return;
+    platform_mutex_lock(&room->mu);
+    for (RoomInstance *inst = room->instances; inst && !collect_error;
+         inst = inst->next) {
+        platform_mutex_lock(&inst->mu);
+        for (size_t i = 0; i < inst->subs_len; ++i) {
+            Subscriber *sub = &inst->subs[i];
+            if (sub->fd == PLATFORM_INVALID_SOCKET ||
+                !mp2_protocol_is_fd_mp2(sub->fd) || sub->user[0] == '\0') {
+                continue;
+            }
+            if (strcmp(sub->user, requester) == 0) {
+                continue;
+            }
+            if (mp2_room_members_snapshot_push(&snapshots, &snapshot_len,
+                                               &snapshot_cap, sub->user, 1,
+                                               sub->joined_at) != 0) {
+                collect_error = 1;
+                break;
+            }
+        }
+        platform_mutex_unlock(&inst->mu);
+    }
+    platform_mutex_unlock(&room->mu);
+
+    if (collect_error) {
+        mp2_rooms_send_error(
+            fd, 500, "Failed to collect members",
+            MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ERROR_RESPONSE);
+        goto cleanup;
     }
 
-    // Extract member information from room subscribers
-    // This is a simplified implementation - in practice, you'd get this from
-    // your user database
-    for (size_t i = 0; i < member_count; i++) {
-        // For now, create dummy data based on subscriber index
-        // In a real implementation, you'd look up the actual user information
-        static char user_buffer[32];
-        static char timestamp_buffer[32];
-
-        snprintf(user_buffer, sizeof(user_buffer), "user_%zu", i + 1);
-        snprintf(timestamp_buffer, sizeof(timestamp_buffer),
-                 "2025-11-12T12:00:00Z");
-
-        user_ids[i] = strdup(user_buffer);
-        device_ids[i] = 1; // Default device ID
-        timestamps[i] = strdup(timestamp_buffer);
+    const char **user_ids = NULL;
+    uint32_t *device_ids = NULL;
+    const char **timestamps = NULL;
+    if (snapshot_len > 0) {
+        user_ids = (const char **)malloc(snapshot_len * sizeof(*user_ids));
+        device_ids = (uint32_t *)malloc(snapshot_len * sizeof(*device_ids));
+        timestamps = (const char **)malloc(snapshot_len * sizeof(*timestamps));
+        if (!user_ids || !device_ids || !timestamps) {
+            mp2_rooms_send_error(
+                fd, 500, "Memory allocation failed",
+                MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ERROR_RESPONSE);
+            goto cleanup;
+        }
+        for (size_t i = 0; i < snapshot_len; ++i) {
+            user_ids[i] = snapshots[i].user_id;
+            device_ids[i] = snapshots[i].device_id;
+            timestamps[i] = snapshots[i].timestamp;
+        }
     }
 
-    // Send response
+    if (snapshots) {
+        free(snapshots);
+        snapshots = NULL;
+    }
+
     mp2_room_members_send_response(fd, 200, "Success", req->room_name, user_ids,
-                                   device_ids, timestamps, member_count);
+                                   device_ids, timestamps, snapshot_len);
 
-    // Clean up allocated memory
-    for (size_t i = 0; i < member_count; i++) {
-        if (user_ids[i])
+cleanup:
+    if (user_ids) {
+        for (size_t i = 0; i < snapshot_len; ++i) {
             free((void *)user_ids[i]);
-        if (timestamps[i])
             free((void *)timestamps[i]);
+        }
+    } else if (snapshots) {
+        for (size_t i = 0; i < snapshot_len; ++i) {
+            free(snapshots[i].user_id);
+            free(snapshots[i].timestamp);
+        }
     }
     free(user_ids);
     free(device_ids);
     free(timestamps);
-
-    mingdrlms__v2__room_member_list_request__free_unpacked(req, NULL);
+    if (snapshots) {
+        free(snapshots);
+    }
+    if (req) {
+        mingdrlms__v2__room_member_list_request__free_unpacked(req, NULL);
+    }
 #else
-    // Fallback when protobuf-c is not available
     const char *msg = "protobuf-c not available";
     mp2_protocol_send_frame(
         fd, MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ERROR_RESPONSE,

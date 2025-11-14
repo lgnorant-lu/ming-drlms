@@ -32,6 +32,7 @@
 #else
 #include <openssl/sha.h>
 #include <sys/time.h>
+#include <fcntl.h>
 #endif
 
 #define DEFAULT_PORT 15034
@@ -102,14 +103,27 @@ static int detect_mp2_protocol_on_socket(platform_socket_t fd) {
     int n = recv(fd, (char *)hdr, 4, MSG_PEEK);
     if (n == 4) {
         /* MP2 magic is 0xDEADBEEF in network byte order */
-        fprintf(stderr, "[DEBUG] detect_mp2: fd=%d, first 4 bytes: %02x %02x %02x %02x\n",
-                (int)fd, hdr[0], hdr[1], hdr[2], hdr[3]);
+        fprintf(
+            stderr,
+            "[DEBUG] detect_mp2: fd=%d, first 4 bytes: %02x %02x %02x %02x\n",
+            (int)fd, hdr[0], hdr[1], hdr[2], hdr[3]);
         if (hdr[0] == 0xDE && hdr[1] == 0xAD && hdr[2] == 0xBE &&
             hdr[3] == 0xEF) {
-            fprintf(stderr, "[DEBUG] detect_mp2: detected MP2 magic for fd=%d\n", (int)fd);
+            fprintf(stderr,
+                    "[DEBUG] detect_mp2: detected MP2 magic for fd=%d\n",
+                    (int)fd);
+            // Set blocking mode for MP2 connections
+#if defined(_WIN32)
+            u_long mode = 0; // blocking
+            ioctlsocket(fd, FIONBIO, &mode);
+#else
+            fcntl(fd, F_SETFL, 0);
+#endif
             return 1; /* MP2 */
         }
-        fprintf(stderr, "[DEBUG] detect_mp2: detected text protocol for fd=%d\n", (int)fd);
+        fprintf(stderr,
+                "[DEBUG] detect_mp2: detected text protocol for fd=%d\n",
+                (int)fd);
         return 0; /* looks like text */
     }
     /* On timeout or partial read, default to text to keep legacy tests stable
@@ -362,7 +376,9 @@ static int legacy_handle_subscribe(LegacySession *session,
     if (!room_name || !rooms_valid_name(room_name))
         return legacy_sendf(session->fd, "ERR|SUB|invalid room\n");
     Room *room = rooms_get_or_create(room_name, NULL);
-    fprintf(stderr, "[DEBUG] legacy_handle_subscribe: rooms_get_or_create returned %p for room %s\n",
+    fprintf(stderr,
+            "[DEBUG] legacy_handle_subscribe: rooms_get_or_create returned %p "
+            "for room %s\n",
             room, room_name ? room_name : "NULL");
     if (!room)
         return legacy_sendf(session->fd, "ERR|SUB|internal error\n");
@@ -373,23 +389,30 @@ static int legacy_handle_subscribe(LegacySession *session,
         rooms_assign_instance(room, NULL, &uuid, &instance, &is_new);
     if (assign_rc != ROOM_ASSIGN_OK || !instance)
         return legacy_sendf(session->fd, "ERR|SUB|no capacity\n");
-    fprintf(stderr, "[DEBUG] legacy_handle_subscribe: adding subscriber fd=%d user=%s to instance %p\n",
+    fprintf(stderr,
+            "[DEBUG] legacy_handle_subscribe: adding subscriber fd=%d user=%s "
+            "to instance %p\n",
             (int)session->fd, session->user ? session->user : "NULL", instance);
-    int add_rc = rooms_add_subscriber(room, instance, session->fd, session->user);
-    fprintf(stderr, "[DEBUG] legacy_handle_subscribe: rooms_add_subscriber result=%d, instance subs=%zu\n",
+    int add_rc =
+        rooms_add_subscriber(room, instance, session->fd, session->user);
+    fprintf(stderr,
+            "[DEBUG] legacy_handle_subscribe: rooms_add_subscriber result=%d, "
+            "instance subs=%zu\n",
             add_rc, instance->subs_len);
     // Debug: check subscriber info
     for (size_t i = 0; i < instance->subs_len; ++i) {
         Subscriber *sub = &instance->subs[i];
-        fprintf(stderr, "[DEBUG] subscriber[%zu]: fd=%d, user='%s'\n",
-                i, (int)sub->fd, sub->user);
+        fprintf(stderr, "[DEBUG] subscriber[%zu]: fd=%d, user='%s'\n", i,
+                (int)sub->fd, sub->user);
     }
     if (add_rc != 0)
         return legacy_sendf(session->fd, "ERR|SUB|subscribe failed\n");
     rooms_assign_owner_if_empty(room, room_name, session->user, session->fd);
     char instance_hex[33];
     rooms_uuid_to_hex(&uuid, instance_hex);
-    fprintf(stderr, "[DEBUG] legacy_handle_subscribe: returning OK|SUB for fd=%d\n", (int)session->fd);
+    fprintf(stderr,
+            "[DEBUG] legacy_handle_subscribe: returning OK|SUB for fd=%d\n",
+            (int)session->fd);
     return legacy_sendf(session->fd, "OK|SUB|%s|%s\n", room_name, instance_hex);
 }
 
@@ -460,12 +483,16 @@ static int legacy_handle_publish_text(LegacySession *session,
     memset(&ctx, 0, sizeof ctx);
     int ctx_rc = mp2_rooms_prepare_publish_ctx(session->fd, session->user,
                                                room_name, &ctx);
-    fprintf(stderr, "[DEBUG] mp2_rooms_prepare_publish_ctx result: rc=%d, instance=%p\n",
-            ctx_rc, ctx.instance);
+    fprintf(
+        stderr,
+        "[DEBUG] mp2_rooms_prepare_publish_ctx result: rc=%d, instance=%p\n",
+        ctx_rc, ctx.instance);
     if (ctx_rc != 0 || !ctx.instance) {
-        fprintf(stderr, "[DEBUG] Using fallback publish logic for fd=%d room=%s\n",
+        fprintf(stderr,
+                "[DEBUG] Using fallback publish logic for fd=%d room=%s\n",
                 (int)session->fd, room_name);
-        // Fallback: assign an instance without attaching this fd as a subscriber
+        // Fallback: assign an instance without attaching this fd as a
+        // subscriber
         Room *fb_room = rooms_get_or_create(room_name, NULL);
         if (fb_room) {
             platform_mutex_lock(&fb_room->mu);
@@ -480,20 +507,28 @@ static int legacy_handle_publish_text(LegacySession *session,
             if (!target_instance) {
                 // If no instance has subscribers, just assign a new one
                 int is_new_instance = 0;
-                RoomAssignResult assign_rc = rooms_assign_instance(
-                    fb_room, NULL, &ctx.instance_uuid, &target_instance, &is_new_instance);
+                RoomAssignResult assign_rc =
+                    rooms_assign_instance(fb_room, NULL, &ctx.instance_uuid,
+                                          &target_instance, &is_new_instance);
                 if (assign_rc != ROOM_ASSIGN_OK || !target_instance) {
                     platform_mutex_unlock(&fb_room->mu);
                     free(payload);
-                    return legacy_sendf(session->fd, "ERR|PUBT|prepare failed\n");
+                    return legacy_sendf(session->fd,
+                                        "ERR|PUBT|prepare failed\n");
                 }
             }
             // Add the publisher as a subscriber to the target instance
-            fprintf(stderr, "[DEBUG] Adding publisher fd=%d user=%s to instance %p (subs before: %zu)\n",
-                    (int)session->fd, session->user ? session->user : "NULL", target_instance, target_instance->subs_len);
-            int add_rc = rooms_add_subscriber(fb_room, target_instance, session->fd, session->user);
-            fprintf(stderr, "[DEBUG] rooms_add_subscriber result: %d (subs after: %zu)\n",
-                    add_rc, target_instance->subs_len);
+            fprintf(stderr,
+                    "[DEBUG] Adding publisher fd=%d user=%s to instance %p "
+                    "(subs before: %zu)\n",
+                    (int)session->fd, session->user ? session->user : "NULL",
+                    target_instance, target_instance->subs_len);
+            int add_rc = rooms_add_subscriber(fb_room, target_instance,
+                                              session->fd, session->user);
+            fprintf(
+                stderr,
+                "[DEBUG] rooms_add_subscriber result: %d (subs after: %zu)\n",
+                add_rc, target_instance->subs_len);
             if (add_rc != 0) {
                 platform_mutex_unlock(&fb_room->mu);
                 free(payload);
@@ -506,8 +541,8 @@ static int legacy_handle_publish_text(LegacySession *session,
                      session->user ? session->user : "");
             platform_mutex_unlock(&fb_room->mu);
         } else {
-        free(payload);
-        return legacy_sendf(session->fd, "ERR|PUBT|prepare failed\n");
+            free(payload);
+            return legacy_sendf(session->fd, "ERR|PUBT|prepare failed\n");
         }
     }
     char ts[64];
@@ -523,11 +558,12 @@ static int legacy_handle_publish_text(LegacySession *session,
                           (unsigned long long)event_id);
 
     // Broadcast to all instances in the room
-    fprintf(stderr, "[DEBUG] Broadcasting PUBT event to room: %s, event_id: %llu\n",
+    fprintf(stderr,
+            "[DEBUG] Broadcasting PUBT event to room: %s, event_id: %llu\n",
             room_name, (unsigned long long)event_id);
-    int broadcast_rc = rooms_fanout_text_to_room(room_name, ts, session->user, event_id, payload,
-                              payload_len, sha_lower, session->rate_down_bps,
-                              session->fd);
+    int broadcast_rc = rooms_fanout_text_to_room(
+        room_name, ts, session->user, event_id, payload, payload_len, sha_lower,
+        session->rate_down_bps, session->fd);
     fprintf(stderr, "[DEBUG] Broadcast result: %d\n", broadcast_rc);
     free(payload);
     return rc;
@@ -668,14 +704,16 @@ static void *handle_client(void *arg) {
     }
 
     if (!use_mp2) {
-        // Reset socket timeout for text protocol connections to prevent premature disconnection
+        // Reset socket timeout for text protocol connections to prevent
+        // premature disconnection
 #if defined(_WIN32)
-        DWORD tv_reset = 0;  // No timeout for text connections
-        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv_reset, sizeof(tv_reset));
+        DWORD tv_reset = 0; // No timeout for text connections
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv_reset,
+                   sizeof(tv_reset));
 #else
         struct timeval tv_reset;
         tv_reset.tv_sec = 0;
-        tv_reset.tv_usec = 0;  // No timeout for text connections
+        tv_reset.tv_usec = 0; // No timeout for text connections
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv_reset, sizeof(tv_reset));
 #endif
         LegacySession session;

@@ -38,6 +38,13 @@ class AuthenticationError(MP2Error):
 
 
 @dataclass(slots=True)
+class RoomMember:
+    user_id: str
+    device_id: int
+    timestamp: str
+
+
+@dataclass(slots=True)
 class RoomFileMeta:
     filename: str
     size_bytes: int
@@ -64,6 +71,7 @@ class RoomEvent:
     sender_registration_id: int | None = None
     pre_key_id: int | None = None
     signed_pre_key_id: int | None = None
+    presence: dict[str, Any] | None = None
 
 
 @dataclass(slots=True)
@@ -347,6 +355,15 @@ class MP2Client:
             while True:
                 frame = read_frame(sock)
                 if frame.msg_type == common_pb2.MSG_TYPE_ROOM_EVENT:
+                    import binascii
+                    import sys
+
+                    sys.stderr.write(
+                        f"DEBUG: room event frame payload len={len(frame.payload)}\n"
+                    )
+                    sys.stderr.write(
+                        f"DEBUG: room event frame payload hex={binascii.hexlify(frame.payload).decode()}\n"
+                    )
                     event = room_pb2.RoomEvent()
                     event.ParseFromString(frame.payload)
                     file_meta: RoomFileMeta | None = None
@@ -388,6 +405,17 @@ class MP2Client:
                         if getattr(event.payload, "signed_pre_key_id", 0)
                         else None
                     )
+                    presence_data: dict[str, Any] | None = None
+                    try:
+                        if getattr(event, "presence", None):
+                            presence_data = {
+                                "user_id": event.presence.member.user_id,
+                                "device_id": int(event.presence.member.device_id),
+                                "timestamp": event.presence.member.timestamp,
+                                "instance_id": event.presence.instance_id,
+                            }
+                    except Exception:
+                        presence_data = None
                     yield RoomEvent(
                         room_name=event.room_name,
                         event_id=int(event.event_id),
@@ -412,6 +440,7 @@ class MP2Client:
                         sender_registration_id=sender_registration_id,
                         pre_key_id=pre_key_id,
                         signed_pre_key_id=signed_pre_key_id,
+                        presence=presence_data,
                     )
                 elif frame.msg_type == common_pb2.MSG_TYPE_ERROR_RESPONSE:
                     err = common_pb2.ErrorResponse()
@@ -421,6 +450,63 @@ class MP2Client:
                     continue
 
         return _event_iter()
+
+    def get_room_members(
+        self,
+        username: str,
+        room_name: str,
+    ) -> "list[RoomMember]":
+        record = self.ensure_access_token(username)
+        self.connect()
+        sock = self._require_socket()
+
+        req = room_pb2.RoomMemberListRequest()
+        req.room_name = room_name
+        req.access_token = record.access_token
+        # Debug: log token presence for troubleshooting
+        try:
+            import sys
+
+            sys.stderr.write(
+                f"DEBUG: get_room_members sending access_token length={len(record.access_token) if record and record.access_token is not None else 'None'}\n"
+            )
+        except Exception:
+            pass
+        payload = req.SerializeToString()
+        try:
+            import binascii
+            import sys
+
+            sys.stderr.write(
+                f"DEBUG: serialized RoomMemberListRequest ({len(payload)} bytes): {binascii.hexlify(payload).decode()}\n"
+            )
+        except Exception:
+            pass
+        write_frame(
+            sock,
+            msg_types.MSG_TYPE_ROOM_MEMBER_LIST_REQUEST,
+            payload,
+        )
+
+        frame = read_frame(sock)
+        if frame.msg_type == msg_types.MSG_TYPE_ROOM_MEMBER_LIST_RESPONSE:
+            resp = room_pb2.RoomMemberListResponse()
+            resp.ParseFromString(frame.payload)
+            members = []
+            for member in resp.members:
+                members.append(
+                    RoomMember(
+                        user_id=member.user_id,
+                        device_id=int(member.device_id),
+                        timestamp=member.timestamp,
+                    )
+                )
+            return members
+        if frame.msg_type == common_pb2.MSG_TYPE_ERROR_RESPONSE:
+            err = common_pb2.ErrorResponse()
+            err.ParseFromString(frame.payload)
+            raise MP2Error(f"get room members failed: {err.code}: {err.message}")
+        raise MP2Error(f"unexpected msg_type={frame.msg_type} during get room members")
 
     def e2ee_generate_keys(
         self,
@@ -619,6 +705,7 @@ __all__ = [
     "MP2Error",
     "AuthenticationError",
     "RoomEvent",
+    "RoomMember",
     "SignalKeyPair",
     "SignalPreKey",
     "SignalSignedPreKey",

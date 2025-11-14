@@ -12,6 +12,9 @@
 #include "rooms_gc.h"
 #include "mp2_protocol.h"
 #include "mp2_room_members.h"
+#ifdef HAVE_PROTOBUF_C
+#include "mp2_rooms_common.h"
+#endif
 
 #ifdef HAVE_PROTOBUF_C
 #include "generated/schema/v2/room.pb-c.h"
@@ -24,30 +27,6 @@ extern void rfc3339_time_local(char *buf, size_t cap);
 extern void dummy_sha256_hex(char *out_hex, size_t out_sz);
 extern long rooms_get_ignite_pending_ttl(void);
 extern long rooms_get_ignite_active_ttl(void);
-
-/**
- * Broadcast presence event to all room subscribers
- */
-static void
-rooms_instance_broadcast_presence_event(Room *room, const char *username,
-                                        int event_kind /* 2=JOINED, 3=LEFT */) {
-    if (!room || !username || *username == '\0') {
-        return;
-    }
-    /* Presence events over MP2 can interfere with client expectations in tests.
-       Skip broadcasting presence as MP2 frames to keep event streams clean. */
-#if defined(HAVE_PROTOBUF_C)
-    (void)event_kind;
-    (void)room;
-    (void)username;
-        return;
-#else
-    (void)event_kind;
-    (void)room;
-    (void)username;
-    return;
-#endif
-}
 
 void rooms_clear_all_subscribers(Room *room, int close_fds) {
     if (!room)
@@ -116,10 +95,31 @@ int rooms_inst_add_subscriber(Room *room, RoomInstance *instance,
     int instance_state_snapshot = 0;
     unsigned long long instance_last_event_snapshot = 0;
     platform_mutex_lock(&room->mu);
+    int user_already_present = 0;
+    if (username && *username) {
+        for (RoomInstance *it = room->instances; it; it = it->next) {
+            platform_mutex_lock(&it->mu);
+            for (size_t i = 0; i < it->subs_len; ++i) {
+                if (it->subs[i].user[0] != '\0' &&
+                    strcmp(it->subs[i].user, username) == 0) {
+                    user_already_present = 1;
+                    break;
+                }
+            }
+            platform_mutex_unlock(&it->mu);
+            if (user_already_present)
+                break;
+        }
+    }
+    mp2_protocol_dbgf(
+        "[presence] add_sub pre-check: user=%s already_present=%d",
+        username ? username : "", user_already_present);
     if (instance->parent != room) {
         platform_mutex_unlock(&room->mu);
         return -1;
     }
+    room_update_aggregates_locked(room);
+    size_t prev_total_subs = room->total_subs;
     platform_mutex_lock(&instance->mu);
     if (room->max_capacity_per_instance > 0 &&
         instance->subs_len >= room->max_capacity_per_instance) {
@@ -146,6 +146,7 @@ int rooms_inst_add_subscriber(Room *room, RoomInstance *instance,
         platform_mutex_unlock(&room->mu);
         return -1;
     }
+    sub->joined_at = time(NULL);
     instance->subs_len++;
     rooms_instance_update_last_active(instance);
 
@@ -180,10 +181,20 @@ int rooms_inst_add_subscriber(Room *room, RoomInstance *instance,
             total_subs_snapshot, last_event_snapshot);
     }
 
-    // Broadcast MEMBER_JOINED event to all room subscribers
-    if (username && *username) {
-        rooms_instance_broadcast_presence_event(room, username,
-                                                2); // 2 = MEMBER_JOINED
+    size_t total_subs_after_join = total_subs_snapshot;
+    int should_broadcast_join =
+        (username && *username && !user_already_present &&
+         total_subs_after_join > 1);
+
+    mp2_protocol_dbgf("[presence] add_sub: user=%s prev_total_subs=%zu "
+                      "total_after=%zu broadcast=%d",
+                      username ? username : "", prev_total_subs,
+                      total_subs_after_join, should_broadcast_join);
+
+    // Broadcast MEMBER_JOINED event to all existing room subscribers
+    if (should_broadcast_join) {
+        rooms_instance_broadcast_presence_event(room, instance, username, 2,
+                                                &instance->instance_id, fd);
     }
 
     return 0;
@@ -278,8 +289,9 @@ int rooms_inst_remove_subscriber(Room *room, RoomInstance *instance,
 
     // Broadcast MEMBER_LEFT event to all room subscribers
     if (removed_username[0] != '\0') {
-        rooms_instance_broadcast_presence_event(room, removed_username,
-                                                3); // 3 = MEMBER_LEFT
+        mp2_protocol_dbgf("[presence] remove_sub: user=%s", removed_username);
+        rooms_instance_broadcast_presence_event(
+            room, instance, removed_username, 3, &uuid_copy, fd);
     }
 
     return 0;
@@ -454,6 +466,7 @@ void rooms_subscriber_reset(Subscriber *sub) {
     sub->current_cosmetic_id[0] = '\0';
     sub->generated_name[0] = '\0';
     sub->visibility_state = ROOM_VISIBILITY_STRANGER;
+    sub->joined_at = 0;
 }
 
 int rooms_subscriber_generate_presence_token(RoomInstance *instance,
@@ -945,4 +958,32 @@ int rooms_update_subscriber_identity(RoomInstance *instance,
         subscriber_snapshot_local(sub, out);
     platform_mutex_unlock(&instance->mu);
     return 0;
+}
+
+// Presence event broadcasting helper
+void rooms_instance_broadcast_presence_event(struct Room *room,
+                                             struct RoomInstance *instance,
+                                             const char *username,
+                                             int event_kind,
+                                             const InstanceUUID *instance_uuid,
+                                             platform_socket_t skip_fd) {
+#ifdef HAVE_PROTOBUF_C
+    if (!room || !username || !instance_uuid) {
+        return;
+    }
+    Mingdrlms__V2__RoomEventKind kind =
+        (event_kind == 3)
+            ? MINGDRLMS__V2__ROOM_EVENT_KIND__ROOM_EVENT_KIND_MEMBER_LEFT
+            : MINGDRLMS__V2__ROOM_EVENT_KIND__ROOM_EVENT_KIND_MEMBER_JOINED;
+    (void)instance;
+    mp2_rooms_broadcast_presence_event(room, instance_uuid, username, skip_fd,
+                                       kind);
+#else
+    (void)room;
+    (void)instance;
+    (void)username;
+    (void)event_kind;
+    (void)instance_uuid;
+    (void)skip_fd;
+#endif
 }

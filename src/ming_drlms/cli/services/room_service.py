@@ -9,6 +9,7 @@ from ming_drlms.core.mproto_v2_client import (
     AuthenticationError,
     MP2Error,
     RoomEvent,
+    RoomMember,
 )
 from ming_drlms.core.pysignal import SignalBridgeError
 from ming_drlms.core.e2ee_store import LocalKeyStore
@@ -410,23 +411,25 @@ class RoomService:
         except ValueError:
             return 0
 
-    def get_members(
+    def get_room_members_mp2(
         self,
         *,
         host: str,
         port: int,
         user: str,
-        password: str,
         room: str,
-    ) -> CommandResult:
-        """Get the list of members in a room."""
-        return self._execute_simple_command(
-            host=host,
-            port=port,
-            user=user,
-            password=password,
-            command=f"ROOMMEMBERS|{room}\n",
-        )
+        token_store_path: Optional[object] = None,
+    ) -> list[RoomMember]:
+        try:
+            with self._client_factory(
+                host,
+                port,
+                timeout=10.0,
+                token_store_path=token_store_path,
+            ) as client:
+                return client.get_room_members(user, room)
+        except (MP2Error, AuthenticationError) as exc:
+            raise RoomServiceError(str(exc)) from exc
 
 
 __all__ = [

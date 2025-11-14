@@ -12,6 +12,11 @@ from ming_drlms.cli.services import PublishResult
 from ming_drlms.core.token_store import TokenRecord
 
 
+class _MembersStubMixin:
+    def get_room_members_mp2(self, **kwargs):  # type: ignore[no-untyped-def]
+        return []
+
+
 @pytest.fixture()
 def runner() -> CliRunner:
     return CliRunner()
@@ -109,7 +114,7 @@ def test_room_sub_limit(monkeypatch, runner: CliRunner):
         RoomEvent(room_name="demo", event_id=2, payload=b"bye", display_token="t2"),
     ]
 
-    class StubService:
+    class StubService(_MembersStubMixin):
         def subscribe(self, **kwargs):
             yield from events
 

@@ -71,4 +71,5 @@ exclude = [
     "build", 
     "dist", 
     "tools/cli/src/ming_drlms/_version.py",
+    "src/ming_drlms/proto/schema/v2/*_pb2.py",  # Generated protobuf files
 ]

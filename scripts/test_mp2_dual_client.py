@@ -12,6 +12,12 @@ import time
 import threading
 import argparse
 import sys
+import os
+
+os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
+
+from ming_drlms.proto.schema.v2.room_pb2 import RoomEvent as RoomEventPb2
+from ming_drlms.proto.schema.v2 import room_pb2
 
 
 def pack_varint(value):
@@ -166,48 +172,13 @@ def authenticate(sock, username, password_hash):
 
 
 def decode_room_event(payload_bytes):
-    """Minimal protobuf decoder for RoomEvent."""
-    i = 0
-    room_name = None
-    event_id = None
-    payload = None
-    display_token = None
-    pb = payload_bytes
-
-    def read_varint(idx):
-        shift = 0
-        val = 0
-        while idx < len(pb):
-            b = pb[idx]
-            idx += 1
-            val |= (b & 0x7F) << shift
-            if (b & 0x80) == 0:
-                return val, idx
-            shift += 7
-        raise ValueError("truncated varint")
-
-    while i < len(pb):
-        tag, i = read_varint(i)
-        field_num = tag >> 3
-        wire = tag & 0x07
-        if wire == 2:  # length-delimited
-            ln, i = read_varint(i)
-            if i + ln > len(pb):
-                raise ValueError("truncated field")
-            data = pb[i : i + ln]
-            i += ln
-            if field_num == 1:
-                room_name = data.decode("utf-8", errors="ignore")
-            elif field_num == 3:
-                payload = data
-            elif field_num == 4:
-                display_token = data.decode("utf-8", errors="ignore")
-        elif wire == 0:  # varint (e.g., int64)
-            val, i = read_varint(i)
-            if field_num == 2:
-                event_id = val
-        else:
-            raise ValueError(f"unsupported wire type {wire}")
+    """Decode RoomEvent using protobuf."""
+    ev = RoomEventPb2()
+    ev.ParseFromString(payload_bytes)
+    room_name = ev.room_name
+    event_id = ev.event_id
+    payload = ev.payload.ciphertext if ev.payload else None
+    display_token = ev.display_token
     return room_name, event_id, payload, display_token
 
 
@@ -223,13 +194,14 @@ def client_a_subscriber(host, port, password_hash, room_name, results):
         access_token = authenticate(sock, "alice", password_hash)
 
         # Subscribe to room
-        sub_req = (
-            pack_field_str(1, room_name)  # room_name
-            + pack_field_str(2, access_token)  # access_token
-            + pack_field_int64(3, 0)
-        )  # since_id
+        sub_req = room_pb2.RoomSubscribeRequest()
+        sub_req.room_name = room_name
+        sub_req.access_token = access_token
+        sub_req.since_id = 0
+        sub_req.replay_limit = 0
+        sub_payload = sub_req.SerializeToString()
 
-        send_frame(sock, 200, sub_req)  # MSG_TYPE_ROOM_SUB_REQUEST
+        send_frame(sock, 200, sub_payload)  # MSG_TYPE_ROOM_SUB_REQUEST
         print(f"[A] Subscribed to room: {room_name}")
 
         # Wait for RoomEvent
@@ -238,6 +210,8 @@ def client_a_subscriber(host, port, password_hash, room_name, results):
 
         if msg_type == 202:  # MSG_TYPE_ROOM_EVENT
             room_name_recv, event_id, msg_payload, display = decode_room_event(payload)
+            if msg_payload is None:
+                raise ValueError("RoomEvent payload is None")
             print(
                 f"[A] Received RoomEvent: room={room_name_recv} event_id={event_id} display={display}"
             )
@@ -279,14 +253,16 @@ def client_b_publisher(host, port, password_hash, room_name, message):
         access_token = authenticate(sock, "alice", password_hash)
 
         # Publish message
-        pub_req = (
-            pack_field_str(1, room_name)  # room_name
-            + pack_field_str(2, access_token)  # access_token
-            + pack_field_bytes(3, message.encode("utf-8"))  # payload
-            + pack_field_int64(4, 0)
-        )  # ephemeral (false)
+        pub_req = room_pb2.RoomPublishRequest()
+        pub_req.room_name = room_name
+        pub_req.access_token = access_token
+        pub_req.payload.type = (
+            room_pb2.SignalCiphertextType.SIGNAL_CIPHERTEXT_TYPE_MESSAGE
+        )
+        pub_req.payload.ciphertext = message.encode("utf-8")
+        pub_payload = pub_req.SerializeToString()
 
-        send_frame(sock, 201, pub_req)  # MSG_TYPE_ROOM_PUB_REQUEST
+        send_frame(sock, 201, pub_payload)  # MSG_TYPE_ROOM_PUB_REQUEST
         print(f"[B] Published message to room: {room_name}")
         print(f"[B] Message: {message}")
 

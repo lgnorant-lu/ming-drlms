@@ -42,8 +42,13 @@ set(SERVER_SOURCES
 include(${CMAKE_SOURCE_DIR}/cmake/ProtobufFetch.cmake)
 include(${CMAKE_SOURCE_DIR}/cmake/SignalFetch.cmake)
 
+if(PROTOBUF_C_USE_BUNDLED_RUNTIME AND NOT PROTOBUF_C_USE_PREGENSETS)
+    list(APPEND SERVER_SOURCES ${PROJECT_SOURCE_DIR}/src/external/protobuf-c/protobuf-c.c)
+endif()
+
 # --- Protobuf-C code generation (Phase 1) ---
 find_program(PROTOC_C_EXECUTABLE protoc-c)
+find_program(PROTOC_EXECUTABLE protoc REQUIRED)
 set(PROTO_DIR ${PROJECT_SOURCE_DIR}/schema/v2)
 # Generate into the current binary dir to avoid source dir path issues
 set(GENERATED_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated)
@@ -61,6 +66,7 @@ set(PROTO_FILES
 
 set(GENERATED_SRC)
 set(GENERATED_HDR)
+set(GENERATED_PY)
 
 if(PROTOBUF_C_USE_PREGENSETS)
     set(GENERATED_SRC ${PROTOBUF_C_SOURCES})
@@ -69,26 +75,27 @@ if(PROTOBUF_C_USE_PREGENSETS)
     list(APPEND SERVER_SOURCES mp2_rooms_sub_pub.c)
     source_group("generated" FILES ${GENERATED_SRC} ${GENERATED_HDR})
 else()
-    if(PROTOC_C_EXECUTABLE)
-        foreach(PF ${PROTO_FILES})
-            get_filename_component(PBN ${PF} NAME_WE)
-            set(REL_SUBDIR schema/v2)
-            set(OUT_DIR ${GENERATED_DIR}/${REL_SUBDIR})
-            set(OUT_C ${OUT_DIR}/${PBN}.pb-c.c)
-            set(OUT_H ${OUT_DIR}/${PBN}.pb-c.h)
-            add_custom_command(
-                OUTPUT ${OUT_C} ${OUT_H}
-                COMMAND ${CMAKE_COMMAND} -E echo "[proto_gen] ${PF} -> ${OUT_C}"
-                COMMAND ${CMAKE_COMMAND} -E make_directory ${OUT_DIR}
-                COMMAND ${PROTOC_C_EXECUTABLE} --c_out=${GENERATED_DIR} -I${PROJECT_SOURCE_DIR} -I${PROTO_DIR} ${PF}
-                DEPENDS ${PF}
-                BYPRODUCTS ${OUT_C} ${OUT_H}
-                VERBATIM
-                COMMENT "Generating protobuf-c sources for ${PBN}"
-            )
-            list(APPEND GENERATED_SRC ${OUT_C})
-            list(APPEND GENERATED_HDR ${OUT_H})
-        endforeach()
+        if(PROTOC_C_EXECUTABLE)
+            foreach(PF ${PROTO_FILES})
+                get_filename_component(PBN ${PF} NAME_WE)
+                set(REL_SUBDIR schema/v2)
+                set(OUT_DIR ${GENERATED_DIR}/${REL_SUBDIR})
+                set(OUT_C ${OUT_DIR}/${PBN}.pb-c.c)
+                set(OUT_H ${OUT_DIR}/${PBN}.pb-c.h)
+                set(OUT_PY ${OUT_DIR}/${PBN}_pb2.py)
+                add_custom_command(
+                    OUTPUT ${OUT_C} ${OUT_H} ${OUT_PY}
+                    COMMAND ${CMAKE_COMMAND} -E echo "[proto_gen] ${PF} -> ${OUT_C}"
+                    COMMAND ${CMAKE_COMMAND} -E make_directory ${OUT_DIR}
+                    COMMAND ${PROTOC_EXECUTABLE} --proto_path=${PROJECT_SOURCE_DIR} --c_out=${GENERATED_DIR} --python_out=${GENERATED_DIR} ${PF}
+                    DEPENDS ${PF}
+                    VERBATIM
+                    COMMENT "Generating protobuf-c and python sources for ${PBN}"
+                )
+                list(APPEND GENERATED_SRC ${OUT_C})
+                list(APPEND GENERATED_HDR ${OUT_H})
+                list(APPEND GENERATED_PY ${OUT_PY})
+            endforeach()
         list(APPEND SERVER_SOURCES ${GENERATED_SRC})
         list(APPEND SERVER_SOURCES mp2_rooms_sub_pub.c)
         source_group("generated" FILES ${GENERATED_SRC} ${GENERATED_HDR})
@@ -146,13 +153,6 @@ else()
     )
 endif()
 
-# Add custom message types for room member list API
-target_compile_definitions(log_collector_server PRIVATE 
-    MSG_TYPE_ROOM_MEMBER_LIST_REQUEST=504
-    MSG_TYPE_ROOM_MEMBER_LIST_RESPONSE=505
-    MSG_TYPE_ERROR_RESPONSE=500
-)
-
 # 设置编译特性来降低警告严格度
 set_target_properties(log_collector_server PROPERTIES
     C_STANDARD 11
@@ -165,13 +165,14 @@ target_include_directories(log_collector_server
         ${PROJECT_SOURCE_DIR}/src/libipc
         ${PROJECT_SOURCE_DIR}/src/platform/include
         ${PROJECT_SOURCE_DIR}/src
-        ${PROJECT_SOURCE_DIR}/src/generated
         ${PROJECT_SOURCE_DIR}
         ${CMAKE_CURRENT_BINARY_DIR}
         ${GENERATED_DIR}
+        ${PROJECT_SOURCE_DIR}/src/generated
+    ${PROJECT_SOURCE_DIR}/src/external/protobuf-c/include
+    ${PROJECT_SOURCE_DIR}/src/external/protobuf-c
         ${ARGON2_INCLUDE_DIRS}
-        ${PROTOBUF_C_INCLUDE_DIRS}
-        ${PROJECT_SOURCE_DIR}/src/external/protobuf-c/include
+    ${PROTOBUF_C_INCLUDE_DIRS}
 )
 
 set(SERVER_LIBS
@@ -230,8 +231,25 @@ target_link_libraries(log_collector_server PRIVATE ${SERVER_LIBS})
 
 # Add build info logging
 if(PROTOC_C_EXECUTABLE AND NOT PROTOBUF_C_USE_PREGENSETS AND GENERATED_SRC)
-    add_custom_target(proto_gen DEPENDS ${GENERATED_SRC} ${GENERATED_HDR})
+    add_custom_target(proto_gen DEPENDS ${GENERATED_SRC} ${GENERATED_HDR} ${GENERATED_PY})
     add_dependencies(log_collector_server proto_gen)
+    set(_PROTO_PY_BASE_DIRS
+        "${GENERATED_DIR}/schema/v2"
+        "${GENERATED_DIR}/schema/v2/v2"
+    )
+    set(_PROTO_PY_BASE_DIRS_FILE "${CMAKE_CURRENT_BINARY_DIR}/proto_py_base_dirs.txt")
+    file(WRITE ${_PROTO_PY_BASE_DIRS_FILE} "")
+    foreach(_dir IN LISTS _PROTO_PY_BASE_DIRS)
+        file(APPEND ${_PROTO_PY_BASE_DIRS_FILE} "${_dir}\n")
+    endforeach()
+    add_custom_command(TARGET proto_gen POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -DPROTO_PY_BASE_DIR_FILE=${_PROTO_PY_BASE_DIRS_FILE} -DPROTO_PY_FILENAME=common_pb2.py -DPROTO_PY_DEST_DIR=${CMAKE_SOURCE_DIR}/src/ming_drlms/proto/schema/v2 -P ${CMAKE_SOURCE_DIR}/cmake/CopyGeneratedProtoPy.cmake
+        COMMAND ${CMAKE_COMMAND} -DPROTO_PY_BASE_DIR_FILE=${_PROTO_PY_BASE_DIRS_FILE} -DPROTO_PY_FILENAME=room_pb2.py -DPROTO_PY_DEST_DIR=${CMAKE_SOURCE_DIR}/src/ming_drlms/proto/schema/v2 -P ${CMAKE_SOURCE_DIR}/cmake/CopyGeneratedProtoPy.cmake
+        COMMAND ${CMAKE_COMMAND} -DPROTO_PY_BASE_DIR_FILE=${_PROTO_PY_BASE_DIRS_FILE} -DPROTO_PY_FILENAME=e2ee_pb2.py -DPROTO_PY_DEST_DIR=${CMAKE_SOURCE_DIR}/src/ming_drlms/proto/schema/v2 -P ${CMAKE_SOURCE_DIR}/cmake/CopyGeneratedProtoPy.cmake
+        COMMAND ${CMAKE_COMMAND} -DPROTO_PY_BASE_DIR_FILE=${_PROTO_PY_BASE_DIRS_FILE} -DPROTO_PY_FILENAME=auth_pb2.py -DPROTO_PY_DEST_DIR=${CMAKE_SOURCE_DIR}/src/ming_drlms/proto/schema/v2 -P ${CMAKE_SOURCE_DIR}/cmake/CopyGeneratedProtoPy.cmake
+        COMMAND ${CMAKE_COMMAND} -DPROTO_PY_BASE_DIR_FILE=${_PROTO_PY_BASE_DIRS_FILE} -DPROTO_PY_FILENAME=federation_pb2.py -DPROTO_PY_DEST_DIR=${CMAKE_SOURCE_DIR}/src/ming_drlms/proto/schema/v2 -P ${CMAKE_SOURCE_DIR}/cmake/CopyGeneratedProtoPy.cmake
+        COMMENT "Copying generated Python protobuf files to client directory"
+    )
 endif()
 
 message(STATUS "Server build configuration summary:")

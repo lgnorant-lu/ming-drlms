@@ -268,6 +268,9 @@ int mp2_protocol_send_frame(platform_socket_t fd, uint16_t msg_type,
     /* Skip if this fd is not registered as MP2 (prevents binary leaking into
      * text sockets) */
     if (!mp2_protocol_is_fd_mp2(fd)) {
+        fprintf(stderr,
+                "[mp2][dbg] send_frame: fd=%d msg_type=%u not registered\n",
+                (int)fd, msg_type);
         return 0;
     }
     unsigned char header[12];

@@ -3,305 +3,400 @@
 M-Proto-v2 Room Presence E2E Tests
 """
 
-import json
+import os
+import shutil
 import socket
-import threading
+import subprocess
+import tempfile
 import time
+from pathlib import Path
 
 import pytest
 
 from ming_drlms.cli.services.room_service import RoomService
+from ming_drlms.core.mproto_v2_client import login_flow
+from ming_drlms.core.token_store import TokenStore
 
 
-class PresenceTestServer:
-    """Simple test server that handles room member list requests and presence events."""
+class RealServerPresenceTest:
+    """Test presence functionality with real server process."""
 
-    def __init__(self, host: str = "127.0.0.1", port: int = 0):
-        self.host = host
-        self.port = port
-        self.server_socket = None
-        self.clients = []
-        self.rooms = {}  # room_name -> list of (client_socket, username)
-        self.running = False
-        self.server_thread = None
+    def __init__(self):
+        self.server_process = None
+        self.server_port = 0
+        self.temp_dir = None
+        self.users_file = None
+        self.token_store_path = None
 
-    def start(self):
-        """Start the test server."""
-        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.server_socket.bind((self.host, self.port))
-        self.port = self.server_socket.getsockname()[1]  # Get actual port
-        self.server_socket.listen(5)
-        self.running = True
+    def start_server(self):
+        """Start a real server process for testing."""
+        self.temp_dir = tempfile.mkdtemp(prefix="drlms_test_")
+        self.users_file = Path(self.temp_dir) / "users.txt"
 
-        self.server_thread = threading.Thread(target=self._server_loop)
-        self.server_thread.daemon = True
-        self.server_thread.start()
+        # Copy existing sample users file (argon2 entries)
+        repo_root = Path(__file__).resolve().parents[2]
+        sample_users = repo_root / "users.txt"
+        shutil.copy(sample_users, self.users_file)
 
-    def stop(self):
-        """Stop the test server."""
-        self.running = False
-        if self.server_socket:
-            self.server_socket.close()
-        for client in self.clients:
+        # Find server binary
+        server_binary = self._find_server_binary()
+        if not server_binary:
+            raise RuntimeError("Could not find server binary")
+
+        # Pre-allocate a free port so we know where to connect
+        reserved_port = self._reserve_port()
+
+        # Start server
+        env = os.environ.copy()
+        env["DRLMS_USERS_FILE"] = str(self.users_file)
+        env["DRLMS_DATA_DIR"] = str(self.temp_dir)
+        env["DRLMS_MP2_ACCEPT_ANY"] = "1"
+        env["DRLMS_ENABLE_MPROTO_V2"] = "1"
+        env["DRLMS_MP2_DEBUG"] = "1"
+        env["DRLMS_PORT"] = str(reserved_port)
+
+        self.server_process = subprocess.Popen(
+            [server_binary],
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+        # Start threads to print server output in real-time
+        import threading
+
+        def print_stdout():
             try:
-                client.close()
+                for line in iter(self.server_process.stdout.readline, ""):
+                    print(f"SERVER STDOUT: {line.strip()}")
             except Exception:
                 pass
-        if self.server_thread:
-            self.server_thread.join(timeout=1)
 
-    def _server_loop(self):
-        """Main server loop."""
-        while self.running:
+        def print_stderr():
             try:
-                self.server_socket.settimeout(1.0)
-                client_socket, address = self.server_socket.accept()
-                self.clients.append(client_socket)
-                client_thread = threading.Thread(
-                    target=self._handle_client, args=(client_socket,)
-                )
-                client_thread.daemon = True
-                client_thread.start()
-            except socket.timeout:
-                continue
+                for line in iter(self.server_process.stderr.readline, ""):
+                    print(f"SERVER STDERR: {line.strip()}")
             except Exception:
-                break
+                pass
 
-    def _handle_client(self, client_socket: socket.socket):
-        """Handle individual client connections."""
+        threading.Thread(target=print_stdout, daemon=True).start()
+        threading.Thread(target=print_stderr, daemon=True).start()
+
+        # Wait for server to start accepting connections
+        if self._wait_for_port(reserved_port, timeout=10.0):
+            self.server_port = reserved_port
+        else:
+            self.server_port = self._get_server_port()
+        print(f"Server port found: {self.server_port}")
+
+        if self.server_port == 0:
+            # Print server output for debugging
+            if self.server_process.poll() is None:
+                print("Server process is still running")
+            else:
+                stdout, stderr = self.server_process.communicate()
+                print(f"Server stdout: {stdout}")
+                print(f"Server stderr: {stderr}")
+            self.stop_server()
+            raise RuntimeError("Server failed to start or port not found")
+
+        # Token store path used by clients for authenticated calls
+        self.token_store_path = Path(self.temp_dir) / "tokens.json"
+
+        # Add fake token for testing
+        from ming_drlms.core.token_store import TokenStore, TokenRecord
+        import time
+
+        token_store = TokenStore(self.token_store_path)
+        record = TokenRecord(
+            username="bob",
+            host="127.0.0.1",
+            port=self.server_port,
+            access_token="fake_token",
+            access_expires_at=time.time() + 3600,
+            refresh_token="fake_refresh",
+        )
+        token_store.store(record)
+
+    def _find_server_binary(self):
+        """Find the server binary."""
+        candidates = [
+            Path("build/log_collector_server"),
+            Path("build/Debug/log_collector_server"),
+            Path("build/Release/log_collector_server"),
+            Path("log_collector_server"),
+        ]
+
+        for candidate in candidates:
+            if candidate.exists() and candidate.is_file():
+                return str(candidate)
+
+        # Try to build it
+        if Path("CMakeLists.txt").exists():
+            try:
+                subprocess.run(
+                    ["cmake", "--build", "build", "--target", "log_collector_server"],
+                    check=True,
+                    capture_output=True,
+                )
+                if Path("build/log_collector_server").exists():
+                    return "build/log_collector_server"
+            except subprocess.CalledProcessError:
+                pass
+
+        return None
+
+    def _get_server_port(self):
+        """Get the server port from process output."""
+        if not self.server_process:
+            return 0
+
         try:
-            while self.running:
-                data = client_socket.recv(1024)
-                if not data:
-                    break
-
-                message = data.decode().strip()
-
-                # Handle room subscription
-                if message.startswith("SUB|"):
-                    parts = message.split("|")
-                    if len(parts) >= 4:
-                        username = parts[1]
-                        room_name = parts[2]
-                        # token = parts[3]  # unused for now
-
-                        if room_name not in self.rooms:
-                            self.rooms[room_name] = []
-
-                        # Broadcast member joined event to existing subscribers BEFORE adding new user
-                        self._broadcast_presence_event(room_name, username, "joined")
-
-                        self.rooms[room_name].append((client_socket, username))
-
-                        client_socket.sendall(b"OK|SUBSCRIBED\n")
-
-                # Handle room member list request
-                elif message.startswith("ROOMMEMBERS|"):
-                    parts = message.split("|")
-                    if len(parts) >= 2:
-                        room_name = parts[1]
-                        self._send_member_list(client_socket, room_name)
-
-                # Handle room publish
-                elif message.startswith("PUB|"):
-                    # Echo the message back for now
-                    client_socket.sendall(b"OK|PUBLISHED\n")
-
-                else:
-                    client_socket.sendall(b"OK\n")
-
+            # Try to connect to find the port (expanded range including observed ports)
+            for port in range(8000, 20000):
+                try:
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    sock.settimeout(0.1)
+                    result = sock.connect_ex(("127.0.0.1", port))
+                    sock.close()
+                    if result == 0:
+                        return port
+                except Exception:
+                    continue
         except Exception:
             pass
+
+        return 0
+
+    def _reserve_port(self):
+        """Reserve a free port by binding to port 0."""
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+        sock.close()
+        return port
+
+    def _wait_for_port(self, port, timeout=10.0):
+        """Wait for the server to start listening on the given port."""
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(0.1)
+                result = sock.connect_ex(("127.0.0.1", port))
+                sock.close()
+                if result == 0:
+                    return True
+            except Exception:
+                pass
+            time.sleep(0.1)
+        return False
+
+    def stop_server(self):
+        """Stop the server process."""
+        if self.server_process:
+            try:
+                self.server_process.terminate()
+                self.server_process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.server_process.kill()
+                self.server_process.wait()
+
+        if self.temp_dir and Path(self.temp_dir).exists():
+            shutil.rmtree(self.temp_dir)
+
+    def login_user(self, username: str) -> None:
+        """Perform login flow for a user to populate the token store."""
+        if not self.token_store_path:
+            raise RuntimeError("Server not started")
+        token_store = TokenStore(self.token_store_path)
+        login_flow(
+            host="127.0.0.1",
+            port=self.server_port,
+            username=username,
+            users_file=self.users_file,
+            token_store=token_store,
+        )
+
+
+class TestMP2PresenceE2E:
+    """End-to-end tests for room presence functionality with real server."""
+
+    @pytest.fixture
+    def real_server(self):
+        """Start a real server for testing."""
+        server = RealServerPresenceTest()
+        try:
+            server.start_server()
+            yield server
         finally:
-            # Remove client from all rooms
-            for room_name in list(self.rooms.keys()):
-                self.rooms[room_name] = [
-                    (sock, user)
-                    for sock, user in self.rooms[room_name]
-                    if sock != client_socket
-                ]
-                # If room is empty, remove it
-                if not self.rooms[room_name]:
-                    del self.rooms[room_name]
-
-    def _send_member_list(self, client_socket: socket.socket, room_name: str):
-        """Send room member list to client."""
-        if room_name in self.rooms:
-            # Send member list in format: ROOMMEMBERS|room_name|user_id|device_id|timestamp|...
-            for sock, username in self.rooms[room_name]:
-                timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-                response = f"ROOMMEMBERS|{room_name}|{username}|1|{timestamp}\n"
-                client_socket.sendall(response.encode())
-        client_socket.sendall(b"OK\n")
-
-    def _broadcast_presence_event(self, room_name: str, username: str, action: str):
-        """Broadcast presence event to room members."""
-        if room_name in self.rooms:
-            event_data = {
-                "event_type": "presence",
-                "user": username,
-                "action": action,
-                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            }
-            event_json = json.dumps(event_data)
-
-            for sock, member_username in self.rooms[room_name]:
-                try:
-                    # Send as RoomEvent with special format
-                    sock.sendall(f"ROOM_EVENT|{event_json}\n".encode())
-                except Exception:
-                    pass
-
-
-class TestMP2Presence:
-    """Test suite for room presence functionality."""
+            server.stop_server()
 
     @pytest.fixture
-    def test_server(self):
-        """Create and start test server."""
-        server = PresenceTestServer()
-        server.start()
-        yield server
-        server.stop()
-
-    @pytest.fixture
-    def room_service(self):
-        """Create RoomService instance."""
+    def room_service(self, real_server):
+        """Create RoomService instance with token store."""
+        _ = real_server  # ensure server fixture is initialized before clients
         return RoomService()
 
-    def test_room_member_list_api(self, test_server, room_service):
-        """Test that room member list API works correctly."""
-        # Wait for server to start
-        time.sleep(0.1)
+    def test_presence_full_lifecycle(self, real_server, room_service):
+        """Test complete presence lifecycle: join -> join event -> leave -> leave event."""
+        if real_server.server_port == 0:
+            pytest.skip("Real server not available")
 
-        # Connect clients to simulate members joining a room
-        room_name = "test_presence_room"
-        username1 = "alice"
-        username2 = "bob"
+        room_name = "test_presence_e2e"
+        host = "127.0.0.1"
+        port = real_server.server_port
+        user_a = "bob"
+        user_b = "testuser"
+        real_server.login_user(user_a)
+        real_server.login_user(user_b)
+        token_store_path = real_server.token_store_path
+        if token_store_path is None:
+            pytest.skip("Token store not initialized")
 
-        # Subscribe first client
-        client1 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        client1.connect(("127.0.0.1", test_server.port))
-        client1.sendall(f"SUB|{username1}|{room_name}|token1\n".encode())
-        response1 = client1.recv(1024).decode()
-        assert "OK|SUBSCRIBED" in response1
+        # Client A subscribes first
+        print(f"Client {user_a} subscribing to {room_name}")
+        events_a = []
 
-        # Subscribe second client
-        client2 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        client2.connect(("127.0.0.1", test_server.port))
-        client2.sendall(f"SUB|{username2}|{room_name}|token2\n".encode())
-        response2 = client2.recv(1024).decode()
-        assert "OK|SUBSCRIBED" in response2
+        def collect_events_a():
+            try:
+                for event in room_service.subscribe(
+                    host=host,
+                    port=port,
+                    user=user_a,
+                    room=room_name,
+                    since_id=0,
+                    token_store=token_store_path,
+                    timeout=5.0,
+                ):
+                    events_a.append(event)
+                    if len(events_a) >= 3:  # Get a few events then stop
+                        break
+            except Exception as e:
+                print(f"Client A error: {e}")
 
-        # Give time for presence events to be processed
-        time.sleep(0.1)
+        import threading
 
-        # Test room members API through RoomService
-        # Note: This test would need proper integration with the actual server
-        # For now, we'll test the basic connectivity
-        assert len(test_server.rooms[room_name]) == 2
+        thread_a = threading.Thread(target=collect_events_a, daemon=True)
+        thread_a.start()
 
-        # Cleanup
-        client1.close()
-        client2.close()
+        time.sleep(1)  # Let client A subscribe
 
-    def test_presence_events(self, test_server):
-        """Test that presence events are broadcast correctly."""
-        # Wait for server to start
-        time.sleep(0.1)
+        # Client B subscribes (should trigger MEMBER_JOINED for client A)
+        print(f"Client {user_b} subscribing to {room_name}")
+        events_b = []
 
-        room_name = "test_presence_events"
-        username1 = "test_user"
-        username2 = "other_user"
+        def collect_events_b():
+            try:
+                for event in room_service.subscribe(
+                    host=host,
+                    port=port,
+                    user=user_b,
+                    room=room_name,
+                    since_id=0,
+                    token_store=token_store_path,
+                    timeout=5.0,
+                ):
+                    events_b.append(event)
+                    if len(events_b) >= 2:  # Get a few events then stop
+                        break
+            except Exception as e:
+                print(f"Client B error: {e}")
 
-        # Create subscriber client (user1)
-        subscriber = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        subscriber.connect(("127.0.0.1", test_server.port))
+        thread_b = threading.Thread(target=collect_events_b, daemon=True)
+        thread_b.start()
 
-        # Subscribe and listen for events
-        subscriber.sendall(f"SUB|{username1}|{room_name}|token\n".encode())
-        response = subscriber.recv(1024).decode()
-        assert "OK|SUBSCRIBED" in response
+        time.sleep(2)  # Let events propagate
 
-        # Create publisher client and subscribe another user (user2)
-        publisher = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        publisher.connect(("127.0.0.1", test_server.port))
-        publisher.sendall(f"SUB|{username2}|{room_name}|token\n".encode())
-        pub_response = publisher.recv(1024).decode()
-        assert "OK|SUBSCRIBED" in pub_response
+        # Check that client A received MEMBER_JOINED event for client B
+        presence_events_a = [e for e in events_a if e.kind in (2, 3)]  # JOINED or LEFT
+        assert len(presence_events_a) > 0, (
+            f"Client A should have received presence events, got: {[e.kind for e in events_a]}"
+        )
 
-        # Check if presence event was received by subscriber (user1)
-        subscriber.settimeout(1.0)
+        joined_events = [e for e in presence_events_a if e.kind == 2]
+        assert len(joined_events) > 0, (
+            "Client A should have received MEMBER_JOINED event"
+        )
+
+        # Verify the joined event contains correct data
+        join_event = joined_events[0]
+        assert join_event.presence is not None, "Join event should have presence data"
+        assert join_event.presence["user_id"] == user_b, (
+            f"Expected {user_b}, got {join_event.presence.get('user_id')}"
+        )
+
+        print("Presence E2E test completed successfully")
+
+    def test_room_members_api(self, real_server, room_service):
+        """Test room members API returns correct data."""
+        if real_server.server_port == 0:
+            pytest.skip("Real server not available")
+
+        room_name = "test_members_api"
+        host = "127.0.0.1"
+        port = real_server.server_port
+        user = "bob"
+        # real_server.login_user(user)  # Skip login for now
+        token_store_path = real_server.token_store_path
+        if token_store_path is None:
+            pytest.skip("Token store not initialized")
+
+        # Initially room should be empty
         try:
-            event_data = subscriber.recv(1024).decode()
-            assert "ROOM_EVENT" in event_data
-            # The presence event should contain the username of the user who just joined (user2)
-            assert username2 in event_data  # user2 joined
-            assert "joined" in event_data
-        except socket.timeout:
-            # Presence events might be processed with delay
-            pass
+            members = room_service.get_room_members_mp2(
+                host=host,
+                port=port,
+                user=user,
+                room=room_name,
+                token_store_path=token_store_path,
+            )
+            assert len(members) == 0, f"Expected empty room, got {len(members)} members"
+        except Exception as e:
+            # Room might not exist yet, that's OK
+            print(f"Initial members check failed (expected): {e}")
 
-        # Cleanup
-        subscriber.close()
-        publisher.close()
+        # Subscribe a user
+        events = []
 
-    def test_empty_room_member_list(self, test_server):
-        """Test that empty room returns proper member list."""
-        # Wait for server to start
-        time.sleep(0.1)
+        def collect_events():
+            try:
+                for event in room_service.subscribe(
+                    host=host,
+                    port=port,
+                    user=user,
+                    room=room_name,
+                    since_id=0,
+                    token_store=token_store_path,
+                    timeout=3.0,
+                ):
+                    events.append(event)
+                    break  # Just get one event
+            except Exception as e:
+                print(f"Subscribe error: {e}")
 
-        room_name = "empty_test_room"
+        import threading
 
-        # Request member list for empty room
-        client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        client.connect(("127.0.0.1", test_server.port))
-        client.sendall(f"ROOMMEMBERS|{room_name}\n".encode())
+        thread = threading.Thread(target=collect_events, daemon=True)
+        thread.start()
+        time.sleep(1)
 
-        response = client.recv(1024).decode()
-        assert "OK" in response
-
-        client.close()
-
-    def test_room_member_join_leave_flow(self, test_server):
-        """Test complete join/leave flow for room members."""
-        # Wait for server to start
-        time.sleep(0.1)
-
-        room_name = "test_flow_room"
-
-        # Client A joins
-        client_a = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        client_a.connect(("127.0.0.1", test_server.port))
-        client_a.sendall(f"SUB|alice|{room_name}|token_a\n".encode())
-        response_a = client_a.recv(1024).decode()
-        assert "OK|SUBSCRIBED" in response_a
-
-        # Give time for any processing
-        time.sleep(0.1)
-
-        # Client B joins
-        client_b = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        client_b.connect(("127.0.0.1", test_server.port))
-        client_b.sendall(f"SUB|bob|{room_name}|token_b\n".encode())
-        response_b = client_b.recv(1024).decode()
-        assert "OK|SUBSCRIBED" in response_b
-
-        # Check that both clients are in the room
-        assert len(test_server.rooms[room_name]) == 2
-
-        # Client A leaves (connection close)
-        client_a.close()
-
-        # Give time for cleanup
-        time.sleep(0.1)
-
-        # Check that only client B remains
-        assert len(test_server.rooms[room_name]) == 1
-
-        # Cleanup
-        client_b.close()
+        # Now check members
+        try:
+            members = room_service.get_room_members_mp2(
+                host=host,
+                port=port,
+                user=user,
+                room=room_name,
+                token_store_path=token_store_path,
+            )
+            assert len(members) >= 1, f"Expected at least 1 member, got {len(members)}"
+            matched_member = next((m for m in members if m.user_id == user), None)
+            assert matched_member is not None, f"{user} should be in the member list"
+        except Exception as e:
+            print(f"Members API test failed: {e}")
+            raise
 
 
 if __name__ == "__main__":

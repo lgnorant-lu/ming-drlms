@@ -1,6 +1,7 @@
 #ifndef DRLMS_ROOMS_INSTANCE_H
 #define DRLMS_ROOMS_INSTANCE_H
 
+#include <time.h>
 #include "rooms.h"
 #include "platform/platform.h"
 #include <stddef.h>
@@ -13,6 +14,7 @@ typedef struct Subscriber {
     char current_cosmetic_id[ROOM_COSMETIC_ID_LEN];
     char generated_name[ROOM_GENERATED_NAME_LEN];
     int visibility_state;
+    time_t joined_at;
 } Subscriber;
 
 typedef enum {
@@ -137,5 +139,13 @@ int rooms_instance_append_ephemeral_file(struct RoomInstance *instance,
 // from the Room list remains in rooms.c to avoid exposing Room internals.
 void rooms_instance_destroy_unlink_locked(struct Room *room,
                                           struct RoomInstance *instance);
+
+// Presence event broadcasting helper
+void rooms_instance_broadcast_presence_event(struct Room *room,
+                                             struct RoomInstance *instance,
+                                             const char *username,
+                                             int event_kind,
+                                             const InstanceUUID *instance_uuid,
+                                             platform_socket_t skip_fd);
 
 #endif // DRLMS_ROOMS_INSTANCE_H

@@ -166,6 +166,9 @@ static int mp2_rooms_perform_publish(platform_socket_t client_fd,
     ev.event_id = (int64_t)event_id;
     ev.payload = payload_msg;
     ev.display_token = (char *)(display_token ? display_token : "");
+    mp2_protocol_dbgf("room publish payload debug: ciphertext_len=%zu type=%d",
+                      (size_t)payload_msg->ciphertext.len,
+                      (int)payload_msg->type);
     size_t ev_sz = room_event__get_packed_size(&ev);
     unsigned char *ev_buf = (unsigned char *)malloc(ev_sz);
     if (!ev_buf) {
@@ -176,7 +179,8 @@ static int mp2_rooms_perform_publish(platform_socket_t client_fd,
     room_event__pack(&ev, ev_buf);
 
     // Broadcast MP2 frame to all subscribers in the room/instance
-    // mp2_protocol_send_frame will add the frame header, so we only send the Protobuf payload
+    // mp2_protocol_send_frame will add the frame header, so we only send the
+    // Protobuf payload
     if (ctx.room) {
         platform_mutex_lock(&ctx.room->mu);
         for (RoomInstance *it = ctx.room->instances; it; it = it->next) {
@@ -309,6 +313,9 @@ int mp2_rooms_handle_publish(platform_socket_t fd, const unsigned char *payload,
     mp2_protocol_dbgf("room publish: user=%s room=%s ciphertext_len=%zu",
                       username, req->room_name,
                       (size_t)req->payload->ciphertext.len);
+    if (!req->payload->ciphertext.data || req->payload->ciphertext.len == 0) {
+        mp2_protocol_dbgf("room publish abort: ciphertext missing after log");
+    }
 
     int pub_result =
         mp2_rooms_perform_publish(fd, username, req->room_name, req->payload);

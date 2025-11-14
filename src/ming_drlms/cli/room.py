@@ -39,18 +39,38 @@ def _option_value(value, name: str):
 def _print_room_event(event: RoomEvent, *, json_out: bool) -> None:
     if json_out:
         payload_b64 = base64.b64encode(event.payload).decode("ascii")
+        event_data = {
+            "room": event.room_name,
+            "event_id": event.event_id,
+            "display_token": event.display_token,
+            "payload_b64": payload_b64,
+        }
+        if event.kind is not None:
+            event_data["kind"] = event.kind
+        if event.presence is not None:
+            event_data["presence"] = event.presence
         print(
             json.dumps(
-                {
-                    "room": event.room_name,
-                    "event_id": event.event_id,
-                    "display_token": event.display_token,
-                    "payload_b64": payload_b64,
-                },
+                event_data,
                 ensure_ascii=False,
             )
         )
         return
+
+    # Handle presence events (kind=2: MEMBER_JOINED, kind=3: MEMBER_LEFT)
+    if event.kind == 2 and event.presence is not None:
+        user_id = event.presence.get("user_id", "unknown")
+        print(
+            f"[blue][{event.event_id}] {event.display_token}[/blue] 用户 {user_id} 加入了房间"
+        )
+        return
+    elif event.kind == 3 and event.presence is not None:
+        user_id = event.presence.get("user_id", "unknown")
+        print(
+            f"[yellow][{event.event_id}] {event.display_token}[/yellow] 用户 {user_id} 离开了房间"
+        )
+        return
+
     try:
         text = event.payload.decode("utf-8")
     except UnicodeDecodeError:
@@ -102,6 +122,25 @@ def room_sub(
     e2ee_peer = _option_value(e2ee_peer, "e2ee_peer")
     e2ee_store = _option_value(e2ee_store, "e2ee_store")
     count = 0
+
+    # AC-4.b: 在订阅成功后自动显示当前房间成员列表
+    try:
+        members = room_service.get_room_members_mp2(
+            host=host,
+            port=port,
+            user=user,
+            room=room,
+        )
+        if not json_out:
+            if members:
+                print(f"[cyan]当前房间成员 ({len(members)} 人):[/cyan]")
+                for member in members:
+                    print(f"  • {member.user_id} (设备 {member.device_id})")
+            else:
+                print(f"[yellow]房间 '{room}' 目前没有其他成员[/yellow]")
+    except RoomServiceError as exc:
+        print(f"[yellow]无法获取成员列表: {exc}[/yellow]")
+
     try:
         for event in room_service.subscribe(
             host=host,
@@ -422,11 +461,10 @@ def room_members(
     user = _option_value(user, "user")
     password = _option_value(password, "password")
     try:
-        result = room_service.get_members(
+        members = room_service.get_room_members_mp2(
             host=host,
             port=port,
             user=user,
-            password=password,
             room=room,
         )
     except RoomServiceError as exc:
@@ -434,15 +472,17 @@ def room_members(
         raise typer.Exit(code=1)
 
     if json_output:
-        # Parse and display as JSON
-        for line in result.lines:
-            if line.startswith("ROOMMEMBERS|"):
-                # This would need proper JSON parsing in real implementation
-                print(line)
-            elif line == "OK":
-                print('{"status": "success", "room": "' + room + '"}')
-            else:
-                print(line)
+        import json
+
+        members_data = [
+            {
+                "user_id": member.user_id,
+                "device_id": member.device_id,
+                "timestamp": member.timestamp,
+            }
+            for member in members
+        ]
+        print(json.dumps({"room": room, "members": members_data}, indent=2))
     else:
         # Display as table
         table = Table(title=f"房间成员: {room}")
@@ -450,22 +490,13 @@ def room_members(
         table.add_column("设备ID", style="magenta")
         table.add_column("加入时间", style="green")
 
-        for line in result.lines:
-            if line.startswith("ROOMMEMBERS|"):
-                # Parse the response format: ROOMMEMBERS|room_name|user_id|device_id|timestamp|...
-                parts = line.split("|")
-                if len(parts) >= 4:
-                    user_id = parts[2]
-                    device_id = parts[3]
-                    timestamp = parts[4] if len(parts) > 4 else "N/A"
-                    table.add_row(user_id, device_id, timestamp)
-            elif line == "OK":
-                print("成功获取房间成员列表")
-            else:
-                print(line)
+        for member in members:
+            table.add_row(member.user_id, str(member.device_id), member.timestamp)
 
         if len(table.rows) > 0:
             print(table)
+        else:
+            print(f"[yellow]房间 '{room}' 没有成员[/yellow]")
 
 
 __all__ = [
