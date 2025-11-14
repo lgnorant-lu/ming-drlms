@@ -173,9 +173,9 @@ endif()
 
 # 4) Bundled pre-generated sources (no external library required)
 set(_protobuf_pregen_dir "${PROJECT_SOURCE_DIR}/src/generated/schema/v2")
-if(NOT PROTOBUF_C_FOUND AND EXISTS "${_protobuf_pregen_dir}/common.pb-c.c")
+if(NOT PROTOBUF_C_FOUND AND EXISTS "${_protobuf_pregen_dir}/common.pb-c.h")
     set(PROTOBUF_C_FOUND TRUE)
-    set(PROTOBUF_C_DETECTION_METHOD "pre-generated sources")
+    set(PROTOBUF_C_DETECTION_METHOD "pre-generated headers only")
     set(_protobuf_local_include "${PROJECT_SOURCE_DIR}/src/external/protobuf-c/include")
     set(PROTOBUF_C_INCLUDE_DIRS
         "${_protobuf_local_include}"
@@ -185,19 +185,10 @@ if(NOT PROTOBUF_C_FOUND AND EXISTS "${_protobuf_pregen_dir}/common.pb-c.c")
         "${_protobuf_pregen_dir}")
     set(PROTOBUF_C_USE_PREGENSETS TRUE)
     set(PROTOBUF_C_SOURCES
-        "${_protobuf_pregen_dir}/common.pb-c.c"
-        "${_protobuf_pregen_dir}/auth.pb-c.c"
-        "${_protobuf_pregen_dir}/room.pb-c.c"
-        "${_protobuf_pregen_dir}/federation.pb-c.c"
-        "${_protobuf_pregen_dir}/e2ee.pb-c.c"
         "${PROJECT_SOURCE_DIR}/src/external/protobuf-c/protobuf-c.c")
     set(PROTOBUF_C_HEADERS
-        "${_protobuf_pregen_dir}/common.pb-c.h"
-        "${_protobuf_pregen_dir}/auth.pb-c.h"
-        "${_protobuf_pregen_dir}/room.pb-c.h"
-        "${_protobuf_pregen_dir}/federation.pb-c.h"
-        "${_protobuf_pregen_dir}/e2ee.pb-c.h"
         "${_protobuf_local_include}/protobuf-c/protobuf-c.h")
+    message(STATUS "Using bundled protobuf-c runtime with pre-generated headers")
 endif()
 
 # Always prefer the bundled runtime when requested so that we control protobuf-c features.

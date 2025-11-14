@@ -78,10 +78,9 @@ int mp2_rooms_extract_username(const char *access_token, char *username,
         return -1;
     }
 
-    // Test mode: accept fake_token if DRLMS_MP2_ACCEPT_ANY=1
+    // Test mode: accept any token if DRLMS_MP2_ACCEPT_ANY=1
     const char *accept_any = getenv("DRLMS_MP2_ACCEPT_ANY");
-    if (accept_any && strcmp(accept_any, "1") == 0 &&
-        strcmp(access_token, "fake_token") == 0) {
+    if (accept_any && strcmp(accept_any, "1") == 0) {
         if (username_cap > 9) {
             strcpy(username, "test_user");
             return 0;
