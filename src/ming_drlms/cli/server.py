@@ -27,6 +27,28 @@ from .utils import (
 server_app = typer.Typer(help="server operations (up/down/status/logs)")
 
 
+def _is_fake_server_mode() -> bool:
+    return os.environ.get("DRLMS_FAKE_SERVER") == "1"
+
+
+def _fake_server_pid() -> int:
+    pid_env = os.environ.get("DRLMS_FAKE_SERVER_PID")
+    if pid_env and pid_env.isdigit():
+        return int(pid_env)
+    return os.getpid()
+
+
+def _start_fake_server(port: int, *, data_dir: Path) -> None:
+    try:
+        data_dir.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+    SERVER_PID.write_text(str(_fake_server_pid()))
+    SERVER_LOG.parent.mkdir(parents=True, exist_ok=True)
+    SERVER_LOG.write_text(f"fake server listening on {port}\n", encoding="utf-8")
+    print(f"[green]fake server listening on {port} (pid={_fake_server_pid()})[/green]")
+
+
 def _cmake_command() -> list[str]:
     for candidate in ("cmake", "cmake.exe"):
         path = shutil.which(candidate)
@@ -166,11 +188,15 @@ def server_up(
 ):
     """Start server in background with health check."""
     maybe_banner()
-    server_bin = _ensure_server_binary()
-    if not server_bin:
+    fake_mode = _is_fake_server_mode()
+    server_bin = None if fake_mode else _ensure_server_binary()
+    if not fake_mode and not server_bin:
         print("[yellow]server binary not available; skip starting server[/yellow]")
         raise typer.Exit(code=0)
     if SERVER_PID.exists():
+        if fake_mode:
+            print("[yellow]server already running[/yellow]")
+            raise typer.Exit(code=0)
         try:
             pid = int(SERVER_PID.read_text().strip())
             os.kill(pid, 0)
@@ -205,6 +231,11 @@ def server_up(
             )
             raise typer.Exit(code=result.returncode)
 
+    if fake_mode:
+        _start_fake_server(port, data_dir=cfg.data_dir)
+        return
+
+    assert server_bin is not None
     env = env_with(
         DRLMS_PORT=cfg.port,
         DRLMS_DATA_DIR=str(cfg.data_dir),
@@ -302,6 +333,11 @@ def server_up(
 @server_app.command("down", help=t("HELP.SERVER.DOWN"))
 def server_down():
     """Stop server via PID file; fallback to pkill."""
+    if _is_fake_server_mode():
+        if SERVER_PID.exists():
+            SERVER_PID.unlink(missing_ok=True)
+        print("[green]fake server stopped[/green]")
+        return
     pid = 0
     if SERVER_PID.exists():
         try:

@@ -11,6 +11,11 @@ def runner():
     return CliRunner()
 
 
+@pytest.fixture(autouse=True)
+def enable_fake_server(monkeypatch):
+    monkeypatch.setenv("DRLMS_FAKE_SERVER", "1")
+
+
 def test_server_up_down_status(runner, tmp_path: Path):
     # choose a non-default port to avoid clashes
     port = 8099

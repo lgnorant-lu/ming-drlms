@@ -191,11 +191,17 @@ typedef struct sqlite3_stmt sqlite3_stmt;
 
 typedef int (*sqlite3_callback)(void*,int,char**,char**);
 
+// SQLite type definitions
+typedef long long int sqlite3_int64;
+typedef unsigned long long int sqlite3_uint64;
+
 #define SQLITE_OK           0   /* Successful result */
 #define SQLITE_ERROR        1   /* Generic error */
 #define SQLITE_BUSY         5   /* The database file is locked */
 #define SQLITE_ROW          100 /* sqlite3_step() has another row ready */
 #define SQLITE_DONE         101 /* sqlite3_step() has finished executing */
+#define SQLITE_TRANSIENT    ((void(*)(void*))-1)
+#define SQLITE_STATIC       ((void(*)(void*))0)
 
 int sqlite3_open(const char *filename, sqlite3 **ppDb);
 int sqlite3_close(sqlite3 *db);

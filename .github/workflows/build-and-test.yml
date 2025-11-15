@@ -190,6 +190,10 @@ jobs:
 
       - name: Build C components
         shell: bash
+        env:
+          LD_LIBRARY_PATH: ${{ runner.os == 'Linux' && format('{0}/build/_deps/signal-install/lib:{0}/build', github.workspace) || env.LD_LIBRARY_PATH }}
+          DYLD_LIBRARY_PATH: ${{ runner.os == 'macOS' && format('{0}/build/_deps/signal-install/lib:{0}/build', github.workspace) || env.DYLD_LIBRARY_PATH }}
+          PATH: ${{ runner.os == 'Windows' && format('{0}/build/_deps/signal-install/bin;{0}/build/RelWithDebInfo;{0}/build;%PATH%', github.workspace) || env.PATH }}
         run: |
           set -euo pipefail
           mkdir -p build
@@ -206,6 +210,9 @@ jobs:
       - name: Run Ruff static analysis
         env:
           QT_QPA_PLATFORM: offscreen
+          LD_LIBRARY_PATH: ${{ runner.os == 'Linux' && format('{0}/build/_deps/signal-install/lib:{0}/build', github.workspace) || env.LD_LIBRARY_PATH }}
+          DYLD_LIBRARY_PATH: ${{ runner.os == 'macOS' && format('{0}/build/_deps/signal-install/lib:{0}/build', github.workspace) || env.DYLD_LIBRARY_PATH }}
+          PATH: ${{ runner.os == 'Windows' && format('{0}/build/_deps/signal-install/bin;{0}/build/RelWithDebInfo;{0}/build;%PATH%', github.workspace) || env.PATH }}
         run: python -m ruff check src/ tests/
 
       - name: Run Python unit tests
@@ -221,6 +228,9 @@ jobs:
         shell: bash
         env:
           RUNNER_OS: ${{ runner.os }}
+          LD_LIBRARY_PATH: ${{ runner.os == 'Linux' && format('{0}/build/_deps/signal-install/lib:{0}/build', github.workspace) || env.LD_LIBRARY_PATH }}
+          DYLD_LIBRARY_PATH: ${{ runner.os == 'macOS' && format('{0}/build/_deps/signal-install/lib:{0}/build', github.workspace) || env.DYLD_LIBRARY_PATH }}
+          PATH: ${{ runner.os == 'Windows' && format('{0}/build/_deps/signal-install/bin;{0}/build/RelWithDebInfo;{0}/build;%PATH%', github.workspace) || env.PATH }}
         run: |
           set -euo pipefail
           if [[ "${RUNNER_OS}" == "Windows" ]]; then
@@ -231,6 +241,10 @@ jobs:
       - name: Smoke Test M-Proto-v2 Handler
         if: matrix.os == 'ubuntu-latest'
         shell: bash
+        env:
+          LD_LIBRARY_PATH: ${{ runner.os == 'Linux' && format('{0}/build/_deps/signal-install/lib:{0}/build', github.workspace) || env.LD_LIBRARY_PATH }}
+          DYLD_LIBRARY_PATH: ${{ runner.os == 'macOS' && format('{0}/build/_deps/signal-install/lib:{0}/build', github.workspace) || env.DYLD_LIBRARY_PATH }}
+          PATH: ${{ runner.os == 'Windows' && format('{0}/build/_deps/signal-install/bin;{0}/build/RelWithDebInfo;{0}/build;%PATH%', github.workspace) || env.PATH }}
         run: |
           set -euo pipefail
           # Use coverage build dir from previous step
