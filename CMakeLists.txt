@@ -56,8 +56,8 @@ endif()
 
 if(BUILD_SERVER)
     find_package(Argon2 QUIET)
-    if(NOT Argon2_FOUND)
-        message(STATUS "Argon2 not found - enabling dummy implementation for CI compatibility")
+    if(NOT Argon2_FOUND OR NOT ARGON2_LIBRARIES)
+        message(STATUS "Argon2 not found or library not available - enabling dummy implementation for CI compatibility")
         set(Argon2_FOUND TRUE)
         # Don't set ARGON2_LIBRARIES here - we'll handle it in the server CMakeLists.txt
         set(ARGON2_LIBRARIES "")

@@ -270,10 +270,10 @@ jobs:
         run: |
           # Debug info
           echo "Python version: $(python --version)"
-          echo "Python executable: $(which python)"
+          echo "Python executable: $(python --version)"
           echo "Working directory: $(pwd)"
           echo "Environment variables:"
-          env | grep -E "(QT_|PROTOCOL_BUFFERS|DRLMS|LD_|DYLD_|PATH)" | sort
+          env | grep -E "(QT_|PROTOCOL_BUFFERS|DRLMS|LD_|DYLD_|PATH)" | sort || true
           
           # Check protobuf implementation
           echo "Checking protobuf implementation..."
