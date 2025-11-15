@@ -141,6 +141,17 @@ ExternalProject_Add(signal_protocol_ext
     LOG_BUILD ON
     LOG_INSTALL ON)
 
+if(WIN32 AND DEFINED OPENSSL_ROOT_DIR)
+    set(_openssl_bin "${OPENSSL_ROOT_DIR}/bin")
+    set(_signal_bin "${SIGNAL_INSTALL_PREFIX}/bin")
+    install(CODE "file(MAKE_DIRECTORY \"${_signal_bin}\")")
+    add_custom_command(TARGET signal_protocol_ext POST_INSTALL
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_openssl_bin}/libcrypto-3-x64.dll" "${_signal_bin}"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_openssl_bin}/libssl-3-x64.dll" "${_signal_bin}"
+        COMMENT "Copying OpenSSL DLLs into signal install bin"
+    )
+endif()
+
 # Note:
 # We build static libraries to avoid runtime loader differences across platforms.
 # As such, we do not need any post-build shell commands here (which were causing CI issues).
