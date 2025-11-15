@@ -311,6 +311,30 @@ jobs:
           } else {
             Write-Host "System OpenSSL bin not found: $systemSsl"
           }
+      - name: Prebuild libsignal CFFI (Windows diagnostics)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          try {
+            python -c "from ming_drlms.core import _pysignal_bridge; _pysignal_bridge.load_bridge()"
+          } catch {
+            Write-Host "libsignal CFFI preload failed (expected if dependencies missing): $_"
+          }
+      - name: Dump libsignal CFFI dependencies (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pycache = Join-Path $Env:GITHUB_WORKSPACE 'src/ming_drlms/core/__pycache__'
+          if (-not (Test-Path $pycache)) {
+            Write-Host "Pycache directory not found: $pycache"
+          } else {
+            Get-ChildItem $pycache -Filter '_cffi__*.pyd' -File | ForEach-Object {
+              Write-Host "Dumping dependencies for $($_.FullName)"
+              dumpbin /dependents $_.FullName
+            }
+          }
 
       - name: Run Ruff static analysis
         env:

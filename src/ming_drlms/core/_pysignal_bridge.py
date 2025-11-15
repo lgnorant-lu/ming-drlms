@@ -485,6 +485,14 @@ def _build_link_args(lib_path: Path, openssl_lib: Optional[Path] = None) -> dict
     lib_path = Path(lib_path)
     link_args: dict = {}
 
+    if openssl_lib is not None:
+        print(
+            f"[DEBUG] OpenSSL libs provided to CFFI build: {openssl_lib}",
+            file=sys.stderr,
+        )
+    else:
+        print("[DEBUG] No OpenSSL library detected for CFFI build", file=sys.stderr)
+
     if os.name == "nt":
         lib_dirs = link_args.setdefault("library_dirs", [])
         if str(lib_path.parent) not in lib_dirs:
@@ -517,6 +525,11 @@ def _build_link_args(lib_path: Path, openssl_lib: Optional[Path] = None) -> dict
                 lib_dirs.append(str(openssl_lib))
             if bin_dir.exists() and str(bin_dir) not in lib_dirs:
                 lib_dirs.append(str(bin_dir))
+
+            print(
+                f"[DEBUG] Added OpenSSL directories to CFFI link paths: {openssl_lib.parent}, {bin_dir}",
+                file=sys.stderr,
+            )
 
             libs = link_args.setdefault("libraries", [])
             # Use the correct library names for OpenSSL 3.x
