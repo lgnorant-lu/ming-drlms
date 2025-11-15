@@ -222,8 +222,18 @@ jobs:
           # Ensure cmake is in PATH
           if [[ "${{ runner.os }}" == "Linux" ]]; then
             export PATH="/usr/bin:/bin:$PATH"
+            CMAKE_BIN="/usr/bin/cmake"
           elif [[ "${{ runner.os }}" == "macOS" ]]; then
-            export PATH="/usr/local/bin:/usr/bin:/bin:$PATH"
+            HOMEBREW_PREFIX=$(brew --prefix)
+            export PATH="${HOMEBREW_PREFIX}/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+            CMAKE_BIN="${HOMEBREW_PREFIX}/bin/cmake"
+          fi
+          if [[ -z "${CMAKE_BIN:-}" || ! -x "${CMAKE_BIN}" ]]; then
+            CMAKE_BIN=$(command -v cmake || true)
+          fi
+          if [[ -z "${CMAKE_BIN:-}" ]]; then
+            echo "cmake not found in PATH" >&2
+            exit 1
           fi
           CMAKE_ARGS="-DENABLE_TESTS=ON"
           if [[ "${{ runner.os }}" == "Windows" ]]; then
@@ -232,8 +242,8 @@ jobs:
           else
             BUILD_CONFIG=""
           fi
-          cmake -S . -B build ${CMAKE_ARGS}
-          cmake --build build ${BUILD_CONFIG}
+          "${CMAKE_BIN}" -S . -B build ${CMAKE_ARGS}
+          "${CMAKE_BIN}" --build build ${BUILD_CONFIG}
 
       - name: Run Ruff static analysis
         env:

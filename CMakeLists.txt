@@ -290,6 +290,7 @@ sqlite3_int64 sqlite3_column_int64(sqlite3_stmt*, int);
 int sqlite3_column_int(sqlite3_stmt*, int);
 const void* sqlite3_column_blob(sqlite3_stmt*, int);
 int sqlite3_column_bytes(sqlite3_stmt*, int);
+void sqlite3_free(void*);
 int sqlite3_changes(sqlite3*);
 
 #endif // SQLITE3_H
@@ -401,6 +402,12 @@ int sqlite3_column_bytes(sqlite3_stmt* stmt, int iCol) {
 int sqlite3_changes(sqlite3* db) {
     (void)db;
     return 0;
+}
+
+void sqlite3_free(void* ptr) {
+    if (ptr) {
+        free(ptr);
+    }
 }
 ]=])
             # Create dummy library
