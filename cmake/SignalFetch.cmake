@@ -107,6 +107,15 @@ if(CMAKE_TOOLCHAIN_FILE)
     endif()
 endif()
 
+if(DEFINED OPENSSL_ROOT_DIR)
+    list(APPEND _signal_cmake_args
+        -DOPENSSL_ROOT_DIR=${OPENSSL_ROOT_DIR}
+        -DOPENSSL_INCLUDE_DIR=${OPENSSL_ROOT_DIR}/include
+        -DOPENSSL_CRYPTO_LIBRARY=${OPENSSL_ROOT_DIR}/lib/libcrypto-3-x64.lib
+        -DOPENSSL_SSL_LIBRARY=${OPENSSL_ROOT_DIR}/lib/libssl-3-x64.lib
+        -DOPENSSL_USE_STATIC_LIBS=OFF)
+endif()
+
 # Windows特定配置
 if(WIN32)
     # Windows doesn't need separate math library
