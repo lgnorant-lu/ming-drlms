@@ -284,6 +284,34 @@ jobs:
           "${CMAKE_BIN}" -S . -B build ${CMAKE_ARGS}
           "${CMAKE_BIN}" --build build ${BUILD_CONFIG}
 
+      - name: Dump signal-protocol-c dependencies (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $signalDll = Join-Path $Env:GITHUB_WORKSPACE 'build/_deps/signal-install/bin/signal-protocol-c.dll'
+          if (-not (Test-Path $signalDll)) {
+            throw "signal-protocol-c.dll not found: $signalDll"
+          }
+          Write-Host "Dumping DLL dependencies for $signalDll"
+          dumpbin /dependents $signalDll
+          Write-Host '--- PATH snapshot ---'
+          $Env:PATH -split ';' | Where-Object { $_ -and $_ -ne 'C:' } | ForEach-Object { Write-Host $_ }
+          Write-Host '--- vcpkg OpenSSL DLLs ---'
+          $vcpkgBin = Join-Path $Env:GITHUB_WORKSPACE 'vcpkg_installed/x64-windows/bin'
+          if (Test-Path $vcpkgBin) {
+            Get-ChildItem $vcpkgBin -Filter 'libcrypto*.dll','libssl*.dll','openssl*.dll' -File | Select-Object Name, Length | Format-Table -AutoSize
+          } else {
+            Write-Host "vcpkg bin directory missing: $vcpkgBin"
+          }
+          Write-Host '--- System OpenSSL bin ---'
+          $systemSsl = 'C:\\Program Files\\OpenSSL\\bin'
+          if (Test-Path $systemSsl) {
+            Get-ChildItem $systemSsl -File | Select-Object Name, Length | Format-Table -AutoSize
+          } else {
+            Write-Host "System OpenSSL bin not found: $systemSsl"
+          }
+
       - name: Run Ruff static analysis
         env:
           QT_QPA_PLATFORM: offscreen
