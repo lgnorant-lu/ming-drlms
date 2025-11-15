@@ -223,7 +223,6 @@ jobs:
         env:
           LD_LIBRARY_PATH: ${{ runner.os == 'Linux' && format('{0}/build/_deps/signal-install/lib:{0}/build', github.workspace) || env.LD_LIBRARY_PATH }}
           DYLD_LIBRARY_PATH: ${{ runner.os == 'macOS' && format('{0}/build/_deps/signal-install/lib:{0}/build', github.workspace) || env.DYLD_LIBRARY_PATH }}
-          PATH: ${{ runner.os == 'Windows' && format('{0}/build/_deps/signal-install/bin;{0}/build/RelWithDebInfo;{0}/build;%PATH%', github.workspace) || env.PATH }}
         run: |
           set -euo pipefail
           # Ensure cmake is in PATH
@@ -234,6 +233,9 @@ jobs:
             HOMEBREW_PREFIX=$(brew --prefix)
             export PATH="${HOMEBREW_PREFIX}/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
             CMAKE_BIN="${HOMEBREW_PREFIX}/bin/cmake"
+          fi
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            PATH="${GITHUB_WORKSPACE}/build/_deps/signal-install/bin:${GITHUB_WORKSPACE}/build/RelWithDebInfo:${GITHUB_WORKSPACE}/build:${PATH}"
           fi
           if [[ -z "${CMAKE_BIN:-}" || ! -x "${CMAKE_BIN}" ]]; then
             CMAKE_BIN=$(command -v cmake || true)
@@ -257,16 +259,15 @@ jobs:
           QT_QPA_PLATFORM: offscreen
           LD_LIBRARY_PATH: ${{ runner.os == 'Linux' && format('{0}/build/_deps/signal-install/lib:{0}/build', github.workspace) || env.LD_LIBRARY_PATH }}
           DYLD_LIBRARY_PATH: ${{ runner.os == 'macOS' && format('{0}/build/_deps/signal-install/lib:{0}/build', github.workspace) || env.DYLD_LIBRARY_PATH }}
-          PATH: ${{ runner.os == 'Windows' && format('{0}/build/_deps/signal-install/bin;{0}/build/RelWithDebInfo;{0}/build;%PATH%', github.workspace) || env.PATH }}
         run: python -m ruff check src/ tests/
 
       - name: Run Python unit tests
+        shell: bash
         env:
           QT_QPA_PLATFORM: offscreen
           DRLMS_UPDATE_CHECK: "0"
           LD_LIBRARY_PATH: ${{ runner.os == 'Linux' && format('{0}/build/_deps/signal-install/lib:{0}/build', github.workspace) || env.LD_LIBRARY_PATH }}
           DYLD_LIBRARY_PATH: ${{ runner.os == 'macOS' && format('{0}/build/_deps/signal-install/lib:{0}/build', github.workspace) || env.DYLD_LIBRARY_PATH }}
-          PATH: ${{ runner.os == 'Windows' && format('{0}/build/_deps/signal-install/bin;{0}/build/RelWithDebInfo;{0}/build;%PATH%', github.workspace) || env.PATH }}
         run: |
           # Debug info
           echo "Python version: $(python --version)"
@@ -274,6 +275,10 @@ jobs:
           echo "Working directory: $(pwd)"
           echo "Environment variables:"
           env | grep -E "(QT_|PROTOCOL_BUFFERS|DRLMS|LD_|DYLD_|PATH)" | sort || true
+          
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            PATH="${GITHUB_WORKSPACE}/build/_deps/signal-install/bin:${GITHUB_WORKSPACE}/build/RelWithDebInfo:${GITHUB_WORKSPACE}/build:${PATH}"
+          fi
           
           # Check protobuf implementation
           echo "Checking protobuf implementation..."
@@ -288,7 +293,7 @@ jobs:
           
           # If that passes, run the demo test separately
           echo "Running test_cli_demo_unit.py..."
-          timeout 60 python -m pytest tests/python/test_cli_demo_unit.py -v
+          python -c "import subprocess, sys; subprocess.run([sys.executable, '-m', 'pytest', 'tests/python/test_cli_demo_unit.py', '-v'], check=True, timeout=60)"
           echo "test_cli_demo_unit.py completed"
           
           # Then run the rest
@@ -301,7 +306,6 @@ jobs:
           RUNNER_OS: ${{ runner.os }}
           LD_LIBRARY_PATH: ${{ runner.os == 'Linux' && format('{0}/build/_deps/signal-install/lib:{0}/build', github.workspace) || env.LD_LIBRARY_PATH }}
           DYLD_LIBRARY_PATH: ${{ runner.os == 'macOS' && format('{0}/build/_deps/signal-install/lib:{0}/build', github.workspace) || env.DYLD_LIBRARY_PATH }}
-          PATH: ${{ runner.os == 'Windows' && format('{0}/build/_deps/signal-install/bin;{0}/build/RelWithDebInfo;{0}/build;%PATH%', github.workspace) || env.PATH }}
         run: |
           set -euo pipefail
           if [[ "${RUNNER_OS}" == "Windows" ]]; then
@@ -315,7 +319,6 @@ jobs:
         env:
           LD_LIBRARY_PATH: ${{ runner.os == 'Linux' && format('{0}/build/_deps/signal-install/lib:{0}/build', github.workspace) || env.LD_LIBRARY_PATH }}
           DYLD_LIBRARY_PATH: ${{ runner.os == 'macOS' && format('{0}/build/_deps/signal-install/lib:{0}/build', github.workspace) || env.DYLD_LIBRARY_PATH }}
-          PATH: ${{ runner.os == 'Windows' && format('{0}/build/_deps/signal-install/bin;{0}/build/RelWithDebInfo;{0}/build;%PATH%', github.workspace) || env.PATH }}
         run: |
           set -euo pipefail
           # Use coverage build dir from previous step
