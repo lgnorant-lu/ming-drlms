@@ -24,7 +24,7 @@ dependencies = [
     "rich",
     "psutil",
     "argon2-cffi",
-    "protobuf==5.33.1",
+    "protobuf==6.33.1",
     "requests",
     "packaging>=24.2",
 ]
