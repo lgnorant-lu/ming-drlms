@@ -191,6 +191,13 @@ jobs:
             Write-Warning "OpenSSL root not found at either $cacheOpensslRoot or $buildOpensslRoot"
           }
 
+          # Debug: List vcpkg installed contents
+          Write-Host "=== VCPKG INSTALLED CONTENTS ==="
+          if (Test-Path "$Env:GITHUB_WORKSPACE/vcpkg_installed") {
+            Get-ChildItem "$Env:GITHUB_WORKSPACE/vcpkg_installed" -Recurse | Where-Object { $_.Name -like "*.dll" -or $_.Name -like "*.lib" } | Select-Object FullName | Out-Host
+          }
+          Write-Host "=== END VCPKG CONTENTS ==="
+
       - name: Ensure CMake available (Windows)
         if: matrix.os == 'windows-latest'
         shell: pwsh
