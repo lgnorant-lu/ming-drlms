@@ -232,21 +232,34 @@ def load_bridge() -> Tuple[FFI, object]:
 
     _ensure_win_distutils()
 
+    signal_prefix: Optional[Path] = (
+        include_dir.parent if include_dir is not None else None
+    )
+
     # For Windows, ensure DLL directory is in PATH for runtime loading
     if os.name == "nt":
-        root = Path(__file__).resolve().parents[3]
-        build_root = root / "build"
-        bin_candidates = [
-            build_root / "_deps" / "signal-install" / "bin",
-            build_root / "vcpkg_installed" / "x64-windows" / "bin",
-            build_root / "vcpkg_installed" / "x64-windows" / "debug" / "bin",
-            # Also add system vcpkg locations that might be used in CI
-            Path("C:/vcpkg/installed/x64-windows/bin"),
-            Path("D:/a/_temp/vcpkg/installed/x64-windows/bin"),
-            build_root / "RelWithDebInfo",
-            build_root / "Debug",
-            build_root,
-        ]
+        repo_root = _find_repo_root()
+        build_root = repo_root / "build" if repo_root is not None else None
+        bin_candidates: list[Path] = []
+        if signal_prefix is not None:
+            bin_candidates.append(signal_prefix / "bin")
+        if build_root is not None:
+            bin_candidates.extend(
+                [
+                    build_root / "_deps" / "signal-install" / "bin",
+                    build_root / "vcpkg_installed" / "x64-windows" / "bin",
+                    build_root / "vcpkg_installed" / "x64-windows" / "debug" / "bin",
+                    build_root / "RelWithDebInfo",
+                    build_root / "Debug",
+                    build_root,
+                ]
+            )
+        bin_candidates.extend(
+            [
+                Path("C:/vcpkg/installed/x64-windows/bin"),
+                Path("D:/a/_temp/vcpkg/installed/x64-windows/bin"),
+            ]
+        )
 
         # First pass: find signal-protocol-c.dll and add all existing directories to PATH
         dll_found = False
@@ -337,15 +350,20 @@ def load_bridge() -> Tuple[FFI, object]:
 
     # Try multiple library locations for CI compatibility
     if os.name == "nt":  # Windows
-        # For CI environments, try loading from build directory first
-        root = Path(__file__).resolve().parents[3]
-        build_root = root / "build"
-        bin_candidates = [
-            build_root / "_deps" / "signal-install" / "bin",
-            build_root / "RelWithDebInfo",
-            build_root / "Debug",
-            build_root,
-        ]
+        repo_root = _find_repo_root()
+        build_root = repo_root / "build" if repo_root is not None else None
+        bin_candidates = []
+        if signal_prefix is not None:
+            bin_candidates.append(signal_prefix / "bin")
+        if build_root is not None:
+            bin_candidates.extend(
+                [
+                    build_root / "_deps" / "signal-install" / "bin",
+                    build_root / "RelWithDebInfo",
+                    build_root / "Debug",
+                    build_root,
+                ]
+            )
 
         for bin_dir in bin_candidates:
             dll_path = bin_dir / "signal-protocol-c.dll"
@@ -357,15 +375,23 @@ def load_bridge() -> Tuple[FFI, object]:
                 break
     elif sys.platform == "darwin":  # macOS
         # For macOS CI environments, try multiple locations
-        root = Path(__file__).resolve().parents[3]
-        build_root = root / "build"
-        lib_candidates = [
-            build_root / "_deps" / "signal-install" / "lib",
-            build_root / "RelWithDebInfo",
-            build_root / "Debug",
-            Path("/opt/homebrew/lib"),  # Homebrew default
-            Path("/usr/local/lib"),  # MacPorts default
-        ]
+        repo_root = _find_repo_root()
+        build_root = repo_root / "build" if repo_root is not None else None
+        lib_candidates = []
+        if build_root is not None:
+            lib_candidates.extend(
+                [
+                    build_root / "_deps" / "signal-install" / "lib",
+                    build_root / "RelWithDebInfo",
+                    build_root / "Debug",
+                ]
+            )
+        lib_candidates.extend(
+            [
+                Path("/opt/homebrew/lib"),  # Homebrew default
+                Path("/usr/local/lib"),  # MacPorts default
+            ]
+        )
 
         for lib_dir in lib_candidates:
             if lib_dir.exists():
@@ -377,15 +403,23 @@ def load_bridge() -> Tuple[FFI, object]:
                     break
     else:  # Linux
         # For Linux CI environments
-        root = Path(__file__).resolve().parents[3]
-        build_root = root / "build"
-        lib_candidates = [
-            build_root / "_deps" / "signal-install" / "lib",
-            build_root / "RelWithDebInfo",
-            build_root / "Debug",
-            Path("/usr/lib"),
-            Path("/usr/local/lib"),
-        ]
+        repo_root = _find_repo_root()
+        build_root = repo_root / "build" if repo_root is not None else None
+        lib_candidates = []
+        if build_root is not None:
+            lib_candidates.extend(
+                [
+                    build_root / "_deps" / "signal-install" / "lib",
+                    build_root / "RelWithDebInfo",
+                    build_root / "Debug",
+                ]
+            )
+        lib_candidates.extend(
+            [
+                Path("/usr/lib"),
+                Path("/usr/local/lib"),
+            ]
+        )
 
         for lib_dir in lib_candidates:
             if lib_dir.exists():
@@ -694,3 +728,11 @@ def _ensure_win_distutils() -> None:
 
 
 __all__ = ["load_bridge"]
+
+
+def _find_repo_root() -> Optional[Path]:
+    current = Path(__file__).resolve()
+    for parent in current.parents:
+        if (parent / "pyproject.toml").exists() or (parent / "CMakeLists.txt").exists():
+            return parent
+    return None
