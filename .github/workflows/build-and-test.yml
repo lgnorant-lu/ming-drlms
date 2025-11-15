@@ -25,6 +25,8 @@ jobs:
           - name: Windows
             os: windows-latest
             pip-cache: ~\AppData\Local\pip\Cache
+    env:
+      DRLMS_SIGNAL_PREFIX: ${{ github.workspace }}/build/_deps/signal-install
 
     steps:
       - name: Checkout repository
@@ -284,12 +286,26 @@ jobs:
           "${CMAKE_BIN}" -S . -B build ${CMAKE_ARGS}
           "${CMAKE_BIN}" --build build ${BUILD_CONFIG}
 
+      - name: Install C components (Unix)
+        if: matrix.os != 'windows-latest'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --install build
+
+      - name: Install C components (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cmake --install build --config RelWithDebInfo
+
       - name: Dump signal-protocol-c dependencies (Windows)
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $signalDll = Join-Path $Env:GITHUB_WORKSPACE 'build/_deps/signal-install/bin/signal-protocol-c.dll'
+          $signalDll = Join-Path $Env:DRLMS_SIGNAL_PREFIX 'bin/signal-protocol-c.dll'
           if (-not (Test-Path $signalDll)) {
             throw "signal-protocol-c.dll not found: $signalDll"
           }
@@ -316,7 +332,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $signalDll = Join-Path $Env:GITHUB_WORKSPACE 'build/_deps/signal-install/bin/signal-protocol-c.dll'
+          $signalDll = Join-Path $Env:DRLMS_SIGNAL_PREFIX 'bin/signal-protocol-c.dll'
           if (-not (Test-Path $signalDll)) {
             Write-Host "Skipping CFFI preload because signal DLL is not ready: $signalDll"
             exit 0
