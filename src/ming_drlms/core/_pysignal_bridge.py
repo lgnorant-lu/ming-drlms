@@ -277,10 +277,18 @@ def load_bridge() -> Tuple[FFI, object]:
             from ctypes import WinDLL  # type: ignore
 
             # Preload OpenSSL first (dependency of signal-protocol-c)
+            openssl_dll_names = [
+                "libcrypto-3-x64.dll",
+                "libssl-3-x64.dll",  # OpenSSL 3.x vcpkg
+                "libcrypto-3.dll",
+                "libssl-3.dll",  # OpenSSL 3.x system
+                "libcrypto.dll",
+                "libssl.dll",  # Generic
+            ]
             for _d in bin_candidates:
                 if not _d.exists():
                     continue
-                for _n in ("libcrypto-3-x64.dll", "libssl-3-x64.dll"):
+                for _n in openssl_dll_names:
                     _p = _d / _n
                     if _p.exists():
                         try:
@@ -533,6 +541,22 @@ def _detect_openssl_prefix(
     signal_lib_path: Path,
 ) -> Tuple[Optional[Path], Optional[Path]]:
     candidates: list[Tuple[Path, Path]] = []
+
+    # Add system OpenSSL paths first (highest priority for CI compatibility)
+    if os.name == "nt":
+        system_paths = [
+            Path("C:/Program Files/OpenSSL"),
+            Path("C:/Program Files (x86)/OpenSSL"),
+        ]
+        for base in system_paths:
+            include_dir = base / "include"
+            lib_dir = base / "lib"
+            candidates.append((include_dir, lib_dir))
+            evp_path = include_dir / "openssl" / "evp.h"
+            print(
+                f"[DEBUG] System OpenSSL candidate: {evp_path} (exists: {evp_path.exists()})",
+                file=sys.stderr,
+            )
 
     env_root = os.environ.get("OPENSSL_ROOT_DIR")
     if env_root:
