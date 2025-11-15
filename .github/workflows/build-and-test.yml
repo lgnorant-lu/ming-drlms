@@ -277,7 +277,7 @@ jobs:
           env | grep -E "(QT_|PROTOCOL_BUFFERS|DRLMS|LD_|DYLD_|PATH)" | sort || true
           
           if [[ "${{ runner.os }}" == "Windows" ]]; then
-            PATH="${GITHUB_WORKSPACE}/build/_deps/signal-install/bin:${GITHUB_WORKSPACE}/build/RelWithDebInfo:${GITHUB_WORKSPACE}/build:${PATH}"
+            export PATH="${GITHUB_WORKSPACE}/build/_deps/signal-install/bin;${GITHUB_WORKSPACE}/build/RelWithDebInfo;${GITHUB_WORKSPACE}/build;${GITHUB_WORKSPACE}/vcpkg_installed/x64-windows/bin;${PATH}"
           fi
           
           # Check protobuf implementation
@@ -309,7 +309,7 @@ jobs:
         run: |
           set -euo pipefail
           if [[ "${RUNNER_OS}" == "Windows" ]]; then
-            export PATH="/c/Program Files/CMake/bin:$PATH"
+            export PATH="${GITHUB_WORKSPACE}/build/_deps/signal-install/bin;${GITHUB_WORKSPACE}/build/RelWithDebInfo;${GITHUB_WORKSPACE}/build;${GITHUB_WORKSPACE}/vcpkg_installed/x64-windows/bin;/c/Program Files/CMake/bin;${PATH}"
           fi
           bash scripts/run_coverage.sh
 
