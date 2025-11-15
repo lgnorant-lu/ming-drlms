@@ -59,7 +59,8 @@ if(BUILD_SERVER)
     if(NOT Argon2_FOUND)
         message(STATUS "Argon2 not found - enabling dummy implementation for CI compatibility")
         set(Argon2_FOUND TRUE)
-        set(ARGON2_LIBRARIES "argon2_dummy")
+        # Don't set ARGON2_LIBRARIES here - we'll handle it in the server CMakeLists.txt
+        set(ARGON2_LIBRARIES "")
         set(ARGON2_INCLUDE_DIRS "")
         # Create dummy argon2.h
         set(_dummy_argon2_dir "${CMAKE_BINARY_DIR}/dummy_argon2")

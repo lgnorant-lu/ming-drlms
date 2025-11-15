@@ -182,7 +182,6 @@ target_include_directories(log_collector_server
 set(SERVER_LIBS
     ipc_static
     Threads::Threads
-    ${ARGON2_LIBRARIES}
     OpenSSL::Crypto
     platform
     Signal::protocol
@@ -190,6 +189,8 @@ set(SERVER_LIBS
 
 if(TARGET argon2_dummy)
     list(APPEND SERVER_LIBS argon2_dummy)
+elseif(ARGON2_LIBRARIES)
+    list(APPEND SERVER_LIBS ${ARGON2_LIBRARIES})
 endif()
 
 if(HAVE_SYSTEM_SQLITE3)

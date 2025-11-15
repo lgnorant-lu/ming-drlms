@@ -56,7 +56,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          brew update
+          # Check if brew is available, install if not
+          if ! command -v brew >/dev/null 2>&1; then
+            echo "Homebrew not found, installing..."
+            /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+            eval "$(/opt/homebrew/bin/brew shellenv)" || eval "$(/usr/local/bin/brew shellenv)"
+          fi
+          # Skip brew update to avoid timeouts
+          # brew update
           brew install cmake argon2 openssl@3 sqlite3 lcov protobuf-c
 
       - name: Configure macOS build environment
@@ -256,11 +263,37 @@ jobs:
       - name: Run Python unit tests
         env:
           QT_QPA_PLATFORM: offscreen
-          PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: python
+          DRLMS_UPDATE_CHECK: "0"
           LD_LIBRARY_PATH: ${{ runner.os == 'Linux' && format('{0}/build/_deps/signal-install/lib:{0}/build', github.workspace) || env.LD_LIBRARY_PATH }}
           DYLD_LIBRARY_PATH: ${{ runner.os == 'macOS' && format('{0}/build/_deps/signal-install/lib:{0}/build', github.workspace) || env.DYLD_LIBRARY_PATH }}
           PATH: ${{ runner.os == 'Windows' && format('{0}/build/_deps/signal-install/bin;{0}/build/RelWithDebInfo;{0}/build;%PATH%', github.workspace) || env.PATH }}
-        run: python -m pytest -m "not integration" tests/python
+        run: |
+          # Debug info
+          echo "Python version: $(python --version)"
+          echo "Python executable: $(which python)"
+          echo "Working directory: $(pwd)"
+          echo "Environment variables:"
+          env | grep -E "(QT_|PROTOCOL_BUFFERS|DRLMS|LD_|DYLD_|PATH)" | sort
+          
+          # Check protobuf implementation
+          echo "Checking protobuf implementation..."
+          python -c "import google.protobuf; print(f'Protobuf version: {google.protobuf.__version__}')"
+          python -c "from google.protobuf import descriptor as _descriptor; print(f'Protobuf implementation: {_descriptor.__file__}')"
+          python -c "import google.protobuf.pyext; print('C extension available')" 2>/dev/null || echo "C extension NOT available"
+          
+          # First run just the client unit tests to isolate the hanging issue
+          echo "Running test_cli_client_unit.py..."
+          python -m pytest tests/python/test_cli_client_unit.py -v
+          echo "test_cli_client_unit.py completed"
+          
+          # If that passes, run the demo test separately
+          echo "Running test_cli_demo_unit.py..."
+          timeout 60 python -m pytest tests/python/test_cli_demo_unit.py -v
+          echo "test_cli_demo_unit.py completed"
+          
+          # Then run the rest
+          echo "Running remaining tests..."
+          python -m pytest -m "not integration" tests/python --ignore=tests/python/test_cli_client_unit.py --ignore=tests/python/test_cli_demo_unit.py --tb=short -x
 
       - name: Run coverage and integration suite
         shell: bash
