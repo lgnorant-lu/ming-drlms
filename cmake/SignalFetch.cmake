@@ -94,6 +94,19 @@ if(CMAKE_GENERATOR_PLATFORM)
     list(APPEND _signal_cmake_args -DCMAKE_GENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM})
 endif()
 
+if(CMAKE_TOOLCHAIN_FILE)
+    list(APPEND _signal_cmake_args -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE})
+    if(DEFINED VCPKG_TARGET_TRIPLET)
+        list(APPEND _signal_cmake_args -DVCPKG_TARGET_TRIPLET=${VCPKG_TARGET_TRIPLET})
+    endif()
+    if(DEFINED VCPKG_ROOT)
+        list(APPEND _signal_cmake_args -DVCPKG_ROOT=${VCPKG_ROOT})
+    endif()
+    if(DEFINED VCPKG_CHAINLOAD_TOOLCHAIN_FILE)
+        list(APPEND _signal_cmake_args -DVCPKG_CHAINLOAD_TOOLCHAIN_FILE=${VCPKG_CHAINLOAD_TOOLCHAIN_FILE})
+    endif()
+endif()
+
 # Windows特定配置
 if(WIN32)
     # Windows doesn't need separate math library
