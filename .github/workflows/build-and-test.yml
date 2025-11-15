@@ -203,17 +203,6 @@ jobs:
           cmake -S . -B build ${CMAKE_ARGS}
           cmake --build build ${BUILD_CONFIG}
 
-      - name: Set library paths for C components
-        shell: bash
-        run: |
-          if [[ "${{ runner.os }}" == "Windows" ]]; then
-            echo "PATH=$PWD/build/RelWithDebInfo:$PWD/build:$PATH" >> $GITHUB_ENV
-          elif [[ "${{ runner.os }}" == "macOS" ]]; then
-            echo "DYLD_LIBRARY_PATH=$PWD/build:$DYLD_LIBRARY_PATH" >> $GITHUB_ENV
-          else
-            echo "LD_LIBRARY_PATH=$PWD/build:$LD_LIBRARY_PATH" >> $GITHUB_ENV
-          fi
-
       - name: Run Ruff static analysis
         env:
           QT_QPA_PLATFORM: offscreen
@@ -223,6 +212,9 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
           PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: python
+          LD_LIBRARY_PATH: ${{ runner.os == 'Linux' && format('{0}/build/_deps/signal-install/lib:{0}/build', github.workspace) || env.LD_LIBRARY_PATH }}
+          DYLD_LIBRARY_PATH: ${{ runner.os == 'macOS' && format('{0}/build/_deps/signal-install/lib:{0}/build', github.workspace) || env.DYLD_LIBRARY_PATH }}
+          PATH: ${{ runner.os == 'Windows' && format('{0}/build/_deps/signal-install/bin;{0}/build/RelWithDebInfo;{0}/build;%PATH%', github.workspace) || env.PATH }}
         run: python -m pytest -m "not integration" tests/python
 
       - name: Run coverage and integration suite
