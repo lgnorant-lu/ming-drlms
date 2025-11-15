@@ -188,6 +188,32 @@ jobs:
         run: |
           python -m build --sdist --wheel --outdir dist/tmp
 
+      - name: Build C components
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          CMAKE_ARGS="-DENABLE_TESTS=ON"
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            CMAKE_ARGS="${CMAKE_ARGS} -DCMAKE_TOOLCHAIN_FILE=${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake -DVCPKG_TARGET_TRIPLET=x64-windows"
+            BUILD_CONFIG="--config RelWithDebInfo"
+          else
+            BUILD_CONFIG=""
+          fi
+          cmake -S . -B build ${CMAKE_ARGS}
+          cmake --build build ${BUILD_CONFIG}
+
+      - name: Set library paths for C components
+        shell: bash
+        run: |
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            echo "PATH=$PWD/build/RelWithDebInfo:$PWD/build:$PATH" >> $GITHUB_ENV
+          elif [[ "${{ runner.os }}" == "macOS" ]]; then
+            echo "DYLD_LIBRARY_PATH=$PWD/build:$DYLD_LIBRARY_PATH" >> $GITHUB_ENV
+          else
+            echo "LD_LIBRARY_PATH=$PWD/build:$LD_LIBRARY_PATH" >> $GITHUB_ENV
+          fi
+
       - name: Run Ruff static analysis
         env:
           QT_QPA_PLATFORM: offscreen
