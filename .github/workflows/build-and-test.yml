@@ -235,6 +235,19 @@ jobs:
         run: |
           python -m build --sdist --wheel --outdir dist/tmp
 
+      - name: Clean build directory (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $buildDir = Join-Path $Env:GITHUB_WORKSPACE 'build'
+          if (Test-Path $buildDir) {
+            Write-Host "Removing stale build directory: $buildDir"
+            Remove-Item $buildDir -Recurse -Force
+          } else {
+            Write-Host "No existing build directory to remove"
+          }
+
       - name: Build C components
         shell: bash
         env:
