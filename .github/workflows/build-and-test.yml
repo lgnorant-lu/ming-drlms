@@ -235,7 +235,7 @@ jobs:
             CMAKE_BIN="${HOMEBREW_PREFIX}/bin/cmake"
           fi
           if [[ "${{ runner.os }}" == "Windows" ]]; then
-            export PATH="${GITHUB_WORKSPACE}/build/_deps/signal-install/bin:${GITHUB_WORKSPACE}/build/RelWithDebInfo:${GITHUB_WORKSPACE}/build:${GITHUB_WORKSPACE}/vcpkg_installed/x64-windows/bin:${PATH}"
+            export PATH="${GITHUB_WORKSPACE}/build/_deps/signal-install/bin;${GITHUB_WORKSPACE}/build/RelWithDebInfo;${GITHUB_WORKSPACE}/build;${GITHUB_WORKSPACE}/vcpkg_installed/x64-windows/bin;${PATH}"
           fi
           if [[ -z "${CMAKE_BIN:-}" || ! -x "${CMAKE_BIN}" ]]; then
             CMAKE_BIN=$(command -v cmake || true)
