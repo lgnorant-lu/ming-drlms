@@ -542,19 +542,24 @@ def _detect_openssl_prefix(
 ) -> Tuple[Optional[Path], Optional[Path]]:
     candidates: list[Tuple[Path, Path]] = []
 
-    # Add system OpenSSL paths first (highest priority for CI compatibility)
-    if os.name == "nt":
-        system_paths = [
-            Path("C:/Program Files/OpenSSL"),
-            Path("C:/Program Files (x86)/OpenSSL"),
-        ]
-        for base in system_paths:
-            include_dir = base / "include"
-            lib_dir = base / "lib"
-            candidates.append((include_dir, lib_dir))
+    # Add per-build vcpkg_installed prefixes used by CMake manifest builds in CI (highest priority)
+    repo_root = Path(signal_lib_path).resolve().parents[3]  # This gets build/ directory
+    build_prefixes = [
+        repo_root
+        / "vcpkg_installed"
+        / "x64-windows",  # build/vcpkg_installed/x64-windows
+        repo_root.parent
+        / "vcpkg_installed"
+        / "x64-windows",  # root/vcpkg_installed/x64-windows
+    ]
+    for prefix in build_prefixes:
+        include_dir = prefix / "include"
+        lib_dir = prefix / "lib"
+        candidates.append((include_dir, lib_dir))
+        if os.name == "nt":
             evp_path = include_dir / "openssl" / "evp.h"
             print(
-                f"[DEBUG] System OpenSSL candidate: {evp_path} (exists: {evp_path.exists()})",
+                f"[DEBUG] CI build vcpkg_installed candidate: {evp_path} (exists: {evp_path.exists()})",
                 file=sys.stderr,
             )
 
@@ -589,24 +594,19 @@ def _detect_openssl_prefix(
                     file=sys.stderr,
                 )
 
-    # Add per-build vcpkg_installed prefixes used by CMake manifest builds in CI
-    repo_root = Path(signal_lib_path).resolve().parents[3]  # This gets build/ directory
-    build_prefixes = [
-        repo_root
-        / "vcpkg_installed"
-        / "x64-windows",  # build/vcpkg_installed/x64-windows
-        repo_root.parent
-        / "vcpkg_installed"
-        / "x64-windows",  # root/vcpkg_installed/x64-windows
-    ]
-    for prefix in build_prefixes:
-        include_dir = prefix / "include"
-        lib_dir = prefix / "lib"
-        candidates.append((include_dir, lib_dir))
-        if os.name == "nt":
+    # Add system OpenSSL paths (lowest priority - only fallback)
+    if os.name == "nt":
+        system_paths = [
+            Path("C:/Program Files/OpenSSL"),
+            Path("C:/Program Files (x86)/OpenSSL"),
+        ]
+        for base in system_paths:
+            include_dir = base / "include"
+            lib_dir = base / "lib"
+            candidates.append((include_dir, lib_dir))
             evp_path = include_dir / "openssl" / "evp.h"
             print(
-                f"[DEBUG] CI build vcpkg_installed candidate: {evp_path} (exists: {evp_path.exists()})",
+                f"[DEBUG] System OpenSSL candidate: {evp_path} (exists: {evp_path.exists()})",
                 file=sys.stderr,
             )
 
@@ -636,7 +636,17 @@ def _detect_openssl_prefix(
         crypto_dll = (
             lib_dir.parent / "bin" / "libcrypto-3-x64.dll"
         )  # Check for DLL in bin directory
+        print(
+            f"[DEBUG] Checking candidate: header={header} (exists: {header.exists()}), "
+            f"lib={crypto_lib} (exists: {crypto_lib.exists()}), "
+            f"dll={crypto_dll} (exists: {crypto_dll.exists()})",
+            file=sys.stderr,
+        )
         if header.exists() and (crypto_lib.exists() or crypto_dll.exists()):
+            print(
+                f"[DEBUG] Selected OpenSSL: include={include_dir}, lib={lib_dir}",
+                file=sys.stderr,
+            )
             return include_dir, lib_dir
 
     return None, None
