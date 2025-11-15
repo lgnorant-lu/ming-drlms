@@ -262,6 +262,15 @@ typedef unsigned long long int sqlite3_uint64;
 #define SQLITE_TRANSIENT    ((void(*)(void*))-1)
 #define SQLITE_STATIC       ((void(*)(void*))0)
 
+// Define the structs for MSVC compatibility
+struct sqlite3 {
+    int dummy;
+};
+
+struct sqlite3_stmt {
+    int dummy;
+};
+
 int sqlite3_open(const char *filename, sqlite3 **ppDb);
 int sqlite3_close(sqlite3 *db);
 int sqlite3_exec(sqlite3*, const char *sql, sqlite3_callback, void*, char**);
