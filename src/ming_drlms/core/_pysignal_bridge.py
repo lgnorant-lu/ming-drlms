@@ -523,6 +523,14 @@ def _build_link_args(lib_path: Path, openssl_lib: Optional[Path] = None) -> dict
             for name in ("libcrypto", "libssl"):
                 if name not in libs:
                     libs.append(name)
+            openssl_lib_dir = openssl_lib
+            if openssl_lib_dir is not None:
+                extra_objs = link_args.setdefault("extra_objects", [])
+                for lib_name in ("libcrypto.lib", "libssl.lib"):
+                    candidate = openssl_lib_dir / lib_name
+                    if candidate.exists():
+                        if str(candidate) not in extra_objs:
+                            extra_objs.append(str(candidate))
         link_args.setdefault("extra_link_args", []).append("/NODEFAULTLIB:MSVCRTD")
     else:
         link_args["extra_objects"] = [str(lib_path)]
