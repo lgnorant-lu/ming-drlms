@@ -503,9 +503,15 @@ def _build_link_args(lib_path: Path, openssl_lib: Optional[Path] = None) -> dict
         if "/MD" not in compile_args:
             compile_args.append("/MD")
         if openssl_lib is not None:
+            # Add both lib and bin directories for OpenSSL
+            bin_dir = openssl_lib.parent / "bin"
             if str(openssl_lib) not in lib_dirs:
                 lib_dirs.append(str(openssl_lib))
+            if bin_dir.exists() and str(bin_dir) not in lib_dirs:
+                lib_dirs.append(str(bin_dir))
+
             libs = link_args.setdefault("libraries", [])
+            # Use the correct library names for OpenSSL 3.x
             for name in ("libcrypto", "libssl"):
                 if name not in libs:
                     libs.append(name)
@@ -603,7 +609,10 @@ def _detect_openssl_prefix(
     for include_dir, lib_dir in candidates:
         header = include_dir / "openssl" / "evp.h"
         crypto_lib = lib_dir / "libcrypto.lib"
-        if header.exists() and crypto_lib.exists():
+        crypto_dll = (
+            lib_dir.parent / "bin" / "libcrypto-3-x64.dll"
+        )  # Check for DLL in bin directory
+        if header.exists() and (crypto_lib.exists() or crypto_dll.exists()):
             return include_dir, lib_dir
 
     return None, None
