@@ -188,6 +188,10 @@ set(SERVER_LIBS
     Signal::protocol
 )
 
+if(TARGET argon2_dummy)
+    list(APPEND SERVER_LIBS argon2_dummy)
+endif()
+
 if(HAVE_SYSTEM_SQLITE3)
     list(APPEND SERVER_LIBS SQLite::SQLite3)
 elseif(TARGET unofficial::sqlite3::sqlite3)
