@@ -1,9 +1,7 @@
 import itertools
-import os
 from contextlib import contextmanager
 from pathlib import Path
 
-import pytest
 
 from ming_drlms.core.e2ee_store import LocalKeyStore
 from ming_drlms.core.pysignal import create_signal_context, generate_device_keys
@@ -126,10 +124,6 @@ def _generate_and_store_keys(
     )
 
 
-@pytest.mark.skipif(
-    os.getenv("CI") == "true",
-    reason="E2E encryption tests require OpenSSL DLLs which may not be available in CI",
-)
 def test_room_service_e2ee_roundtrip(tmp_path: Path) -> None:
     keystore_path = tmp_path / "keys.json"
     store = LocalKeyStore(keystore_path)
