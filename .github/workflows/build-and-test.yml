@@ -219,7 +219,6 @@ jobs:
           PATH: ${{ runner.os == 'Windows' && format('{0}/build/_deps/signal-install/bin;{0}/build/RelWithDebInfo;{0}/build;%PATH%', github.workspace) || env.PATH }}
         run: |
           set -euo pipefail
-          mkdir -p build
           CMAKE_ARGS="-DENABLE_TESTS=ON"
           if [[ "${{ runner.os }}" == "Windows" ]]; then
             CMAKE_ARGS="${CMAKE_ARGS} -DCMAKE_TOOLCHAIN_FILE=${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake -DVCPKG_TARGET_TRIPLET=x64-windows"
