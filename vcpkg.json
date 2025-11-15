@@ -3,9 +3,12 @@
   "version-string": "1.0.0",
   "description": "MingDRLMS - Ming's Distributed Real-time Large-scale Messaging System",
   "dependencies": [
+    {
+      "name": "openssl",
+      "features": ["tools"]
+    },
     "sqlite3",
     "argon2",
-    "openssl",
     "protobuf-c"
   ]
 }
