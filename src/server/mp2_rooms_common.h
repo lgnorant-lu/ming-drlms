@@ -43,7 +43,7 @@ long long mp2_rooms_get_max_upload_bytes(void);
 
 void mp2_rooms_broadcast_presence_event(
     Room *room, const InstanceUUID *instance_uuid, const char *username,
-    platform_socket_t skip_fd,
+    platform_socket_t skip_fd, const char *presence_token,
 #ifdef HAVE_PROTOBUF_C
     Mingdrlms__V2__RoomEventKind event_kind);
 #else

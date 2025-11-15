@@ -41,6 +41,7 @@ set(SERVER_SOURCES
 # Include the new ProtobufFetch module
 include(${CMAKE_SOURCE_DIR}/cmake/ProtobufFetch.cmake)
 include(${CMAKE_SOURCE_DIR}/cmake/SignalFetch.cmake)
+include(${CMAKE_SOURCE_DIR}/cmake/EnsureProtocVersion.cmake)
 
 if(PROTOBUF_C_USE_BUNDLED_RUNTIME AND NOT PROTOBUF_C_USE_PREGENSETS)
     list(APPEND SERVER_SOURCES ${PROJECT_SOURCE_DIR}/src/external/protobuf-c/protobuf-c.c)
@@ -48,7 +49,10 @@ endif()
 
 # --- Protobuf-C code generation (Phase 1) ---
 find_program(PROTOC_C_EXECUTABLE protoc-c)
-find_program(PROTOC_EXECUTABLE protoc REQUIRED)
+drlms_require_protoc(PROTOC_EXECUTABLE)
+if(NOT PROTOC_EXECUTABLE)
+    message(FATAL_ERROR "Failed to locate protoc ${DRLMS_PROTOC_VERSION}")
+endif()
 set(PROTO_DIR ${PROJECT_SOURCE_DIR}/schema/v2)
 # Generate into the current binary dir to avoid source dir path issues
 set(GENERATED_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated)

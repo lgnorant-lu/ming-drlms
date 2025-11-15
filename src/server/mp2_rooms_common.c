@@ -2,6 +2,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <stdbool.h>
 #include <ctype.h>
 #include <time.h>
 #include <stdio.h>
@@ -307,13 +308,16 @@ long long mp2_rooms_get_max_upload_bytes(void) {
 #ifdef HAVE_PROTOBUF_C
 void mp2_rooms_broadcast_presence_event(
     Room *room, const InstanceUUID *instance_uuid, const char *username,
-    platform_socket_t skip_fd, Mingdrlms__V2__RoomEventKind event_kind) {
+    platform_socket_t skip_fd, const char *presence_token,
+    Mingdrlms__V2__RoomEventKind event_kind) {
     if (!room || !username || !instance_uuid) {
         return;
     }
 
     mp2_protocol_dbgf("[presence] broadcast: user=%s event_kind=%d skip_fd=%d",
                       username, (int)event_kind, (int)skip_fd);
+
+    const bool has_origin_token = (presence_token && *presence_token);
 
     char ts[32];
     mp2_rooms_format_timestamp(ts, sizeof ts);
@@ -357,6 +361,14 @@ void mp2_rooms_broadcast_presence_event(
                                   (int)skip_fd, username);
                 continue;
             }
+            if (has_origin_token && sub->presence_token[0] != '\0' &&
+                strncmp(sub->presence_token, presence_token,
+                        ROOM_PRESENCE_TOKEN_LEN) == 0) {
+                mp2_protocol_dbgf(
+                    "[presence] skip same-token presence for fd=%d",
+                    (int)sub->fd);
+                continue;
+            }
             if (username && sub->user[0] != '\0') {
                 mp2_protocol_dbgf(
                     "[presence] candidate user=%s target=%s fd=%d", sub->user,
@@ -388,14 +400,13 @@ void mp2_rooms_broadcast_presence_event(
     free(ev_buf);
 }
 #else
-void mp2_rooms_broadcast_presence_event(Room *room,
-                                        const InstanceUUID *instance_uuid,
-                                        const char *username,
-                                        platform_socket_t skip_fd,
-                                        int event_kind) {
+void mp2_rooms_broadcast_presence_event(
+    Room *room, const InstanceUUID *instance_uuid, const char *username,
+    platform_socket_t skip_fd, const char *presence_token, int event_kind) {
     (void)room;
     (void)instance_uuid;
     (void)username;
+    (void)presence_token;
     (void)event_kind;
     (void)skip_fd;
 }

@@ -94,6 +94,7 @@ int rooms_inst_add_subscriber(Room *room, RoomInstance *instance,
     unsigned long long last_event_snapshot = 0;
     int instance_state_snapshot = 0;
     unsigned long long instance_last_event_snapshot = 0;
+    char new_presence_token[ROOM_PRESENCE_TOKEN_LEN] = {0};
     platform_mutex_lock(&room->mu);
     int user_already_present = 0;
     if (username && *username) {
@@ -146,6 +147,10 @@ int rooms_inst_add_subscriber(Room *room, RoomInstance *instance,
         platform_mutex_unlock(&room->mu);
         return -1;
     }
+    if (sub->presence_token[0] != '\0') {
+        snprintf(new_presence_token, sizeof new_presence_token, "%s",
+                 sub->presence_token);
+    }
     sub->joined_at = time(NULL);
     instance->subs_len++;
     rooms_instance_update_last_active(instance);
@@ -193,7 +198,8 @@ int rooms_inst_add_subscriber(Room *room, RoomInstance *instance,
 
     // Broadcast MEMBER_JOINED event to all existing room subscribers
     if (should_broadcast_join) {
-        rooms_instance_broadcast_presence_event(room, instance, username, 2,
+        rooms_instance_broadcast_presence_event(room, instance, username,
+                                                new_presence_token, 2,
                                                 &instance->instance_id, fd);
     }
 
@@ -220,11 +226,14 @@ int rooms_inst_remove_subscriber(Room *room, RoomInstance *instance,
     platform_mutex_lock(&instance->mu);
     int removed = 0;
     char removed_username[64] = {0};
+    char removed_presence_token[ROOM_PRESENCE_TOKEN_LEN] = {0};
     for (size_t i = 0; i < instance->subs_len; ++i) {
         if (instance->subs[i].fd == fd) {
             // Save the username before removing
             strncpy(removed_username, instance->subs[i].user,
                     sizeof(removed_username) - 1);
+            strncpy(removed_presence_token, instance->subs[i].presence_token,
+                    sizeof(removed_presence_token) - 1);
             rooms_instance_remove_sub_locked(instance, i);
             removed = 1;
             break;
@@ -291,7 +300,8 @@ int rooms_inst_remove_subscriber(Room *room, RoomInstance *instance,
     if (removed_username[0] != '\0') {
         mp2_protocol_dbgf("[presence] remove_sub: user=%s", removed_username);
         rooms_instance_broadcast_presence_event(
-            room, instance, removed_username, 3, &uuid_copy, fd);
+            room, instance, removed_username, removed_presence_token, 3,
+            &uuid_copy, fd);
     }
 
     return 0;
@@ -961,12 +971,10 @@ int rooms_update_subscriber_identity(RoomInstance *instance,
 }
 
 // Presence event broadcasting helper
-void rooms_instance_broadcast_presence_event(struct Room *room,
-                                             struct RoomInstance *instance,
-                                             const char *username,
-                                             int event_kind,
-                                             const InstanceUUID *instance_uuid,
-                                             platform_socket_t skip_fd) {
+void rooms_instance_broadcast_presence_event(
+    struct Room *room, struct RoomInstance *instance, const char *username,
+    const char *presence_token, int event_kind,
+    const InstanceUUID *instance_uuid, platform_socket_t skip_fd) {
 #ifdef HAVE_PROTOBUF_C
     if (!room || !username || !instance_uuid) {
         return;
@@ -977,11 +985,12 @@ void rooms_instance_broadcast_presence_event(struct Room *room,
             : MINGDRLMS__V2__ROOM_EVENT_KIND__ROOM_EVENT_KIND_MEMBER_JOINED;
     (void)instance;
     mp2_rooms_broadcast_presence_event(room, instance_uuid, username, skip_fd,
-                                       kind);
+                                       presence_token, kind);
 #else
     (void)room;
     (void)instance;
     (void)username;
+    (void)presence_token;
     (void)event_kind;
     (void)instance_uuid;
     (void)skip_fd;

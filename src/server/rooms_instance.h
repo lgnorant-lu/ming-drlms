@@ -141,11 +141,9 @@ void rooms_instance_destroy_unlink_locked(struct Room *room,
                                           struct RoomInstance *instance);
 
 // Presence event broadcasting helper
-void rooms_instance_broadcast_presence_event(struct Room *room,
-                                             struct RoomInstance *instance,
-                                             const char *username,
-                                             int event_kind,
-                                             const InstanceUUID *instance_uuid,
-                                             platform_socket_t skip_fd);
+void rooms_instance_broadcast_presence_event(
+    struct Room *room, struct RoomInstance *instance, const char *username,
+    const char *presence_token, int event_kind,
+    const InstanceUUID *instance_uuid, platform_socket_t skip_fd);
 
 #endif // DRLMS_ROOMS_INSTANCE_H
