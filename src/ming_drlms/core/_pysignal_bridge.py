@@ -263,6 +263,7 @@ def load_bridge() -> Tuple[FFI, object]:
 
         # First pass: find signal-protocol-c.dll and add all existing directories to PATH
         dll_found = False
+        openssl_bin_dirs = []
         for bin_dir in bin_candidates:
             dll_path = bin_dir / "signal-protocol-c.dll"
             if bin_dir.exists():
@@ -284,8 +285,30 @@ def load_bridge() -> Tuple[FFI, object]:
                         file=sys.stderr,
                     )
                     dll_found = True
+                # Collect OpenSSL bin directories
+                if (
+                    "vcpkg_installed" in str(bin_dir)
+                    or "openssl" in str(bin_dir).lower()
+                ):
+                    openssl_bin_dirs.append(str(bin_dir))
 
-        # Preload dependent DLLs on Windows to avoid "DLL not found" during CFFI module import
+        # Ensure OpenSSL DLLs from vcpkg are prioritized in PATH
+        current_path = os.environ.get("PATH", "")
+        path_parts = current_path.split(os.pathsep)
+        # Remove any existing OpenSSL-related paths and re-add vcpkg ones at front
+        filtered_parts = [
+            p
+            for p in path_parts
+            if "openssl" not in p.lower() and "vcpkg" not in p.lower()
+        ]
+        for openssl_dir in reversed(openssl_bin_dirs):
+            if openssl_dir not in filtered_parts:
+                filtered_parts.insert(0, openssl_dir)
+        os.environ["PATH"] = os.pathsep.join(filtered_parts)
+        print(
+            f"[DEBUG] Reordered PATH to prioritize vcpkg OpenSSL: {os.environ['PATH'][:500]}...",
+            file=sys.stderr,
+        )  # Preload dependent DLLs on Windows to avoid "DLL not found" during CFFI module import
         try:
             from ctypes import WinDLL  # type: ignore
 
