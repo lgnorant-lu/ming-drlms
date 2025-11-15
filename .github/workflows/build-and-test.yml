@@ -316,6 +316,11 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          $signalDll = Join-Path $Env:GITHUB_WORKSPACE 'build/_deps/signal-install/bin/signal-protocol-c.dll'
+          if (-not (Test-Path $signalDll)) {
+            Write-Host "Skipping CFFI preload because signal DLL is not ready: $signalDll"
+            exit 0
+          }
           try {
             python -c "from ming_drlms.core import _pysignal_bridge; _pysignal_bridge.load_bridge()"
           } catch {
