@@ -256,6 +256,13 @@ def load_bridge() -> Tuple[FFI, object]:
                     build_root,
                 ]
             )
+            if repo_root is not None:
+                bin_candidates.extend(
+                    [
+                        repo_root / "vcpkg_installed" / "x64-windows" / "bin",
+                        repo_root / "vcpkg_installed" / "x64-windows" / "debug" / "bin",
+                    ]
+                )
         bin_candidates.extend(
             [
                 Path("C:/vcpkg/installed/x64-windows/bin"),
