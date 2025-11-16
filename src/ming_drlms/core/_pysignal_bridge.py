@@ -12,6 +12,8 @@ from cffi import FFI, VerificationError
 
 from ._pysignal_errors import SignalBridgeError
 
+_DLL_DIR_HANDLES: list[object] = []
+
 _CDEF = """
         typedef struct signal_context signal_context;
         typedef struct signal_buffer signal_buffer;
@@ -264,6 +266,8 @@ def load_bridge() -> Tuple[FFI, object]:
         # First pass: find signal-protocol-c.dll and add all existing directories to PATH
         dll_found = False
         openssl_bin_dirs = []
+        added_dll_dirs: set[str] = set()
+        add_dll_supported = hasattr(os, "add_dll_directory")
         for bin_dir in bin_candidates:
             dll_path = bin_dir / "signal-protocol-c.dll"
             if bin_dir.exists():
@@ -285,6 +289,20 @@ def load_bridge() -> Tuple[FFI, object]:
                         file=sys.stderr,
                     )
                     dll_found = True
+                if add_dll_supported and dll_dir not in added_dll_dirs:
+                    try:
+                        handle = os.add_dll_directory(dll_dir)
+                        _DLL_DIR_HANDLES.append(handle)
+                        added_dll_dirs.add(dll_dir)
+                        print(
+                            f"[DEBUG] Added DLL directory via add_dll_directory: {dll_dir}",
+                            file=sys.stderr,
+                        )
+                    except OSError as exc:
+                        print(
+                            f"[DEBUG] Failed to register DLL directory {dll_dir}: {exc}",
+                            file=sys.stderr,
+                        )
                 # Collect OpenSSL bin directories
                 if (
                     "vcpkg_installed" in str(bin_dir)
