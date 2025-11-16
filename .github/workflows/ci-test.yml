@@ -1,5 +1,4 @@
-name: Build and Test
-# Forcing GH to re-read config 2025-11-16
+name: CI - Test
 
 on:
   push:
@@ -131,10 +130,6 @@ jobs:
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: pwsh scripts/ci/windows-diag.ps1
-
-      - name: Run Ruff static analysis
-        shell: bash
-        run: bash scripts/ci/run-ruff.sh
 
       - name: Run Python unit tests
         shell: bash

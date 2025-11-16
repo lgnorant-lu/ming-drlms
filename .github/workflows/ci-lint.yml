@@ -1,0 +1,41 @@
+name: CI - Lint
+
+on:
+  push:
+    branches:
+      - main
+      - 'feature/**'
+  pull_request:
+  workflow_dispatch:
+
+env:
+  PIP_CACHE_DIR: ~/.cache/pip
+
+jobs:
+  ruff:
+    name: Ruff static analysis
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.PIP_CACHE_DIR }}
+          key: lint-${{ runner.os }}-pip-${{ hashFiles('pyproject.toml', 'requirements-dev.txt') }}
+          restore-keys: |
+            lint-${{ runner.os }}-pip-
+
+      - name: Install Python dependencies
+        shell: bash
+        run: bash scripts/ci/install-python-deps.sh
+
+      - name: Run Ruff
+        shell: bash
+        run: bash scripts/ci/run-ruff.sh
