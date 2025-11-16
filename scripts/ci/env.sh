@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="${PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+ROOT_DIR="${PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 BUILD_DIR="${BUILD_DIR:-${ROOT_DIR}/build}"
 PLUGIN_BUILD_DIR="${BUILD_DIR}/coverage"
 COVERAGE_HOST="${COVERAGE_HOST:-127.0.0.1}"

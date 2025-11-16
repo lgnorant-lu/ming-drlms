@@ -2,7 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="${PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-BUILD_DIR="${BUILD_DIR:-${ROOT_DIR}/build/coverage}"
+COVERAGE_BUILD_DIR="${COVERAGE_BUILD_DIR:-${ROOT_DIR}/build/coverage}"
+BUILD_DIR="${COVERAGE_BUILD_DIR}"
 COV_HOST="${COVERAGE_HOST:-127.0.0.1}"
 COV_PORT="${COVERAGE_PORT:-18080}"
 
