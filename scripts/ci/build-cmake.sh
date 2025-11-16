@@ -26,6 +26,6 @@ if [[ "$RUNNER_OS" == "Windows" ]]; then
   BUILD_CONFIG="--config RelWithDebInfo"
 fi
 
-"Configuring CMake ($RUNNER_OS)..." >&2
+echo "Configuring CMake ($RUNNER_OS)..." >&2
 "${CMAKE_BIN}" -S . -B build "${CMAKE_ARGS[@]}"
 "${CMAKE_BIN}" --build build ${BUILD_CONFIG}

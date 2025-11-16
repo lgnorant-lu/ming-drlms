@@ -23,6 +23,8 @@ Add-ToEnv 'VCPKG_TARGET_TRIPLET' 'x64-windows'
 Add-ToEnv 'VCPKG_DEFAULT_BINARY_CACHE' $binaryCache
 Add-ToEnv 'VCPKG_BINARY_SOURCES' "clear;files,$binaryCache,readwrite"
 
+Write-Host "Using VCPKG root: $customRoot"
+
 $desiredVersion = '2025.10.17'
 if (-not (Test-Path (Join-Path $customRoot '.git'))) {
     git clone --depth 1 --branch $desiredVersion https://github.com/microsoft/vcpkg.git $customRoot
@@ -35,7 +37,7 @@ if (-not (Test-Path (Join-Path $customRoot '.git'))) {
     }
     Pop-Location
 }
-& (Join-Path $customRoot 'bootstrap-vcpkg.bat')
+& "$customRoot\bootstrap-vcpkg.bat"
 Write-Host "vcpkg version: $(& "$customRoot\vcpkg.exe" version)"
 
 "Installing manifest dependencies..." | Write-Host
