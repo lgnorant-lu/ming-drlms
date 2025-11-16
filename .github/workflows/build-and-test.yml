@@ -30,7 +30,7 @@ jobs:
             pip-cache: ~\AppData\Local\pip\Cache
     env:
       DRLMS_SIGNAL_PREFIX: ${{ github.workspace }}/build/_deps/signal-install
-      RUNNER_OS: ${{ runner.os }}
+      RUNNER_OS: ${{ matrix.os }}
       CI_DEBUG: ${{ env.CI_DEBUG }}
       VCPKG_ROOT: ${{ github.workspace }}/.cache/vcpkg
       VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.cache/vcpkg-binary-cache
