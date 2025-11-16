@@ -7,5 +7,5 @@ INSTALL_CMD=(cmake --install build)
 if [[ "$RUNNER_OS" == "Windows" ]]; then
   INSTALL_CMD+=(--config RelWithDebInfo)
 fi
-"Installing C components ($RUNNER_OS)..." >&2
+echo "Installing C components ($RUNNER_OS)..." >&2
 "${INSTALL_CMD[@]}"
