@@ -7,9 +7,14 @@ on:
       - 'feature/**'
   pull_request:
   workflow_dispatch:
+    inputs:
+      enable_debug:
+        description: 'Set to true to turn on `CI_DEBUG=1` for Windows diagnostics'
+        required: false
+        default: 'false'
 
 env:
-  CI_DEBUG: '0'
+  CI_DEBUG: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.enable_debug == 'true') && '1' || '0' }}
 
 jobs:
   cross-platform:
@@ -31,7 +36,6 @@ jobs:
     env:
       DRLMS_SIGNAL_PREFIX: ${{ github.workspace }}/build/_deps/signal-install
       RUNNER_OS: ${{ matrix.os }}
-      CI_DEBUG: '0'
       VCPKG_ROOT: ${{ github.workspace }}/.cache/vcpkg
       VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.cache/vcpkg-binary-cache
 
