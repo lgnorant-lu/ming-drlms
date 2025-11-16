@@ -1,4 +1,5 @@
 name: Build and Test
+# Forcing GH to re-read config 2025-11-16
 
 on:
   push:
