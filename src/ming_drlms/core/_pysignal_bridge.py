@@ -238,10 +238,13 @@ def load_bridge() -> Tuple[FFI, object]:
         include_dir.parent if include_dir is not None else None
     )
 
+    repo_root = _find_repo_root()
+    if repo_root is None and lib_path is not None:
+        repo_root = _find_repo_root_from_lib(lib_path)
+    build_root = repo_root / "build" if repo_root is not None else None
+
     # For Windows, ensure DLL directory is in PATH for runtime loading
     if os.name == "nt":
-        repo_root = _find_repo_root()
-        build_root = repo_root / "build" if repo_root is not None else None
         bin_candidates: list[Path] = []
         if signal_prefix is not None:
             bin_candidates.append(signal_prefix / "bin")
@@ -783,4 +786,14 @@ def _find_repo_root() -> Optional[Path]:
     for parent in current.parents:
         if (parent / "pyproject.toml").exists() or (parent / "CMakeLists.txt").exists():
             return parent
+    return None
+
+
+def _find_repo_root_from_lib(lib_path: Path) -> Optional[Path]:
+    current = Path(lib_path).resolve()
+    for parent in current.parents:
+        if (parent / "pyproject.toml").exists() or (parent / "CMakeLists.txt").exists():
+            return parent
+        if parent.name == "build" and parent.parent is not None:
+            return parent.parent
     return None
