@@ -8,6 +8,9 @@ on:
   pull_request:
   workflow_dispatch:
 
+env:
+  CI_DEBUG: '0'
+
 jobs:
   cross-platform:
     name: ${{ matrix.name }}
@@ -27,6 +30,10 @@ jobs:
             pip-cache: ~\AppData\Local\pip\Cache
     env:
       DRLMS_SIGNAL_PREFIX: ${{ github.workspace }}/build/_deps/signal-install
+      RUNNER_OS: ${{ runner.os }}
+      CI_DEBUG: ${{ env.CI_DEBUG }}
+      VCPKG_ROOT: ${{ github.workspace }}/.cache/vcpkg
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.cache/vcpkg-binary-cache
 
     steps:
       - name: Checkout repository
@@ -44,63 +51,28 @@ jobs:
           key: ${{ runner.os }}-pip-${{ hashFiles('pyproject.toml', 'requirements-dev.txt') }}
           restore-keys: |
             ${{ runner.os }}-pip-
+            ${{ runner.os }}-
 
       - name: Install system dependencies (Linux)
         if: matrix.os == 'ubuntu-latest'
         shell: bash
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y build-essential cmake libssl-dev libargon2-dev netcat-openbsd lcov clang-format cppcheck protobuf-c-compiler libprotobuf-c-dev
+        run: bash scripts/ci/install-linux-deps.sh
 
       - name: Install Homebrew dependencies (macOS)
         if: matrix.os == 'macos-latest'
         shell: bash
-        run: |
-          set -euo pipefail
-          # Check if brew is available, install if not
-          if ! command -v brew >/dev/null 2>&1; then
-            echo "Homebrew not found, installing..."
-            /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-            eval "$(/opt/homebrew/bin/brew shellenv)" || eval "$(/usr/local/bin/brew shellenv)"
-          fi
-          # Skip brew update to avoid timeouts
-          # brew update
-          brew install cmake argon2 openssl@3 sqlite3 lcov protobuf-c
+        run: bash scripts/ci/install-macos-deps.sh
 
       - name: Configure macOS build environment
         if: matrix.os == 'macos-latest'
         shell: bash
-        run: |
-          set -euo pipefail
-          OPENSSL_PREFIX=$(brew --prefix openssl@3)
-          ARGON2_PREFIX=$(brew --prefix argon2)
-          echo "OPENSSL_ROOT_DIR=${OPENSSL_PREFIX}" >> "$GITHUB_ENV"
-          echo "LDFLAGS=-L${OPENSSL_PREFIX}/lib -L${ARGON2_PREFIX}/lib" >> "$GITHUB_ENV"
-          echo "CPPFLAGS=-I${OPENSSL_PREFIX}/include -I${ARGON2_PREFIX}/include" >> "$GITHUB_ENV"
-          echo "PKG_CONFIG_PATH=${OPENSSL_PREFIX}/lib/pkgconfig:${ARGON2_PREFIX}/lib/pkgconfig:${PKG_CONFIG_PATH:-}" >> "$GITHUB_ENV"
+        run: bash scripts/ci/configure-macos-env.sh
 
       - name: Set up MSVC developer command prompt
         if: matrix.os == 'windows-latest'
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
-
-      - name: Configure vcpkg root (Windows)
-        if: matrix.os == 'windows-latest'
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $customRoot = Join-Path $Env:RUNNER_TEMP 'vcpkg'
-          $binaryCache = Join-Path $Env:RUNNER_TEMP 'vcpkg-binary-cache'
-          if (-not (Test-Path $binaryCache)) {
-            New-Item -ItemType Directory -Path $binaryCache | Out-Null
-          }
-          Add-Content -Path $Env:GITHUB_ENV -Value "VCPKG_ROOT=$customRoot"
-          Add-Content -Path $Env:GITHUB_ENV -Value ("CMAKE_TOOLCHAIN_FILE={0}" -f (Join-Path $customRoot 'scripts/buildsystems/vcpkg.cmake'))
-          Add-Content -Path $Env:GITHUB_ENV -Value "VCPKG_TARGET_TRIPLET=x64-windows"
-          Add-Content -Path $Env:GITHUB_ENV -Value "VCPKG_DEFAULT_BINARY_CACHE=$binaryCache"
-          Add-Content -Path $Env:GITHUB_ENV -Value "VCPKG_BINARY_SOURCES=clear;files,$binaryCache,readwrite"
 
       - name: Restore vcpkg cache (Windows)
         if: matrix.os == 'windows-latest'
@@ -116,366 +88,54 @@ jobs:
             ${{ runner.os }}-vcpkg-2025.10.17-
             ${{ runner.os }}-vcpkg-
 
-      - name: Bootstrap vcpkg (Windows)
+      - name: Bootstrap and install vcpkg (Windows)
         if: matrix.os == 'windows-latest'
         shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $desiredVersion = "2025.10.17"
-          
-          if (Test-Path $Env:VCPKG_ROOT) {
-            if (-not (Test-Path (Join-Path $Env:VCPKG_ROOT '.git'))) {
-              Remove-Item $Env:VCPKG_ROOT -Recurse -Force
-            }
-          }
-          
-          if (-not (Test-Path $Env:VCPKG_ROOT)) {
-            Write-Host "Cloning vcpkg version $desiredVersion..."
-            git clone --depth 1 --branch $desiredVersion https://github.com/microsoft/vcpkg.git $Env:VCPKG_ROOT
-          } else {
-            Write-Host "Checking vcpkg version..."
-            cd $Env:VCPKG_ROOT
-            $currentTag = git describe --tags --abbrev=0 2>$null
-            if ($currentTag -ne $desiredVersion) {
-              Write-Host "Updating vcpkg from $currentTag to $desiredVersion..."
-              git fetch --depth 1 origin tag $desiredVersion
-              git checkout $desiredVersion
-            }
-          }
-          
-          & (Join-Path $Env:VCPKG_ROOT 'bootstrap-vcpkg.bat')
-          Write-Host "vcpkg version: $(& $Env:VCPKG_ROOT\vcpkg.exe version)"
-
-      - name: Install vcpkg dependencies (Windows)
-        if: matrix.os == 'windows-latest'
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          if (-not (Test-Path $Env:VCPKG_ROOT)) {
-            throw "VCPKG_ROOT is not initialized"
-          }
-          $manifestFile = Join-Path $Env:GITHUB_WORKSPACE 'vcpkg.json'
-          if (-not (Test-Path $manifestFile)) {
-            throw "vcpkg.json not found: $manifestFile"
-          }
-          
-          Write-Host "Installing dependencies with manifest mode..."
-          
-          # Use manifest mode for better reproducibility
-          & "$Env:VCPKG_ROOT\vcpkg.exe" install --triplet x64-windows --x-manifest-root=$Env:GITHUB_WORKSPACE --recurse
-          
-          Write-Host "Installed packages:"
-          & "$Env:VCPKG_ROOT\vcpkg.exe" list
+        run: pwsh scripts/ci/setup-windows-vcpkg.ps1
 
       - name: Configure OpenSSL for Python CFFI (Windows)
         if: matrix.os == 'windows-latest'
         shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          # Check both cache location and build location for OpenSSL
-          $cacheOpensslRoot = Join-Path $Env:VCPKG_ROOT 'installed/x64-windows'
-          $buildOpensslRoot = Join-Path $Env:GITHUB_WORKSPACE 'build/vcpkg_installed/x64-windows'
-
-          $opensslRoot = $null
-          if (Test-Path $buildOpensslRoot) {
-            $opensslRoot = $buildOpensslRoot
-            Write-Host "Using build OpenSSL at $opensslRoot"
-          } elseif (Test-Path $cacheOpensslRoot) {
-            $opensslRoot = $cacheOpensslRoot
-            Write-Host "Using cache OpenSSL at $opensslRoot"
-          }
-
-          if ($opensslRoot) {
-            Add-Content -Path $Env:GITHUB_ENV -Value "OPENSSL_ROOT_DIR=$opensslRoot"
-            Add-Content -Path $Env:GITHUB_ENV -Value "VCPKG_ROOT=$Env:VCPKG_ROOT"
-            Write-Host "Set OPENSSL_ROOT_DIR=$opensslRoot and VCPKG_ROOT=$Env:VCPKG_ROOT for Python CFFI"
-          } else {
-            Write-Warning "OpenSSL root not found at either $cacheOpensslRoot or $buildOpensslRoot"
-          }
-
-          # Debug: List vcpkg installed contents
-          Write-Host "=== VCPKG INSTALLED CONTENTS ==="
-          if (Test-Path "$Env:GITHUB_WORKSPACE/vcpkg_installed") {
-            Get-ChildItem "$Env:GITHUB_WORKSPACE/vcpkg_installed" -Recurse | Where-Object { $_.Name -like "*.dll" -or $_.Name -like "*.lib" } | Select-Object FullName | Out-Host
-          }
-          Write-Host "=== END VCPKG CONTENTS ==="
-
-          # Additional debug: Check bin directory specifically
-          Write-Host "=== OPENSSL BIN DIRECTORY ==="
-          $opensslBin = "$Env:GITHUB_WORKSPACE/vcpkg_installed/x64-windows/bin"
-          if (Test-Path $opensslBin) {
-            Get-ChildItem $opensslBin | Select-Object Name, Length | Out-Host
-          } else {
-            Write-Host "OpenSSL bin directory not found: $opensslBin"
-          }
-          Write-Host "=== END OPENSSL BIN ==="
+        run: pwsh scripts/ci/configure-windows-openssl.ps1
 
       - name: Ensure CMake available (Windows)
         if: matrix.os == 'windows-latest'
         shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          if (-not (Get-Command cmake -ErrorAction SilentlyContinue)) {
-            choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System' --no-progress --yes
-          } else {
-            Write-Host "CMake already installed"
-          }
-          $cmakeBin = 'C:\Program Files\CMake\bin'
-          if (Test-Path $cmakeBin) {
-            Add-Content -Path $Env:GITHUB_PATH -Value $cmakeBin
-            Write-Host "Added $cmakeBin to PATH"
-          }
-          cmake --version
+        run: pwsh scripts/ci/ensure-cmake-windows.ps1
 
       - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip setuptools wheel
-          python -m pip install -r requirements-dev.txt
-          python -m pip install ".[gui]" build coverage
-
-      - name: Validate Python package metadata
-        run: |
-          python -m build --sdist --wheel --outdir dist/tmp
-
-      - name: Clean build directory (Windows)
-        if: matrix.os == 'windows-latest'
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $buildDir = Join-Path $Env:GITHUB_WORKSPACE 'build'
-          if (Test-Path $buildDir) {
-            Write-Host "Removing stale build directory: $buildDir"
-            Remove-Item $buildDir -Recurse -Force
-          } else {
-            Write-Host "No existing build directory to remove"
-          }
+        shell: bash
+        run: bash scripts/ci/install-python-deps.sh
 
       - name: Build C components
         shell: bash
-        env:
-          LD_LIBRARY_PATH: ${{ runner.os == 'Linux' && format('{0}/build/_deps/signal-install/lib:{0}/build', github.workspace) || env.LD_LIBRARY_PATH }}
-          DYLD_LIBRARY_PATH: ${{ runner.os == 'macOS' && format('{0}/build/_deps/signal-install/lib:{0}/build', github.workspace) || env.DYLD_LIBRARY_PATH }}
-        run: |
-          set -euo pipefail
-          # Ensure cmake is in PATH
-          if [[ "${{ runner.os }}" == "Linux" ]]; then
-            export PATH="/usr/bin:/bin:$PATH"
-            CMAKE_BIN="/usr/bin/cmake"
-          elif [[ "${{ runner.os }}" == "macOS" ]]; then
-            HOMEBREW_PREFIX=$(brew --prefix)
-            export PATH="${HOMEBREW_PREFIX}/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
-            CMAKE_BIN="${HOMEBREW_PREFIX}/bin/cmake"
-          fi
-          if [[ "${{ runner.os }}" == "Windows" ]]; then
-            export PATH="${GITHUB_WORKSPACE}/build/_deps/signal-install/bin;${GITHUB_WORKSPACE}/build/RelWithDebInfo;${GITHUB_WORKSPACE}/build;${GITHUB_WORKSPACE}/vcpkg_installed/x64-windows/bin;${PATH}"
-          fi
-          if [[ -z "${CMAKE_BIN:-}" || ! -x "${CMAKE_BIN}" ]]; then
-            CMAKE_BIN=$(command -v cmake || true)
-          fi
-          if [[ -z "${CMAKE_BIN:-}" ]]; then
-            echo "cmake not found in PATH" >&2
-            exit 1
-          fi
-          CMAKE_ARGS="-DENABLE_TESTS=ON"
-          if [[ "${{ runner.os }}" == "Windows" ]]; then
-            CMAKE_ARGS="${CMAKE_ARGS} -DCMAKE_TOOLCHAIN_FILE=${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake -DVCPKG_TARGET_TRIPLET=x64-windows"
-            BUILD_CONFIG="--config RelWithDebInfo"
-          else
-            BUILD_CONFIG=""
-          fi
-          "${CMAKE_BIN}" -S . -B build ${CMAKE_ARGS}
-          "${CMAKE_BIN}" --build build ${BUILD_CONFIG}
+        run: bash scripts/ci/build-cmake.sh
 
-      - name: Install C components (Unix)
-        if: matrix.os != 'windows-latest'
+      - name: Install C components
         shell: bash
-        run: |
-          set -euo pipefail
-          cmake --install build
+        run: bash scripts/ci/install-c-components.sh
 
-      - name: Install C components (Windows)
+      - name: Dump Windows diagnostics (optional)
         if: matrix.os == 'windows-latest'
         shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          cmake --install build --config RelWithDebInfo
-
-      - name: Dump signal-protocol-c dependencies (Windows)
-        if: matrix.os == 'windows-latest'
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $signalDll = Join-Path $Env:DRLMS_SIGNAL_PREFIX 'bin/signal-protocol-c.dll'
-          if (-not (Test-Path $signalDll)) {
-            throw "signal-protocol-c.dll not found: $signalDll"
-          }
-          Write-Host "Dumping DLL dependencies for $signalDll"
-          dumpbin /dependents $signalDll
-          Write-Host '--- PATH snapshot ---'
-          $Env:PATH -split ';' | Where-Object { $_ -and $_ -ne 'C:' } | ForEach-Object { Write-Host $_ }
-          Write-Host '--- vcpkg OpenSSL DLLs ---'
-          $vcpkgBin = Join-Path $Env:GITHUB_WORKSPACE 'vcpkg_installed/x64-windows/bin'
-          if (Test-Path $vcpkgBin) {
-            Get-ChildItem $vcpkgBin -File | Where-Object { $_.Name -match '^(libcrypto|libssl|openssl)' } | Select-Object Name, Length | Format-Table -AutoSize
-          } else {
-            Write-Host "vcpkg bin directory missing: $vcpkgBin"
-          }
-          Write-Host '--- System OpenSSL bin ---'
-          $systemSsl = 'C:\\Program Files\\OpenSSL\\bin'
-          if (Test-Path $systemSsl) {
-            Get-ChildItem $systemSsl -File | Select-Object Name, Length | Format-Table -AutoSize
-          } else {
-            Write-Host "System OpenSSL bin not found: $systemSsl"
-          }
-      - name: Prebuild libsignal CFFI (Windows diagnostics)
-        if: matrix.os == 'windows-latest'
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $signalDll = Join-Path $Env:DRLMS_SIGNAL_PREFIX 'bin/signal-protocol-c.dll'
-          if (-not (Test-Path $signalDll)) {
-            Write-Host "Skipping CFFI preload because signal DLL is not ready: $signalDll"
-            exit 0
-          }
-          try {
-            python -c "from ming_drlms.core import _pysignal_bridge; _pysignal_bridge.load_bridge()"
-          } catch {
-            Write-Host "libsignal CFFI preload failed (expected if dependencies missing): $_"
-          }
-      - name: Dump libsignal CFFI dependencies (Windows)
-        if: matrix.os == 'windows-latest'
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $pycache = Join-Path $Env:GITHUB_WORKSPACE 'src/ming_drlms/core/__pycache__'
-          if (-not (Test-Path $pycache)) {
-            Write-Host "Pycache directory not found: $pycache"
-          } else {
-            Get-ChildItem $pycache -Filter '_cffi__*.pyd' -File | ForEach-Object {
-              Write-Host "Dumping dependencies for $($_.FullName)"
-              dumpbin /dependents $_.FullName
-            }
-          }
+        run: pwsh scripts/ci/windows-diag.ps1
 
       - name: Run Ruff static analysis
-        env:
-          QT_QPA_PLATFORM: offscreen
-          LD_LIBRARY_PATH: ${{ runner.os == 'Linux' && format('{0}/build/_deps/signal-install/lib:{0}/build', github.workspace) || env.LD_LIBRARY_PATH }}
-          DYLD_LIBRARY_PATH: ${{ runner.os == 'macOS' && format('{0}/build/_deps/signal-install/lib:{0}/build', github.workspace) || env.DYLD_LIBRARY_PATH }}
-        run: python -m ruff check src/ tests/
+        shell: bash
+        run: bash scripts/ci/run-ruff.sh
 
       - name: Run Python unit tests
         shell: bash
-        env:
-          QT_QPA_PLATFORM: offscreen
-          DRLMS_UPDATE_CHECK: "0"
-          LD_LIBRARY_PATH: ${{ runner.os == 'Linux' && format('{0}/build/_deps/signal-install/lib:{0}/build', github.workspace) || env.LD_LIBRARY_PATH }}
-          DYLD_LIBRARY_PATH: ${{ runner.os == 'macOS' && format('{0}/build/_deps/signal-install/lib:{0}/build', github.workspace) || env.DYLD_LIBRARY_PATH }}
-        run: |
-          # Debug info
-          echo "Python version: $(python --version)"
-          echo "Python executable: $(python --version)"
-          echo "Working directory: $(pwd)"
-          echo "Environment variables:"
-          env | grep -E "(QT_|PROTOCOL_BUFFERS|DRLMS|LD_|DYLD_|PATH)" | sort || true
-          
-          if [[ "${{ runner.os }}" == "Windows" ]]; then
-            export PATH="${GITHUB_WORKSPACE}/build/_deps/signal-install/bin;${GITHUB_WORKSPACE}/build/RelWithDebInfo;${GITHUB_WORKSPACE}/build;${GITHUB_WORKSPACE}/vcpkg_installed/x64-windows/bin;${PATH}"
-          fi
-          
-          # Check protobuf implementation
-          echo "Checking protobuf implementation..."
-          python -c "import google.protobuf; print(f'Protobuf version: {google.protobuf.__version__}')"
-          python -c "from google.protobuf import descriptor as _descriptor; print(f'Protobuf implementation: {_descriptor.__file__}')"
-          python -c "import google.protobuf.pyext; print('C extension available')" 2>/dev/null || echo "C extension NOT available"
-          
-          # First run just the client unit tests to isolate the hanging issue
-          echo "Running test_cli_client_unit.py..."
-          python -m pytest tests/python/test_cli_client_unit.py -v
-          echo "test_cli_client_unit.py completed"
-          
-          # If that passes, run the demo test separately
-          echo "Running test_cli_demo_unit.py..."
-          python -c "import subprocess, sys; subprocess.run([sys.executable, '-m', 'pytest', 'tests/python/test_cli_demo_unit.py', '-v'], check=True, timeout=60)"
-          echo "test_cli_demo_unit.py completed"
-          
-          # Then run the rest
-          echo "Running remaining tests..."
-          python -m pytest -m "not integration" tests/python --ignore=tests/python/test_cli_client_unit.py --ignore=tests/python/test_cli_demo_unit.py --tb=short -x
+        run: bash scripts/ci/run-python-tests.sh
 
       - name: Run coverage and integration suite
         shell: bash
-        env:
-          RUNNER_OS: ${{ runner.os }}
-          LD_LIBRARY_PATH: ${{ runner.os == 'Linux' && format('{0}/build/_deps/signal-install/lib:{0}/build', github.workspace) || env.LD_LIBRARY_PATH }}
-          DYLD_LIBRARY_PATH: ${{ runner.os == 'macOS' && format('{0}/build/_deps/signal-install/lib:{0}/build', github.workspace) || env.DYLD_LIBRARY_PATH }}
-        run: |
-          set -euo pipefail
-          if [[ "${RUNNER_OS}" == "Windows" ]]; then
-            export PATH="${GITHUB_WORKSPACE}/build/_deps/signal-install/bin;${GITHUB_WORKSPACE}/build/RelWithDebInfo;${GITHUB_WORKSPACE}/build;${GITHUB_WORKSPACE}/vcpkg_installed/x64-windows/bin;/c/Program Files/CMake/bin;${PATH}"
-          fi
-          bash scripts/run_coverage.sh
+        run: bash scripts/ci/run-coverage-suite.sh
 
       - name: Smoke Test M-Proto-v2 Handler
         if: matrix.os == 'ubuntu-latest'
         shell: bash
-        env:
-          LD_LIBRARY_PATH: ${{ runner.os == 'Linux' && format('{0}/build/_deps/signal-install/lib:{0}/build', github.workspace) || env.LD_LIBRARY_PATH }}
-          DYLD_LIBRARY_PATH: ${{ runner.os == 'macOS' && format('{0}/build/_deps/signal-install/lib:{0}/build', github.workspace) || env.DYLD_LIBRARY_PATH }}
-        run: |
-          set -euo pipefail
-          # Use coverage build dir from previous step
-          BIN_DIR="${GITHUB_WORKSPACE}/build/coverage"
-          # Find server executable robustly
-          find_server() {
-            local root="$1"
-            local -a candidates=(
-              "${root}/log_collector_server"
-              "${root}/RelWithDebInfo/log_collector_server"
-              "${root}/Debug/log_collector_server"
-              "${root}/Release/log_collector_server"
-            )
-            for c in "${candidates[@]}"; do
-              if [[ -x "$c" ]]; then echo "$c"; return 0; fi
-            done
-            return 1
-          }
-          SERVER=$(find_server "${BIN_DIR}") || { echo "[error] server not found"; exit 1; }
-          echo "Using server: ${SERVER}"
-          # Launch server in background, capture stdout/stderr
-          SMOKE_HOST=127.0.0.1
-          SMOKE_PORT=19090
-          : > mp2_server.out
-          : > mp2_server.err
-          ( env DRLMS_ENABLE_MPROTO_V2=1 DRLMS_PORT="${SMOKE_PORT}" "${SERVER}" > mp2_server.out 2> mp2_server.err & echo $! > mp2_server.pid )
-          # Wait for server readiness
-          tries=50
-          until nc -z "${SMOKE_HOST}" "${SMOKE_PORT}" >/dev/null 2>&1; do
-            tries=$((tries-1))
-            if [[ ${tries} -le 0 ]]; then
-              echo "[error] server did not become ready"; cat mp2_server.out mp2_server.err || true; exit 1
-            fi
-            sleep 0.1
-          done
-          # Send a valid AUTH_CHALLENGE_REQUEST (msg_type=100)
-          python3 scripts/smoke_mp2_client.py --host "${SMOKE_HOST}" --port "${SMOKE_PORT}" --type 100 || true
-          sleep 0.2
-          if ! (grep -q "Received MSG_TYPE_AUTH_CHALLENGE_REQUEST" mp2_server.err || grep -q "Received MSG_TYPE_AUTH_CHALLENGE_REQUEST" mp2_server.out); then
-            echo "[error] stub log not observed for valid frame"; cat mp2_server.out mp2_server.err; exit 1
-          fi
-          # Optional: send bad magic and ensure no crash
-          before_lines=$(wc -l < mp2_server.err || echo 0)
-          python3 scripts/smoke_mp2_client.py --host "${SMOKE_HOST}" --port "${SMOKE_PORT}" --type 100 --bad-magic || true
-          sleep 0.2
-          after_lines=$(wc -l < mp2_server.err || echo 0)
-          if [[ -z "${after_lines}" || -z "${before_lines}" ]]; then after_lines=0; before_lines=0; fi
-          if ! ps -p $(cat mp2_server.pid) >/dev/null 2>&1; then
-            echo "[error] server crashed on bad magic"; cat mp2_server.out mp2_server.err; exit 1
-          fi
-          # Teardown
-          kill -TERM $(cat mp2_server.pid) >/dev/null 2>&1 || true
-          sleep 0.2
-          pkill -f log_collector_server >/dev/null 2>&1 || true
+        run: bash scripts/ci/run-smoke-mproto.sh
 
       - name: Upload coverage artifacts
         if: always()

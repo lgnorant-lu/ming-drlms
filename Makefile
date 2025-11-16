@@ -164,6 +164,28 @@ coverage:
 	@echo "--- Generating comprehensive C and Python coverage report using CMake ---"
 	bash scripts/run_coverage.sh
 
+.PHONY: test-python install-python-deps ci-build ci-install-c-components run-ruff coverage-ci run-smoke-mproto
+test-python:
+	bash scripts/ci/run-python-tests.sh
+
+install-python-deps:
+	bash scripts/ci/install-python-deps.sh
+
+ci-build:
+	RUNNER_OS=Linux bash scripts/ci/build-cmake.sh
+
+ci-install-c-components:
+	RUNNER_OS=Linux bash scripts/ci/install-c-components.sh
+
+run-ruff:
+	bash scripts/ci/run-ruff.sh
+
+coverage-ci:
+	bash scripts/ci/run-coverage-suite.sh
+
+run-smoke-mproto:
+	bash scripts/ci/run-smoke-mproto.sh
+
 # ------------------------------------------------------------
 # GUI PoC helpers
 # ------------------------------------------------------------
