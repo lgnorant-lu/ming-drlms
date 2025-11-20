@@ -50,32 +50,54 @@ static void mp2_room_members_send_response(
     resp.room_name = (char *)room_name;
     resp.total = member_count;
 
-    // Allocate member array
-    Mingdrlms__V2__RoomMember *members =
-        malloc(sizeof(Mingdrlms__V2__RoomMember) * member_count);
-    if (!members) {
-        mp2_protocol_send_frame(
-            fd, MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ERROR_RESPONSE,
-            (unsigned char *)"Memory allocation failed", 23);
-        return;
+    Mingdrlms__V2__RoomMember *member_objs = NULL;
+    Mingdrlms__V2__RoomMember **member_ptrs = NULL;
+
+    if (member_count > 0) {
+        member_objs = (Mingdrlms__V2__RoomMember *)calloc(member_count,
+                                                          sizeof(*member_objs));
+        if (!member_objs) {
+            mp2_protocol_send_frame(
+                fd, MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ERROR_RESPONSE,
+                (unsigned char *)"Memory allocation failed", 23);
+            return;
+        }
+
+        member_ptrs = (Mingdrlms__V2__RoomMember **)calloc(
+            member_count, sizeof(*member_ptrs));
+        if (!member_ptrs) {
+            free(member_objs);
+            mp2_protocol_send_frame(
+                fd, MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ERROR_RESPONSE,
+                (unsigned char *)"Memory allocation failed", 23);
+            return;
+        }
+
+        fprintf(stderr, "[DEBUG] Allocated %zu member objects\n", member_count);
+
+        // Initialize each member and build pointer array
+        for (size_t i = 0; i < member_count; i++) {
+            mingdrlms__v2__room_member__init(&member_objs[i]);
+            member_objs[i].user_id = (char *)user_ids[i];
+            member_objs[i].device_id = device_ids[i];
+            member_objs[i].timestamp = (char *)timestamps[i];
+            member_ptrs[i] = &member_objs[i];
+            fprintf(stderr, "[DEBUG] Member %zu: user=%s, device=%u, ts=%s\n",
+                    i, member_objs[i].user_id, member_objs[i].device_id,
+                    member_objs[i].timestamp);
+        }
     }
 
-    // Initialize each member
-    for (size_t i = 0; i < member_count; i++) {
-        mingdrlms__v2__room_member__init(&members[i]);
-        members[i].user_id = (char *)user_ids[i];
-        members[i].device_id = device_ids[i];
-        members[i].timestamp = (char *)timestamps[i];
-    }
-
-    resp.members = members;
+    resp.members = member_ptrs;
     resp.n_members = member_count;
 
+    fprintf(stderr, "[DEBUG] Packing response\n");
     size_t resp_sz =
         mingdrlms__v2__room_member_list_response__get_packed_size(&resp);
     unsigned char *resp_buf = (unsigned char *)malloc(resp_sz);
     if (!resp_buf) {
-        free(members);
+        free(member_ptrs);
+        free(member_objs);
         mp2_protocol_send_frame(
             fd, MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ERROR_RESPONSE,
             (unsigned char *)"Memory allocation failed", 23);
@@ -83,13 +105,15 @@ static void mp2_room_members_send_response(
     }
 
     mingdrlms__v2__room_member_list_response__pack(&resp, resp_buf);
+    fprintf(stderr, "[DEBUG] Packed response size=%zu\n", resp_sz);
 
     mp2_protocol_send_frame(
         fd, MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ROOM_MEMBER_LIST_RESPONSE,
         resp_buf, (uint32_t)resp_sz);
 
     free(resp_buf);
-    free(members);
+    free(member_ptrs);
+    free(member_objs);
 #else
     // Fallback for when protobuf-c is not available
     const char *fallback_msg =
@@ -268,8 +292,11 @@ void mp2_room_members_handle_list_request(platform_socket_t fd,
         snapshots = NULL;
     }
 
+    fprintf(stderr, "[DEBUG] Sending response for room %s with %zu members\n",
+            req->room_name, snapshot_len);
     mp2_room_members_send_response(fd, 200, "Success", req->room_name, user_ids,
                                    device_ids, timestamps, snapshot_len);
+    fprintf(stderr, "[DEBUG] Response sent\n");
 
 cleanup:
     if (user_ids) {

@@ -1,7 +1,11 @@
 #include "mp2_e2ee.h"
 
 #include "e2ee_signal.h"
+#include "mp2_auth.h"
 #include "mp2_protocol.h"
+#include "rooms.h"
+#include "rooms_internal.h"
+#include "rooms_instance.h"
 #include "rooms_sqlite_bridge.h"
 #include "sqlite_e2ee.h"
 
@@ -172,6 +176,113 @@ static void send_prekey_bundle_response(platform_socket_t fd, int code,
         fd, MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_E2EE_PREKEY_BUNDLE_RESPONSE,
         buf, (uint32_t)packed);
     free(buf);
+}
+
+static void send_sender_key_push_response(platform_socket_t fd, int code,
+                                          const char *message) {
+    Mingdrlms__V2__E2EESenderKeyPushResponse resp =
+        MINGDRLMS__V2__E2_EESENDER_KEY_PUSH_RESPONSE__INIT;
+    resp.code = code;
+    resp.message = (char *)(message ? message : "");
+    size_t packed =
+        mingdrlms__v2__e2_eesender_key_push_response__get_packed_size(&resp);
+    unsigned char *buf = (unsigned char *)malloc(packed);
+    if (!buf) {
+        return;
+    }
+    mingdrlms__v2__e2_eesender_key_push_response__pack(&resp, buf);
+    (void)mp2_protocol_send_frame(
+        fd, MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_E2EE_SENDER_KEY_PUSH, buf,
+        (uint32_t)packed);
+    free(buf);
+}
+
+static int deliver_sender_key_distribution(
+    const Mingdrlms__V2__SignalSenderKeyDistribution *distribution,
+    const char *target_user) {
+    if (!distribution || !distribution->room_name ||
+        !*distribution->room_name || !target_user || !*target_user) {
+        return -1;
+    }
+    size_t packed =
+        mingdrlms__v2__signal_sender_key_distribution__get_packed_size(
+            distribution);
+    unsigned char *buf = (unsigned char *)malloc(packed);
+    if (!buf) {
+        return -1;
+    }
+    mingdrlms__v2__signal_sender_key_distribution__pack(distribution, buf);
+
+    Room *room = rooms_get_or_create(distribution->room_name, NULL);
+    if (!room) {
+        free(buf);
+        return -1;
+    }
+
+    int delivered = 0;
+    platform_mutex_lock(&room->mu);
+    for (RoomInstance *inst = room->instances; inst; inst = inst->next) {
+        platform_mutex_lock(&inst->mu);
+        for (size_t i = 0; i < inst->subs_len; ++i) {
+            Subscriber *sub = &inst->subs[i];
+            if (sub->fd == PLATFORM_INVALID_SOCKET || sub->user[0] == '\0') {
+                continue;
+            }
+            if (!mp2_protocol_is_fd_mp2(sub->fd)) {
+                continue;
+            }
+            if (strcmp(sub->user, target_user) != 0) {
+                continue;
+            }
+            (void)mp2_protocol_send_frame(
+                sub->fd,
+                MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_E2EE_SENDER_KEY_PUSH, buf,
+                (uint32_t)packed);
+            delivered = 1;
+        }
+        platform_mutex_unlock(&inst->mu);
+    }
+    platform_mutex_unlock(&room->mu);
+    free(buf);
+    return delivered ? 0 : -1;
+}
+
+int mp2_e2ee_flush_pending_sender_keys(const char *room_name,
+                                       const char *user_name) {
+    if (!rooms_is_sqlite_enabled() || !user_name || !*user_name) {
+        return 0;
+    }
+    SQLiteStorage *storage = rooms_get_sqlite_storage();
+    SQLiteE2EESenderKey *rows = NULL;
+    size_t count = 0;
+    if (sqlite_e2ee_list_sender_keys_for_target(storage, user_name, &rows,
+                                                &count) != 0) {
+        return -1;
+    }
+    for (size_t i = 0; i < count; ++i) {
+        SQLiteE2EESenderKey *row = &rows[i];
+        if (room_name && *room_name && strcmp(room_name, row->room_name) != 0) {
+            continue;
+        }
+        Mingdrlms__V2__SignalSenderKeyDistribution dist =
+            MINGDRLMS__V2__SIGNAL_SENDER_KEY_DISTRIBUTION__INIT;
+        dist.room_name = row->room_name;
+        dist.group_id = row->group_id;
+        dist.sender = row->sender_user;
+        dist.sender_device_id = row->sender_device_id;
+        dist.sender_registration_id = row->sender_registration_id;
+        dist.sender_key_id = row->sender_key_id;
+        dist.sender_key_iteration = row->sender_key_iteration;
+        dist.distribution_message.data = row->distribution;
+        dist.distribution_message.len = row->distribution_len;
+        if (deliver_sender_key_distribution(&dist, user_name) == 0) {
+            sqlite_e2ee_delete_sender_key(storage, row->room_name,
+                                          row->group_id, row->sender_user,
+                                          row->target_user);
+        }
+    }
+    sqlite_e2ee_free_sender_key_rows(rows, count);
+    return 0;
 }
 
 static int identity_exists(SQLiteStorage *storage, const char *user_name,
@@ -492,5 +603,82 @@ int mp2_e2ee_handle_prekey_bundle(platform_socket_t fd, const uint8_t *payload,
     send_prekey_bundle_response(fd, 0, "ok", &bundle);
     sqlite_e2ee_free_prekey_bundle(&bundle);
     mingdrlms__v2__e2_eepre_key_bundle_request__free_unpacked(req, NULL);
+    return 0;
+}
+
+int mp2_e2ee_handle_sender_key_push(platform_socket_t fd,
+                                    const uint8_t *payload, size_t len) {
+    if (!rooms_is_sqlite_enabled()) {
+        send_sender_key_push_response(fd, 503, "sqlite disabled");
+        return -1;
+    }
+
+    Mingdrlms__V2__E2EESenderKeyPushRequest *req =
+        mingdrlms__v2__e2_eesender_key_push_request__unpack(NULL, len, payload);
+    if (!req || !req->access_token || !req->target_user || !*req->target_user ||
+        !req->distribution || !req->distribution->room_name ||
+        !*req->distribution->room_name || !req->distribution->group_id ||
+        !*req->distribution->group_id || !req->distribution->sender ||
+        !*req->distribution->sender ||
+        !req->distribution->distribution_message.data ||
+        req->distribution->distribution_message.len == 0) {
+        if (req) {
+            mingdrlms__v2__e2_eesender_key_push_request__free_unpacked(req,
+                                                                       NULL);
+        }
+        send_sender_key_push_response(fd, 400, "malformed request");
+        return -1;
+    }
+
+    char sender_user[64] = {0};
+    unsigned long long exp = 0;
+    const char *secret = mp2_auth_get_secret_or_default();
+    int verify_rc = mp2_auth_verify_access_token(
+        req->access_token, secret, sender_user, sizeof(sender_user), &exp);
+    if (verify_rc != 0) {
+        send_sender_key_push_response(fd, (verify_rc == -2) ? 401 : 400,
+                                      (verify_rc == -2) ? "token expired"
+                                                        : "invalid token");
+        mingdrlms__v2__e2_eesender_key_push_request__free_unpacked(req, NULL);
+        return -1;
+    }
+
+    if (strcmp(sender_user, req->distribution->sender) != 0) {
+        send_sender_key_push_response(fd, 403, "sender mismatch");
+        mingdrlms__v2__e2_eesender_key_push_request__free_unpacked(req, NULL);
+        return -1;
+    }
+
+    SQLiteStorage *storage = rooms_get_sqlite_storage();
+    if (sqlite_e2ee_track_room_member(storage, req->distribution->room_name,
+                                      sender_user,
+                                      req->distribution->group_id) != 0 ||
+        sqlite_e2ee_track_room_member(storage, req->distribution->room_name,
+                                      req->target_user,
+                                      req->distribution->group_id) != 0) {
+        send_sender_key_push_response(fd, 500, "member tracking failed");
+        mingdrlms__v2__e2_eesender_key_push_request__free_unpacked(req, NULL);
+        return -1;
+    }
+
+    if (sqlite_e2ee_upsert_sender_key(
+            storage, req->distribution->room_name, req->distribution->group_id,
+            sender_user, req->target_user, req->distribution->sender_device_id,
+            req->distribution->sender_registration_id,
+            req->distribution->sender_key_id,
+            req->distribution->sender_key_iteration,
+            req->distribution->distribution_message.data,
+            req->distribution->distribution_message.len) != 0) {
+        send_sender_key_push_response(fd, 500, "persist failed");
+        mingdrlms__v2__e2_eesender_key_push_request__free_unpacked(req, NULL);
+        return -1;
+    }
+
+    int deliver_rc =
+        deliver_sender_key_distribution(req->distribution, req->target_user);
+    send_sender_key_push_response(fd, 0,
+                                  (deliver_rc == 0) ? "delivered" : "queued");
+
+    mingdrlms__v2__e2_eesender_key_push_request__free_unpacked(req, NULL);
     return 0;
 }

@@ -16,7 +16,9 @@ _DLL_DIR_HANDLES: list[object] = []
 
 _CDEF = """
         typedef struct signal_context signal_context;
+        typedef struct signal_protocol_store_context signal_protocol_store_context;
         typedef struct signal_buffer signal_buffer;
+        typedef struct ciphertext_message ciphertext_message;
         typedef struct signal_type_base signal_type_base;
         typedef struct ec_key_pair ec_key_pair;
         typedef struct ec_public_key ec_public_key;
@@ -37,6 +39,26 @@ _CDEF = """
             uint32_t signed_pre_key_id;
             int has_signed_pre_key_id;
         } drlms_ciphertext;
+        typedef struct drlms_group_ciphertext {
+            uint8_t *data;
+            size_t len;
+            uint32_t key_id;
+            uint32_t iteration;
+        } drlms_group_ciphertext;
+        typedef struct sender_key_message sender_key_message;
+        typedef struct sender_key_distribution_message sender_key_distribution_message;
+        typedef struct signal_protocol_address {
+            const char *name;
+            size_t name_len;
+            int32_t device_id;
+        } signal_protocol_address;
+        typedef struct signal_protocol_sender_key_name {
+            const char *group_id;
+            size_t group_id_len;
+            signal_protocol_address sender;
+        } signal_protocol_sender_key_name;
+        typedef struct group_session_builder group_session_builder;
+        typedef struct group_cipher group_cipher;
 
         int signal_context_create(signal_context **context, void *user_data);
         void signal_context_destroy(signal_context *context);
@@ -191,6 +213,77 @@ _CDEF = """
 
         void signal_buffer_free(signal_buffer *buffer);
         void free(void *ptr);
+
+        int group_session_builder_create(group_session_builder **builder,
+            signal_protocol_store_context *store, signal_context *global_context);
+        int group_session_builder_process_session(group_session_builder *builder,
+            const signal_protocol_sender_key_name *sender_key_name,
+            sender_key_distribution_message *distribution_message);
+        int group_session_builder_create_session(group_session_builder *builder,
+            sender_key_distribution_message **distribution_message,
+            const signal_protocol_sender_key_name *sender_key_name);
+        void group_session_builder_free(group_session_builder *builder);
+
+        int group_cipher_create(group_cipher **cipher,
+            signal_protocol_store_context *store, const signal_protocol_sender_key_name *sender_key_id,
+            signal_context *global_context);
+        int group_cipher_encrypt(group_cipher *cipher,
+            const uint8_t *padded_plaintext, size_t padded_plaintext_len,
+            ciphertext_message **encrypted_message);
+        int group_cipher_decrypt(group_cipher *cipher,
+            sender_key_message *ciphertext, void *decrypt_context,
+            signal_buffer **plaintext);
+        void group_cipher_free(group_cipher *cipher);
+
+        int sender_key_message_create(sender_key_message **message,
+            uint32_t key_id, uint32_t iteration,
+            const uint8_t *ciphertext, size_t ciphertext_len,
+            ec_private_key *signature_key,
+            signal_context *global_context);
+        int sender_key_message_deserialize(sender_key_message **message,
+            const uint8_t *data, size_t len,
+            signal_context *global_context);
+        uint32_t sender_key_message_get_key_id(sender_key_message *message);
+        uint32_t sender_key_message_get_iteration(sender_key_message *message);
+        signal_buffer *sender_key_message_get_ciphertext(sender_key_message *message);
+        int sender_key_message_verify_signature(sender_key_message *message, ec_public_key *signature_key);
+        void sender_key_message_destroy(signal_type_base *type);
+
+        int sender_key_distribution_message_create(sender_key_distribution_message **message,
+            uint32_t id, uint32_t iteration,
+            const uint8_t *chain_key, size_t chain_key_len,
+            ec_public_key *signature_key,
+            signal_context *global_context);
+        int sender_key_distribution_message_deserialize(sender_key_distribution_message **message,
+            const uint8_t *data, size_t len,
+            signal_context *global_context);
+        int drlms_sender_key_distribution_message_deserialize_manual(
+            sender_key_distribution_message **message,
+            const uint8_t *data, size_t len,
+            signal_context *global_context);
+        signal_buffer *drlms_sender_key_distribution_message_get_serialized(sender_key_distribution_message *message);
+        int drlms_test_unpack(const uint8_t *data, size_t len);
+        uint32_t sender_key_distribution_message_get_id(sender_key_distribution_message *message);
+        uint32_t sender_key_distribution_message_get_iteration(sender_key_distribution_message *message);
+        signal_buffer *sender_key_distribution_message_get_chain_key(sender_key_distribution_message *message);
+        ec_public_key *sender_key_distribution_message_get_signature_key(sender_key_distribution_message *message);
+        void sender_key_distribution_message_destroy(signal_type_base *type);
+
+        int drlms_group_session_builder_create(group_session_builder **builder,
+            drlms_signal_store *store);
+        int drlms_group_cipher_create(group_cipher **cipher,
+            drlms_signal_store *store,
+            const signal_protocol_sender_key_name *sender_key_name);
+        int drlms_group_encrypt(drlms_signal_store *store,
+            const signal_protocol_sender_key_name *sender_key_name,
+            const uint8_t *plaintext, size_t plaintext_len,
+            drlms_group_ciphertext *out);
+        int drlms_group_decrypt(drlms_signal_store *store,
+            const signal_protocol_sender_key_name *sender_key_name,
+            const uint8_t *ciphertext, size_t ciphertext_len,
+            signal_buffer **plaintext_out,
+            uint32_t *key_id_out,
+            uint32_t *iteration_out);
 
         ec_public_key *ratchet_identity_key_pair_get_public(
             const ratchet_identity_key_pair *key_pair);

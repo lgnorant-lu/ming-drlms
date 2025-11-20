@@ -37,6 +37,8 @@ message SignalEncryptedPayload {
   uint32 sender_registration_id = 5;
   uint32 pre_key_id = 6;
   uint32 signed_pre_key_id = 7;
+  string group_id = 8;
+  uint32 sender_key_iteration = 9;
 }
 
 // Shared structs ----------------------------------------------------------

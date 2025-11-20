@@ -3,6 +3,7 @@
 #include "mp2_protocol.h"
 #include "mp2_auth.h"
 #include "mp2_rooms_history.h"
+#include "mp2_e2ee.h"
 #include "federation.h"
 #include "rooms.h"
 #include "rooms_internal.h"
@@ -101,6 +102,8 @@ static int mp2_rooms_perform_subscribe(platform_socket_t client_fd,
 
     mp2_protocol_dbgf(
         "client subscribed successfully, ready to receive events");
+
+    (void)mp2_e2ee_flush_pending_sender_keys(room_name, username);
     return 0;
 }
 

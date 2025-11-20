@@ -52,3 +52,25 @@ message SignalSignedPreKey {
   bytes signature = 3;
   uint64 timestamp = 4;
 }
+
+message SignalSenderKeyDistribution {
+  string room_name = 1;
+  string group_id = 2;
+  string sender = 3;
+  uint32 sender_device_id = 4;
+  uint32 sender_registration_id = 5;
+  bytes distribution_message = 6;
+  uint32 sender_key_id = 7;
+  uint32 sender_key_iteration = 8;
+}
+
+message E2EESenderKeyPushRequest {
+  string access_token = 1;
+  string target_user = 2;
+  SignalSenderKeyDistribution distribution = 3;
+}
+
+message E2EESenderKeyPushResponse {
+  int32 code = 1;
+  string message = 2;
+}

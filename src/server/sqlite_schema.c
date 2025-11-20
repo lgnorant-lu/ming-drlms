@@ -170,6 +170,27 @@ int sqlite_storage_init(SQLiteStorage *storage, const char *db_path) {
         "  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
         "  PRIMARY KEY (user_name, device_id, pre_key_id)"
         ");"
+        "CREATE TABLE IF NOT EXISTS e2ee_room_members ("
+        "  room_name TEXT NOT NULL,"
+        "  user_name TEXT NOT NULL,"
+        "  group_id TEXT NOT NULL,"
+        "  joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
+        "  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
+        "  PRIMARY KEY (room_name, user_name, group_id)"
+        ");"
+        "CREATE TABLE IF NOT EXISTS e2ee_sender_keys ("
+        "  room_name TEXT NOT NULL,"
+        "  group_id TEXT NOT NULL,"
+        "  sender_user TEXT NOT NULL,"
+        "  target_user TEXT NOT NULL,"
+        "  sender_device_id INTEGER NOT NULL,"
+        "  sender_registration_id INTEGER NOT NULL,"
+        "  sender_key_id INTEGER NOT NULL,"
+        "  sender_key_iteration INTEGER NOT NULL,"
+        "  distribution BLOB NOT NULL,"
+        "  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
+        "  PRIMARY KEY (room_name, group_id, sender_user, target_user)"
+        ");"
         "CREATE INDEX IF NOT EXISTS idx_events_room_time ON events(room_name, "
         "timestamp);"
         "CREATE INDEX IF NOT EXISTS idx_events_room_id ON events(room_name, "
@@ -183,7 +204,9 @@ int sqlite_storage_init(SQLiteStorage *storage, const char *db_path) {
         "CREATE INDEX IF NOT EXISTS idx_room_instances_state ON "
         "room_instances(state);"
         "CREATE INDEX IF NOT EXISTS idx_e2ee_pre_keys_active ON "
-        "e2ee_pre_keys(user_name, device_id, is_active, pre_key_id);";
+        "e2ee_pre_keys(user_name, device_id, is_active, pre_key_id);"
+        "CREATE INDEX IF NOT EXISTS idx_e2ee_sender_keys_target ON "
+        "e2ee_sender_keys(target_user, room_name);";
 
     char *err_msg = NULL;
     rc = sqlite3_exec(storage->db, sql, NULL, NULL, &err_msg);

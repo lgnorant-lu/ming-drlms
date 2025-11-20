@@ -13,6 +13,7 @@ from .mproto_v2_client import SignalKeyPair, SignalPreKey, SignalSignedPreKey
 __all__ = [
     "LocalKeyState",
     "LocalKeyStore",
+    "SenderKeyRecord",
 ]
 
 
@@ -66,6 +67,80 @@ def _decode_key_pair(payload: Mapping[str, str] | None) -> SignalKeyPair | None:
     return SignalKeyPair(public_key=public_key, private_key=private_key)
 
 
+def _encode_sender_key_record(record: SenderKeyRecord) -> Mapping[str, object]:
+    return {
+        "room_name": record.room_name,
+        "group_id": record.group_id,
+        "sender": record.sender,
+        "sender_device_id": int(record.sender_device_id),
+        "sender_registration_id": int(record.sender_registration_id),
+        "sender_key_id": int(record.sender_key_id),
+        "sender_key_iteration": int(record.sender_key_iteration),
+        "distribution": record.distribution.hex(),
+    }
+
+
+def _decode_sender_key_record(
+    payload: Mapping[str, object] | None,
+) -> SenderKeyRecord | None:
+    if not payload:
+        return None
+    try:
+        room_name = payload.get("room_name")
+        group_id = payload.get("group_id")
+        sender = payload.get("sender")
+        sender_device_id = payload.get("sender_device_id")
+        sender_registration_id = payload.get("sender_registration_id")
+        sender_key_id = payload.get("sender_key_id")
+        sender_key_iteration = payload.get("sender_key_iteration")
+        distribution_hex = payload.get("distribution")
+    except Exception:
+        return None
+    if (
+        not isinstance(room_name, str)
+        or not isinstance(group_id, str)
+        or not isinstance(sender, str)
+    ):
+        return None
+    try:
+        device_id = int(sender_device_id)
+        registration_id = int(sender_registration_id)
+        key_id = int(sender_key_id)
+        iteration = int(sender_key_iteration)
+    except Exception:
+        return None
+    if not isinstance(distribution_hex, str):
+        return None
+    payload_bytes = _decode_bytes(distribution_hex)
+    if payload_bytes is None:
+        return None
+    return SenderKeyRecord(
+        room_name=room_name,
+        group_id=group_id,
+        sender=sender,
+        sender_device_id=device_id,
+        sender_registration_id=registration_id,
+        sender_key_id=key_id,
+        sender_key_iteration=iteration,
+        distribution=payload_bytes,
+    )
+
+
+@dataclass(slots=True)
+class SenderKeyRecord:
+    room_name: str
+    group_id: str
+    sender: str
+    sender_device_id: int
+    sender_registration_id: int
+    sender_key_id: int
+    sender_key_iteration: int
+    distribution: bytes
+
+    def index(self) -> str:
+        return f"{self.room_name}|{self.group_id}|{self.sender}|{self.sender_device_id}"
+
+
 @dataclass(slots=True)
 class LocalKeyState:
     registration_id: int
@@ -74,6 +149,7 @@ class LocalKeyState:
     signed_pre_key: SignalSignedPreKey | None
     pre_keys: Dict[int, SignalKeyPair]
     remote_identities: Dict[Tuple[str, int], bytes]
+    sender_keys: Dict[str, SenderKeyRecord]
 
 
 class LocalKeyStore:
@@ -153,6 +229,16 @@ class LocalKeyStore:
                 if data is not None:
                     remote_identities[(name, device)] = data
 
+        sender_keys_raw = payload.get("sender_keys")
+        sender_keys: Dict[str, SenderKeyRecord] = {}
+        if isinstance(sender_keys_raw, dict):
+            for key, record in sender_keys_raw.items():
+                if not isinstance(record, dict):
+                    continue
+                entry = _decode_sender_key_record(record)
+                if entry is not None:
+                    sender_keys[key] = entry
+
         return LocalKeyState(
             registration_id=registration_id,
             device_id=device_id,
@@ -160,6 +246,7 @@ class LocalKeyStore:
             signed_pre_key=signed_pre_key,
             pre_keys=pre_keys,
             remote_identities=remote_identities,
+            sender_keys=sender_keys,
         )
 
     # ------------------------------------------------------------------
@@ -271,6 +358,48 @@ class LocalKeyStore:
         if isinstance(encoded, str):
             return _decode_bytes(encoded)
         return None
+
+    def store_sender_key(self, username: str, record: SenderKeyRecord) -> None:
+        payload = self._load_user_payload(username) or {}
+        sender_map = payload.setdefault("sender_keys", {})
+        if not isinstance(sender_map, dict):
+            sender_map = {}
+            payload["sender_keys"] = sender_map
+        sender_map[record.index()] = _encode_sender_key_record(record)
+        self._store_user_payload(username, payload)
+
+    def list_sender_keys(
+        self, username: str, *, room_name: Optional[str] = None
+    ) -> list[SenderKeyRecord]:
+        payload = self._load_user_payload(username)
+        if not payload:
+            return []
+        sender_map = payload.get("sender_keys")
+        if not isinstance(sender_map, dict):
+            return []
+        records: list[SenderKeyRecord] = []
+        for entry in sender_map.values():
+            if not isinstance(entry, dict):
+                continue
+            decoded = _decode_sender_key_record(entry)
+            if decoded is None:
+                continue
+            if room_name and decoded.room_name != room_name:
+                continue
+            records.append(decoded)
+        return records
+
+    def remove_sender_key(self, username: str, record: SenderKeyRecord) -> None:
+        payload = self._load_user_payload(username)
+        if not payload:
+            return
+        sender_map = payload.get("sender_keys")
+        if not isinstance(sender_map, dict):
+            return
+        key = record.index()
+        if key in sender_map:
+            sender_map.pop(key, None)
+            self._store_user_payload(username, payload)
 
     # ------------------------------------------------------------------
     # 内部工具

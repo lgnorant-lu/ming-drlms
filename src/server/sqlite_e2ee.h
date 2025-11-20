@@ -34,6 +34,19 @@ typedef struct {
     SQLiteE2EESignedPreKey signed_pre_key;
 } SQLiteE2EEPreKeyBundle;
 
+typedef struct {
+    char room_name[65];
+    char group_id[65];
+    char sender_user[65];
+    char target_user[65];
+    uint32_t sender_device_id;
+    uint32_t sender_registration_id;
+    uint32_t sender_key_id;
+    uint32_t sender_key_iteration;
+    unsigned char *distribution;
+    size_t distribution_len;
+} SQLiteE2EESenderKey;
+
 int sqlite_e2ee_replace_identity(SQLiteStorage *storage, const char *user_name,
                                  uint32_t device_id,
                                  const unsigned char *identity_public,
@@ -59,5 +72,26 @@ int sqlite_e2ee_get_prekey_bundle(SQLiteStorage *storage, const char *user_name,
                                   SQLiteE2EEPreKeyBundle *out_bundle);
 
 void sqlite_e2ee_free_prekey_bundle(SQLiteE2EEPreKeyBundle *bundle);
+
+int sqlite_e2ee_track_room_member(SQLiteStorage *storage, const char *room_name,
+                                  const char *user_name, const char *group_id);
+
+int sqlite_e2ee_upsert_sender_key(
+    SQLiteStorage *storage, const char *room_name, const char *group_id,
+    const char *sender_user, const char *target_user, uint32_t sender_device_id,
+    uint32_t sender_registration_id, uint32_t sender_key_id,
+    uint32_t sender_key_iteration, const unsigned char *distribution,
+    size_t distribution_len);
+
+int sqlite_e2ee_list_sender_keys_for_target(SQLiteStorage *storage,
+                                            const char *target_user,
+                                            SQLiteE2EESenderKey **out_rows,
+                                            size_t *out_count);
+
+int sqlite_e2ee_delete_sender_key(SQLiteStorage *storage, const char *room_name,
+                                  const char *group_id, const char *sender_user,
+                                  const char *target_user);
+
+void sqlite_e2ee_free_sender_key_rows(SQLiteE2EESenderKey *rows, size_t count);
 
 #endif /* SQLITE_E2EE_H */

@@ -101,9 +101,6 @@ def room_sub(
         help="token 缓存文件路径 (默认 ~/.config/ming-drlms/tokens.json)",
     ),
     timeout: float = typer.Option(10.0, "--timeout", help="socket 超时时间"),
-    e2ee_peer: Optional[str] = typer.Option(
-        None, "--peer", help="启用端到端加密时的对端用户名"
-    ),
     e2ee_store: Optional[Path] = typer.Option(
         None,
         "--key-store",
@@ -119,7 +116,6 @@ def room_sub(
     json_out = _option_value(json_out, "json_out")
     token_store = _option_value(token_store, "token_store")
     timeout = _option_value(timeout, "timeout")
-    e2ee_peer = _option_value(e2ee_peer, "e2ee_peer")
     e2ee_store = _option_value(e2ee_store, "e2ee_store")
     count = 0
 
@@ -150,7 +146,6 @@ def room_sub(
             since_id=since_id,
             token_store=token_store,
             timeout=timeout,
-            e2ee_peer=e2ee_peer,
             e2ee_store=e2ee_store,
         ):
             _print_room_event(event, json_out=json_out)
@@ -185,9 +180,6 @@ def room_pub(
         help="token 缓存文件路径 (默认 ~/.config/ming-drlms/tokens.json)",
     ),
     timeout: float = typer.Option(10.0, "--timeout", help="socket 超时时间"),
-    e2ee_peer: Optional[str] = typer.Option(
-        None, "--peer", help="启用端到端加密时的对端用户名"
-    ),
     e2ee_store: Optional[Path] = typer.Option(
         None,
         "--key-store",
@@ -204,7 +196,6 @@ def room_pub(
     user = _option_value(user, "user")
     token_store = _option_value(token_store, "token_store")
     timeout = _option_value(timeout, "timeout")
-    e2ee_peer = _option_value(e2ee_peer, "e2ee_peer")
     e2ee_store = _option_value(e2ee_store, "e2ee_store")
     sources = [text is not None, file is not None, stdin]
     if sum(1 for src in sources if src) != 1:
@@ -232,7 +223,6 @@ def room_pub(
             ephemeral=ephemeral,
             token_store=token_store,
             timeout=timeout,
-            e2ee_peer=e2ee_peer,
             e2ee_store=e2ee_store,
         )
     except RoomServiceError as exc:

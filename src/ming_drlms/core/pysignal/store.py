@@ -11,7 +11,7 @@ from .types import Ciphertext, DecryptResult
 class SignalStore:
     """封装 Signal 协议状态存储接口。"""
 
-    __slots__ = ("_ffi", "_lib", "_handle", "_closed")
+    __slots__ = ("_ffi", "_lib", "_handle", "_closed", "_context")
 
     def __init__(self, context: SignalContext) -> None:
         ffi, lib = context._ffi, context._lib
@@ -22,6 +22,15 @@ class SignalStore:
         self._lib = lib
         self._handle = handle
         self._closed = False
+        self._context = context
+
+    @property
+    def handle(self):
+        return self._handle
+
+    @property
+    def context_handle(self):
+        return self._context.handle
 
     def close(self) -> None:
         if not self._closed and self._handle not in (None, self._ffi.NULL):

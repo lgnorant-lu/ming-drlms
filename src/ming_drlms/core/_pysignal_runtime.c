@@ -20,6 +20,8 @@
 #include <signal/key_helper.h>
 #include <signal/curve.h>
 #include <signal/protocol.h>
+#include <signal/group_session_builder.h>
+#include <signal/group_cipher.h>
 
 typedef struct key_value_node {
     char *key;
@@ -33,7 +35,8 @@ typedef struct {
 } key_value_store;
 
 static key_value_store *kv_store_create(void) {
-    key_value_store *store = (key_value_store *)calloc(1, sizeof(key_value_store));
+    key_value_store *store =
+        (key_value_store *)calloc(1, sizeof(key_value_store));
     return store;
 }
 
@@ -139,10 +142,12 @@ typedef struct drlms_signal_store {
     signal_protocol_pre_key_store pre_key_store_iface;
     signal_protocol_signed_pre_key_store signed_pre_key_store_iface;
     signal_protocol_identity_key_store identity_store_iface;
+    signal_protocol_sender_key_store sender_key_store_iface;
     key_value_store *sessions;
     key_value_store *pre_keys;
     key_value_store *signed_pre_keys;
     key_value_store *remote_identities;
+    key_value_store *sender_keys;
     uint8_t *identity_public;
     size_t identity_public_len;
     uint8_t *identity_private;
@@ -161,6 +166,13 @@ typedef struct drlms_ciphertext {
     uint32_t signed_pre_key_id;
     int has_signed_pre_key_id;
 } drlms_ciphertext;
+
+typedef struct drlms_group_ciphertext {
+    uint8_t *data;
+    size_t len;
+    uint32_t key_id;
+    uint32_t iteration;
+} drlms_group_ciphertext;
 
 static void drlms_store_clear_identity(drlms_signal_store *store) {
     if (!store) {
@@ -187,6 +199,7 @@ static void drlms_signal_store_destroy(drlms_signal_store *store) {
     kv_store_free(store->pre_keys);
     kv_store_free(store->signed_pre_keys);
     kv_store_free(store->remote_identities);
+    kv_store_free(store->sender_keys);
     drlms_store_clear_identity(store);
     free(store);
 }
@@ -297,9 +310,8 @@ static int session_load(signal_buffer **record, signal_buffer **user_record,
     return 1;
 }
 
-static int session_get_sub_devices(signal_int_list **sessions,
-                                   const char *name, size_t name_len,
-                                   void *user_data) {
+static int session_get_sub_devices(signal_int_list **sessions, const char *name,
+                                   size_t name_len, void *user_data) {
     drlms_signal_store *store = (drlms_signal_store *)user_data;
     signal_int_list *list;
     key_value_node *node;
@@ -316,7 +328,8 @@ static int session_get_sub_devices(signal_int_list **sessions,
         const char *hash = strrchr(node->key, '#');
         if (hash) {
             size_t stored_len = (size_t)(hash - node->key);
-            if (stored_len == name_len && memcmp(node->key, name, name_len) == 0) {
+            if (stored_len == name_len &&
+                memcmp(node->key, name, name_len) == 0) {
                 int device_id = atoi(hash + 1);
                 signal_int_list_push_back(list, device_id);
                 ++count;
@@ -417,6 +430,39 @@ static void session_destroy(void *user_data) {
     (void)user_data;
 }
 
+static char *dup_sender_key_name(const signal_protocol_sender_key_name *name) {
+    if (!name || !name->group_id || !name->sender.name) {
+        return NULL;
+    }
+    size_t group_len = name->group_id_len;
+    size_t sender_len = name->sender.name_len;
+    size_t total = group_len + sender_len + 64;
+    char *buf = (char *)malloc(total);
+    if (!buf) {
+        return NULL;
+    }
+    char *ptr = buf;
+    if (group_len > 0) {
+        memcpy(ptr, name->group_id, group_len);
+        ptr += group_len;
+    }
+    *ptr++ = '#';
+    if (sender_len > 0) {
+        memcpy(ptr, name->sender.name, sender_len);
+        ptr += sender_len;
+    }
+    *ptr++ = '#';
+    int written =
+        snprintf(ptr, total - (ptr - buf), "%d", name->sender.device_id);
+    if (written < 0) {
+        free(buf);
+        return NULL;
+    }
+    ptr += written;
+    *ptr = '\0';
+    return buf;
+}
+
 static char *dup_pre_key(uint32_t id) {
     char buf[32];
     snprintf(buf, sizeof(buf), "pre#%u", id);
@@ -447,8 +493,8 @@ static int pre_key_load(signal_buffer **record, uint32_t pre_key_id,
     return SG_SUCCESS;
 }
 
-static int pre_key_store(uint32_t pre_key_id, uint8_t *record, size_t record_len,
-                         void *user_data) {
+static int pre_key_store(uint32_t pre_key_id, uint8_t *record,
+                         size_t record_len, void *user_data) {
     drlms_signal_store *store = (drlms_signal_store *)user_data;
     char *key = dup_pre_key(pre_key_id);
     int rc;
@@ -559,6 +605,58 @@ static void signed_pre_key_destroy(void *user_data) {
     (void)user_data;
 }
 
+static int
+sender_key_store_load(signal_buffer **record, signal_buffer **user_record,
+                      const signal_protocol_sender_key_name *sender_key_name,
+                      void *user_data) {
+    (void)user_record;
+    drlms_signal_store *store = (drlms_signal_store *)user_data;
+    char *key;
+    key_value_node *node;
+    if (!store || !record || !sender_key_name) {
+        return SG_ERR_INVAL;
+    }
+    key = dup_sender_key_name(sender_key_name);
+    if (!key) {
+        return SG_ERR_NOMEM;
+    }
+    node = kv_store_find(store->sender_keys, key);
+    free(key);
+    if (!node || !node->value) {
+        return 0;
+    }
+    *record = signal_buffer_create(node->value, node->value_len);
+    if (!*record) {
+        return SG_ERR_NOMEM;
+    }
+    return 1;
+}
+
+static int
+sender_key_store_store(const signal_protocol_sender_key_name *sender_key_name,
+                       uint8_t *record, size_t record_len, uint8_t *user_record,
+                       size_t user_record_len, void *user_data) {
+    (void)user_record;
+    (void)user_record_len;
+    drlms_signal_store *store = (drlms_signal_store *)user_data;
+    char *key;
+    int rc;
+    if (!store || !sender_key_name || !record || record_len == 0) {
+        return SG_ERR_INVAL;
+    }
+    key = dup_sender_key_name(sender_key_name);
+    if (!key) {
+        return SG_ERR_NOMEM;
+    }
+    rc = kv_store_put(store->sender_keys, key, record, record_len);
+    free(key);
+    return rc;
+}
+
+static void sender_key_store_destroy(void *user_data) {
+    (void)user_data;
+}
+
 typedef struct {
     HMAC_CTX *ctx;
 } HmacSha256Ctx;
@@ -602,7 +700,8 @@ static int hmac_sha256_update(void *hmac_context, const uint8_t *data,
     if (!hmac_context) {
         return SG_ERR_INVAL;
     }
-    if (HMAC_Update(((HmacSha256Ctx *)hmac_context)->ctx, data, data_len) != 1) {
+    if (HMAC_Update(((HmacSha256Ctx *)hmac_context)->ctx, data, data_len) !=
+        1) {
         return SG_ERR_UNKNOWN;
     }
     return SG_SUCCESS;
@@ -616,7 +715,8 @@ static int hmac_sha256_final(void *hmac_context, signal_buffer **output,
     }
     unsigned char digest[32];
     unsigned int out_len = 0;
-    if (HMAC_Final(((HmacSha256Ctx *)hmac_context)->ctx, digest, &out_len) != 1 ||
+    if (HMAC_Final(((HmacSha256Ctx *)hmac_context)->ctx, digest, &out_len) !=
+            1 ||
         out_len != 32) {
         return SG_ERR_UNKNOWN;
     }
@@ -662,7 +762,8 @@ static int sha512_update(void *digest_context, const uint8_t *data,
     if (!digest_context) {
         return SG_ERR_INVAL;
     }
-    if (EVP_DigestUpdate(((Sha512Ctx *)digest_context)->ctx, data, data_len) != 1) {
+    if (EVP_DigestUpdate(((Sha512Ctx *)digest_context)->ctx, data, data_len) !=
+        1) {
         return SG_ERR_UNKNOWN;
     }
     return SG_SUCCESS;
@@ -676,7 +777,8 @@ static int sha512_final(void *digest_context, signal_buffer **output,
     if (!digest_context || !output) {
         return SG_ERR_INVAL;
     }
-    if (EVP_DigestFinal_ex(((Sha512Ctx *)digest_context)->ctx, digest, &out_len) != 1 ||
+    if (EVP_DigestFinal_ex(((Sha512Ctx *)digest_context)->ctx, digest,
+                           &out_len) != 1 ||
         out_len != sizeof(digest)) {
         return SG_ERR_UNKNOWN;
     }
@@ -863,11 +965,20 @@ static int drlms_signal_store_attach(drlms_signal_store *store) {
     identity_store->destroy_func = NULL;
     identity_store->user_data = store;
 
+    signal_protocol_sender_key_store *sender_store =
+        &store->sender_key_store_iface;
+    memset(sender_store, 0, sizeof(*sender_store));
+    sender_store->store_sender_key = sender_key_store_store;
+    sender_store->load_sender_key = sender_key_store_load;
+    sender_store->destroy_func = sender_key_store_destroy;
+    sender_store->user_data = store;
+
     rc = signal_protocol_store_context_set_session_store(store->store, session);
     if (rc != SG_SUCCESS) {
         return rc;
     }
-    rc = signal_protocol_store_context_set_pre_key_store(store->store, pre_store);
+    rc = signal_protocol_store_context_set_pre_key_store(store->store,
+                                                         pre_store);
     if (rc != SG_SUCCESS) {
         return rc;
     }
@@ -878,6 +989,11 @@ static int drlms_signal_store_attach(drlms_signal_store *store) {
     }
     rc = signal_protocol_store_context_set_identity_key_store(store->store,
                                                               identity_store);
+    if (rc != SG_SUCCESS) {
+        return rc;
+    }
+    rc = signal_protocol_store_context_set_sender_key_store(store->store,
+                                                            sender_store);
     return rc;
 }
 
@@ -895,13 +1011,15 @@ drlms_signal_store *drlms_signal_store_new(signal_context *ctx) {
     store->pre_keys = kv_store_create();
     store->signed_pre_keys = kv_store_create();
     store->remote_identities = kv_store_create();
+    store->sender_keys = kv_store_create();
     if (!store->sessions || !store->pre_keys || !store->signed_pre_keys ||
-        !store->remote_identities) {
+        !store->remote_identities || !store->sender_keys) {
         drlms_signal_store_destroy(store);
         return NULL;
     }
 
-    if (signal_protocol_store_context_create(&store->store, ctx) != SG_SUCCESS) {
+    if (signal_protocol_store_context_create(&store->store, ctx) !=
+        SG_SUCCESS) {
         drlms_signal_store_destroy(store);
         return NULL;
     }
@@ -918,14 +1036,12 @@ void drlms_signal_store_free(drlms_signal_store *store) {
     drlms_signal_store_destroy(store);
 }
 
-int drlms_signal_store_set_identity(drlms_signal_store *store,
-                                    const uint8_t *public_key,
-                                    size_t public_len,
-                                    const uint8_t *private_key,
-                                    size_t private_len,
-                                    uint32_t registration_id,
-                                    int32_t device_id) {
-    if (!store || !public_key || public_len == 0 || !private_key || private_len == 0) {
+int drlms_signal_store_set_identity(
+    drlms_signal_store *store, const uint8_t *public_key, size_t public_len,
+    const uint8_t *private_key, size_t private_len, uint32_t registration_id,
+    int32_t device_id) {
+    if (!store || !public_key || public_len == 0 || !private_key ||
+        private_len == 0) {
         return SG_ERR_INVAL;
     }
 
@@ -1035,8 +1151,7 @@ int drlms_signal_store_get_session(drlms_signal_store *store, const char *name,
 }
 
 int drlms_signal_store_save_remote_identity(drlms_signal_store *store,
-                                            const char *name,
-                                            int32_t device_id,
+                                            const char *name, int32_t device_id,
                                             const uint8_t *identity,
                                             size_t len) {
     char *key;
@@ -1054,8 +1169,7 @@ int drlms_signal_store_save_remote_identity(drlms_signal_store *store,
 }
 
 int drlms_signal_store_get_remote_identity(drlms_signal_store *store,
-                                           const char *name,
-                                           int32_t device_id,
+                                           const char *name, int32_t device_id,
                                            signal_buffer **identity_out) {
     char *key;
     key_value_node *node;
@@ -1134,7 +1248,8 @@ int drlms_signal_process_prekey_bundle(
     address.name_len = strlen(name);
     address.device_id = device_id;
 
-    rc = drlms_decode_public(store->ctx, identity_key, identity_len, &identity_pub);
+    rc = drlms_decode_public(store->ctx, identity_key, identity_len,
+                             &identity_pub);
     if (rc != SG_SUCCESS) {
         goto cleanup;
     }
@@ -1213,7 +1328,8 @@ static int drlms_ciphertext_from_signal(session_cipher *cipher,
     out->has_pre_key_id = 0;
     out->signed_pre_key_id = 0;
     out->has_signed_pre_key_id = 0;
-    return session_cipher_get_remote_registration_id(cipher, &out->registration_id);
+    return session_cipher_get_remote_registration_id(cipher,
+                                                     &out->registration_id);
 }
 
 int drlms_signal_encrypt(drlms_signal_store *store, const char *name,
@@ -1313,8 +1429,8 @@ int drlms_signal_decrypt(drlms_signal_store *store, const char *name,
                                                 ciphertext_len, store->ctx);
         if (rc == SG_SUCCESS) {
             signal_buffer *plaintext = NULL;
-            rc = session_cipher_decrypt_pre_key_signal_message(cipher, pk_msg,
-                                                               NULL, &plaintext);
+            rc = session_cipher_decrypt_pre_key_signal_message(
+                cipher, pk_msg, NULL, &plaintext);
             if (rc == SG_SUCCESS) {
                 *plaintext_out = plaintext;
                 drlms_ciphertext_from_pre_key(store->ctx, info_out, pk_msg);
@@ -1392,15 +1508,11 @@ cleanup:
     return rc;
 }
 
-int drlms_signal_encode_signed_pre_key(signal_context *ctx, uint32_t id,
-                                       uint64_t timestamp,
-                                       const uint8_t *public_key,
-                                       size_t public_len,
-                                       const uint8_t *private_key,
-                                       size_t private_len,
-                                       const uint8_t *signature,
-                                       size_t signature_len,
-                                       signal_buffer **out) {
+int drlms_signal_encode_signed_pre_key(
+    signal_context *ctx, uint32_t id, uint64_t timestamp,
+    const uint8_t *public_key, size_t public_len, const uint8_t *private_key,
+    size_t private_len, const uint8_t *signature, size_t signature_len,
+    signal_buffer **out) {
     ec_public_key *pub = NULL;
     ec_private_key *priv = NULL;
     ec_key_pair *pair = NULL;
@@ -1444,4 +1556,303 @@ cleanup:
     return rc;
 }
 
+int drlms_group_session_builder_create(group_session_builder **builder,
+                                       drlms_signal_store *store) {
+    if (!builder || !store || !store->store || !store->ctx) {
+        return SG_ERR_INVAL;
+    }
+    return group_session_builder_create(builder, store->store, store->ctx);
+}
 
+int drlms_group_cipher_create(
+    group_cipher **cipher, drlms_signal_store *store,
+    const signal_protocol_sender_key_name *sender_key_name) {
+    if (!cipher || !store || !store->store || !store->ctx || !sender_key_name) {
+        return SG_ERR_INVAL;
+    }
+    return group_cipher_create(cipher, store->store, sender_key_name,
+                               store->ctx);
+}
+
+int drlms_group_encrypt(drlms_signal_store *store,
+                        const signal_protocol_sender_key_name *sender_key_name,
+                        const uint8_t *plaintext, size_t plaintext_len,
+                        drlms_group_ciphertext *out) {
+    group_cipher *cipher = NULL;
+    ciphertext_message *message = NULL;
+    signal_buffer *serialized = NULL;
+    int rc;
+
+    if (!store || !store->store || !store->ctx || !sender_key_name ||
+        !plaintext || plaintext_len == 0 || !out) {
+        return SG_ERR_INVAL;
+    }
+
+    memset(out, 0, sizeof(*out));
+
+    rc = drlms_group_cipher_create(&cipher, store, sender_key_name);
+    if (rc != SG_SUCCESS) {
+        goto cleanup;
+    }
+
+    rc = group_cipher_encrypt(cipher, plaintext, plaintext_len, &message);
+    if (rc != SG_SUCCESS) {
+        goto cleanup;
+    }
+
+    serialized = ciphertext_message_get_serialized(message);
+    if (!serialized) {
+        rc = SG_ERR_INVAL;
+        goto cleanup;
+    }
+
+    size_t len = signal_buffer_len(serialized);
+    out->data = (uint8_t *)malloc(len);
+    if (!out->data) {
+        rc = SG_ERR_NOMEM;
+        goto cleanup;
+    }
+    memcpy(out->data, signal_buffer_const_data(serialized), len);
+    out->len = len;
+
+    sender_key_message *sender_msg = NULL;
+    int res = sender_key_message_deserialize(
+        &sender_msg, signal_buffer_const_data(serialized),
+        signal_buffer_len(serialized), store->ctx);
+    if (res == SG_SUCCESS) {
+        out->key_id = sender_key_message_get_key_id(sender_msg);
+        out->iteration = sender_key_message_get_iteration(sender_msg);
+        sender_key_message_destroy((signal_type_base *)sender_msg);
+        rc = SG_SUCCESS;
+    } else {
+        rc = res;
+    }
+
+cleanup:
+    if (message) {
+        signal_type_unref((signal_type_base *)message);
+    }
+    if (cipher) {
+        group_cipher_free(cipher);
+    }
+    if (rc != SG_SUCCESS) {
+        if (out->data) {
+            free(out->data);
+            out->data = NULL;
+        }
+        out->len = 0;
+        out->key_id = 0;
+        out->iteration = 0;
+    }
+    return rc;
+}
+
+int drlms_group_decrypt(drlms_signal_store *store,
+                        const signal_protocol_sender_key_name *sender_key_name,
+                        const uint8_t *ciphertext, size_t ciphertext_len,
+                        signal_buffer **plaintext_out, uint32_t *key_id_out,
+                        uint32_t *iteration_out) {
+    group_cipher *cipher = NULL;
+    sender_key_message *message = NULL;
+    int rc;
+
+    if (!store || !store->store || !store->ctx || !sender_key_name ||
+        !ciphertext || ciphertext_len == 0 || !plaintext_out) {
+        return SG_ERR_INVAL;
+    }
+
+    *plaintext_out = NULL;
+
+    rc = drlms_group_cipher_create(&cipher, store, sender_key_name);
+    if (rc != SG_SUCCESS) {
+        goto cleanup;
+    }
+
+    rc = sender_key_message_deserialize(&message, ciphertext, ciphertext_len,
+                                        store->ctx);
+    if (rc != SG_SUCCESS) {
+        goto cleanup;
+    }
+
+    rc = group_cipher_decrypt(cipher, message, NULL, plaintext_out);
+    if (rc == SG_SUCCESS) {
+        if (key_id_out) {
+            *key_id_out = sender_key_message_get_key_id(message);
+        }
+        if (iteration_out) {
+            *iteration_out = sender_key_message_get_iteration(message);
+        }
+    }
+
+cleanup:
+    if (message) {
+        sender_key_message_destroy((signal_type_base *)message);
+    }
+    if (cipher) {
+        group_cipher_free(cipher);
+    }
+    if (rc != SG_SUCCESS && plaintext_out) {
+        *plaintext_out = NULL;
+    }
+    return rc;
+}
+
+/* Protobuf-C definitions */
+typedef struct ProtobufCMessageDescriptor ProtobufCMessageDescriptor;
+typedef struct ProtobufCMessage ProtobufCMessage;
+typedef int protobuf_c_boolean;
+
+struct ProtobufCMessage {
+    const ProtobufCMessageDescriptor *descriptor;
+    unsigned n_unknown_fields;
+    void *unknown_fields;
+};
+
+typedef struct ProtobufCBinaryData {
+    size_t len;
+    uint8_t *data;
+} ProtobufCBinaryData;
+
+struct _Textsecure__SenderKeyDistributionMessage {
+    ProtobufCMessage base;
+    protobuf_c_boolean has_id;
+    uint32_t id;
+    protobuf_c_boolean has_iteration;
+    uint32_t iteration;
+    protobuf_c_boolean has_chainkey;
+    ProtobufCBinaryData chainkey;
+    protobuf_c_boolean has_signingkey;
+    ProtobufCBinaryData signingkey;
+};
+typedef struct _Textsecure__SenderKeyDistributionMessage
+    Textsecure__SenderKeyDistributionMessage;
+
+extern const ProtobufCMessageDescriptor
+    textsecure__sender_key_distribution_message__descriptor;
+
+size_t protobuf_c_message_get_packed_size(const ProtobufCMessage *message);
+size_t protobuf_c_message_pack(const ProtobufCMessage *message, uint8_t *out);
+
+typedef struct ProtobufCAllocator ProtobufCAllocator;
+Textsecure__SenderKeyDistributionMessage *
+textsecure__sender_key_distribution_message__unpack(
+    ProtobufCAllocator *allocator, size_t len, const uint8_t *data);
+void textsecure__sender_key_distribution_message__free_unpacked(
+    Textsecure__SenderKeyDistributionMessage *message,
+    ProtobufCAllocator *allocator);
+
+#define PROTOBUF_C_MESSAGE_INIT(descriptor)                                    \
+    {                                                                          \
+        { descriptor, 0, NULL }                                                \
+    }
+
+signal_buffer *drlms_sender_key_distribution_message_get_serialized(
+    sender_key_distribution_message *message) {
+    if (!message) {
+        return NULL;
+    }
+
+    Textsecure__SenderKeyDistributionMessage msg = PROTOBUF_C_MESSAGE_INIT(
+        &textsecure__sender_key_distribution_message__descriptor);
+
+    msg.has_id = 1;
+    msg.id = sender_key_distribution_message_get_id(message);
+
+    msg.has_iteration = 1;
+    msg.iteration = sender_key_distribution_message_get_iteration(message);
+
+    signal_buffer *chain_buf =
+        sender_key_distribution_message_get_chain_key(message);
+    if (chain_buf) {
+        msg.has_chainkey = 1;
+        msg.chainkey.len = signal_buffer_len(chain_buf);
+        msg.chainkey.data = (uint8_t *)signal_buffer_const_data(chain_buf);
+    }
+
+    ec_public_key *sig_key =
+        sender_key_distribution_message_get_signature_key(message);
+    signal_buffer *sig_buf = NULL;
+    if (sig_key) {
+        if (ec_public_key_serialize(&sig_buf, sig_key) == SG_SUCCESS) {
+            msg.has_signingkey = 1;
+            msg.signingkey.len = signal_buffer_len(sig_buf);
+            msg.signingkey.data = (uint8_t *)signal_buffer_const_data(sig_buf);
+        }
+    }
+
+    size_t size = protobuf_c_message_get_packed_size((ProtobufCMessage *)&msg);
+    uint8_t *data = (uint8_t *)malloc(size);
+    if (!data) {
+        if (sig_buf)
+            signal_buffer_free(sig_buf);
+        return NULL;
+    }
+
+    protobuf_c_message_pack((ProtobufCMessage *)&msg, data);
+
+    signal_buffer *out = signal_buffer_create(data, size);
+    free(data);
+    if (sig_buf)
+        signal_buffer_free(sig_buf);
+
+    return out;
+}
+
+int drlms_test_unpack(const uint8_t *data, size_t len) {
+    Textsecure__SenderKeyDistributionMessage *msg =
+        textsecure__sender_key_distribution_message__unpack(NULL, len, data);
+    if (msg) {
+        textsecure__sender_key_distribution_message__free_unpacked(msg, NULL);
+        return 1; // Success
+    }
+    return 0; // Failure
+}
+
+int drlms_sender_key_distribution_message_deserialize_manual(
+    sender_key_distribution_message **message, const uint8_t *data, size_t len,
+    signal_context *global_context) {
+
+    Textsecure__SenderKeyDistributionMessage *msg =
+        textsecure__sender_key_distribution_message__unpack(NULL, len, data);
+    if (!msg) {
+        return SG_ERR_INVALID_PROTO_BUF;
+    }
+
+    uint32_t id = msg->has_id ? msg->id : 0;
+    uint32_t iteration = msg->has_iteration ? msg->iteration : 0;
+
+    uint8_t *chain_key_data = msg->has_chainkey ? msg->chainkey.data : NULL;
+    size_t chain_key_len = msg->has_chainkey ? msg->chainkey.len : 0;
+
+    uint8_t *signing_key_data =
+        msg->has_signingkey ? msg->signingkey.data : NULL;
+    size_t signing_key_len = msg->has_signingkey ? msg->signingkey.len : 0;
+
+    ec_public_key *signature_key = NULL;
+    int rc = SG_SUCCESS;
+
+    if (signing_key_data && signing_key_len > 0) {
+        rc = curve_decode_point(&signature_key, signing_key_data,
+                                signing_key_len, global_context);
+        if (rc != SG_SUCCESS) {
+            textsecure__sender_key_distribution_message__free_unpacked(msg,
+                                                                       NULL);
+            return rc;
+        }
+    }
+
+    rc = sender_key_distribution_message_create(message, id, iteration,
+                                                chain_key_data, chain_key_len,
+                                                signature_key, global_context);
+
+    // If creation failed, we must free the key.
+    // If creation succeeded, we assume it took ownership (or we shouldn't free
+    // it yet? libsignal usually takes ownership of keys passed to create
+    // functions).
+    if (rc != SG_SUCCESS && signature_key) {
+        ec_public_key_destroy((signal_type_base *)signature_key);
+    }
+
+    textsecure__sender_key_distribution_message__free_unpacked(msg, NULL);
+    return rc;
+}

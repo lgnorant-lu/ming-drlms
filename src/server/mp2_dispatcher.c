@@ -177,6 +177,9 @@ int mp2_dispatcher_handle_frame(platform_socket_t fd, const mp2_frame_t *frame,
     case MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_E2EE_PREKEY_BUNDLE_REQUEST:
         msg_type_name = "MSG_TYPE_E2EE_PREKEY_BUNDLE_REQUEST";
         break;
+    case MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_E2EE_SENDER_KEY_PUSH:
+        msg_type_name = "MSG_TYPE_E2EE_SENDER_KEY_PUSH";
+        break;
     default:
         // Keep as UNKNOWN for unrecognized message types
         break;
@@ -242,6 +245,9 @@ int mp2_dispatcher_handle_frame(platform_socket_t fd, const mp2_frame_t *frame,
     case MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_E2EE_PREKEY_BUNDLE_REQUEST:
         return mp2_e2ee_handle_prekey_bundle(fd, frame->payload,
                                              frame->payload_len);
+    case MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_E2EE_SENDER_KEY_PUSH:
+        return mp2_e2ee_handle_sender_key_push(fd, frame->payload,
+                                               frame->payload_len);
     case 232:
         mp2_room_members_handle_list_request(fd, frame);
         return 0;

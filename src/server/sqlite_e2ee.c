@@ -3,6 +3,7 @@
 #include <sqlite3.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
 static unsigned char *dup_blob(const void *data, size_t len) {
     if (!data || len == 0) {
@@ -310,4 +311,201 @@ void sqlite_e2ee_free_prekey_bundle(SQLiteE2EEPreKeyBundle *bundle) {
     free(bundle->signed_pre_key.signature);
     bundle->signed_pre_key.signature = NULL;
     bundle->signed_pre_key.signature_len = 0;
+}
+
+int sqlite_e2ee_track_room_member(SQLiteStorage *storage, const char *room_name,
+                                  const char *user_name, const char *group_id) {
+    if (!storage || !room_name || !*room_name || !user_name || !*user_name ||
+        !group_id || !*group_id) {
+        return -1;
+    }
+    const char *sql =
+        "INSERT INTO e2ee_room_members (room_name, user_name, group_id, "
+        "joined_at, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP, "
+        "CURRENT_TIMESTAMP) ON CONFLICT(room_name, user_name, group_id) DO "
+        "UPDATE SET updated_at=CURRENT_TIMESTAMP";
+
+    platform_mutex_lock(&storage->mu);
+    sqlite3_stmt *stmt = NULL;
+    int rc = sqlite3_prepare_v2(storage->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        platform_mutex_unlock(&storage->mu);
+        return -1;
+    }
+    sqlite3_bind_text(stmt, 1, room_name, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, user_name, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 3, group_id, -1, SQLITE_TRANSIENT);
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    platform_mutex_unlock(&storage->mu);
+    return (rc == SQLITE_DONE) ? 0 : -1;
+}
+
+int sqlite_e2ee_upsert_sender_key(
+    SQLiteStorage *storage, const char *room_name, const char *group_id,
+    const char *sender_user, const char *target_user, uint32_t sender_device_id,
+    uint32_t sender_registration_id, uint32_t sender_key_id,
+    uint32_t sender_key_iteration, const unsigned char *distribution,
+    size_t distribution_len) {
+    if (!storage || !room_name || !*room_name || !group_id || !*group_id ||
+        !sender_user || !*sender_user || !target_user || !*target_user ||
+        !distribution || distribution_len == 0) {
+        return -1;
+    }
+    const char *sql =
+        "INSERT INTO e2ee_sender_keys (room_name, group_id, sender_user, "
+        "target_user, sender_device_id, sender_registration_id, "
+        "sender_key_id, sender_key_iteration, distribution, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) ON CONFLICT("
+        "room_name, group_id, sender_user, target_user) DO UPDATE SET "
+        "sender_device_id=excluded.sender_device_id, "
+        "sender_registration_id=excluded.sender_registration_id, "
+        "sender_key_id=excluded.sender_key_id, "
+        "sender_key_iteration=excluded.sender_key_iteration, "
+        "distribution=excluded.distribution, "
+        "updated_at=CURRENT_TIMESTAMP";
+
+    platform_mutex_lock(&storage->mu);
+    sqlite3_stmt *stmt = NULL;
+    int rc = sqlite3_prepare_v2(storage->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        platform_mutex_unlock(&storage->mu);
+        return -1;
+    }
+    sqlite3_bind_text(stmt, 1, room_name, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, group_id, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 3, sender_user, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 4, target_user, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(stmt, 5, (int)sender_device_id);
+    sqlite3_bind_int(stmt, 6, (int)sender_registration_id);
+    sqlite3_bind_int(stmt, 7, (int)sender_key_id);
+    sqlite3_bind_int(stmt, 8, (int)sender_key_iteration);
+    sqlite3_bind_blob(stmt, 9, distribution, (int)distribution_len,
+                      SQLITE_TRANSIENT);
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    platform_mutex_unlock(&storage->mu);
+    return (rc == SQLITE_DONE) ? 0 : -1;
+}
+
+int sqlite_e2ee_list_sender_keys_for_target(SQLiteStorage *storage,
+                                            const char *target_user,
+                                            SQLiteE2EESenderKey **out_rows,
+                                            size_t *out_count) {
+    if (!storage || !target_user || !*target_user || !out_rows || !out_count) {
+        return -1;
+    }
+    *out_rows = NULL;
+    *out_count = 0;
+    const char *sql =
+        "SELECT room_name, group_id, sender_user, target_user, "
+        "sender_device_id, sender_registration_id, sender_key_id, "
+        "sender_key_iteration, distribution FROM e2ee_sender_keys "
+        "WHERE target_user = ? ORDER BY updated_at ASC";
+
+    platform_mutex_lock(&storage->mu);
+    sqlite3_stmt *stmt = NULL;
+    int rc = sqlite3_prepare_v2(storage->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        platform_mutex_unlock(&storage->mu);
+        return -1;
+    }
+    sqlite3_bind_text(stmt, 1, target_user, -1, SQLITE_TRANSIENT);
+
+    SQLiteE2EESenderKey *rows = NULL;
+    size_t count = 0;
+    size_t cap = 0;
+    while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+        if (count >= cap) {
+            size_t new_cap = cap ? cap * 2 : 4;
+            SQLiteE2EESenderKey *tmp =
+                (SQLiteE2EESenderKey *)realloc(rows, new_cap * sizeof(*rows));
+            if (!tmp) {
+                rc = SQLITE_NOMEM;
+                break;
+            }
+            rows = tmp;
+            cap = new_cap;
+        }
+        SQLiteE2EESenderKey *row = &rows[count];
+        memset(row, 0, sizeof(*row));
+        const unsigned char *room = sqlite3_column_text(stmt, 0);
+        const unsigned char *group = sqlite3_column_text(stmt, 1);
+        const unsigned char *sender = sqlite3_column_text(stmt, 2);
+        const unsigned char *target = sqlite3_column_text(stmt, 3);
+        snprintf(row->room_name, sizeof(row->room_name), "%s",
+                 room ? (const char *)room : "");
+        snprintf(row->group_id, sizeof(row->group_id), "%s",
+                 group ? (const char *)group : "");
+        snprintf(row->sender_user, sizeof(row->sender_user), "%s",
+                 sender ? (const char *)sender : "");
+        snprintf(row->target_user, sizeof(row->target_user), "%s",
+                 target ? (const char *)target : "");
+        row->sender_device_id = (uint32_t)sqlite3_column_int(stmt, 4);
+        row->sender_registration_id = (uint32_t)sqlite3_column_int(stmt, 5);
+        row->sender_key_id = (uint32_t)sqlite3_column_int(stmt, 6);
+        row->sender_key_iteration = (uint32_t)sqlite3_column_int(stmt, 7);
+        const void *blob = sqlite3_column_blob(stmt, 8);
+        int blob_len = sqlite3_column_bytes(stmt, 8);
+        if (blob && blob_len > 0) {
+            row->distribution = dup_blob(blob, (size_t)blob_len);
+            row->distribution_len = row->distribution ? (size_t)blob_len : 0;
+        }
+        if (!row->distribution) {
+            rc = SQLITE_NOMEM;
+            break;
+        }
+        count++;
+    }
+
+    sqlite3_finalize(stmt);
+    platform_mutex_unlock(&storage->mu);
+
+    if (rc != SQLITE_DONE) {
+        sqlite_e2ee_free_sender_key_rows(rows, count);
+        return -1;
+    }
+
+    *out_rows = rows;
+    *out_count = count;
+    return 0;
+}
+
+int sqlite_e2ee_delete_sender_key(SQLiteStorage *storage, const char *room_name,
+                                  const char *group_id, const char *sender_user,
+                                  const char *target_user) {
+    if (!storage || !room_name || !*room_name || !group_id || !*group_id ||
+        !sender_user || !*sender_user || !target_user || !*target_user) {
+        return -1;
+    }
+    const char *sql =
+        "DELETE FROM e2ee_sender_keys WHERE room_name=? AND group_id=? "
+        "AND sender_user=? AND target_user=?";
+    platform_mutex_lock(&storage->mu);
+    sqlite3_stmt *stmt = NULL;
+    int rc = sqlite3_prepare_v2(storage->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        platform_mutex_unlock(&storage->mu);
+        return -1;
+    }
+    sqlite3_bind_text(stmt, 1, room_name, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, group_id, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 3, sender_user, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 4, target_user, -1, SQLITE_TRANSIENT);
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    platform_mutex_unlock(&storage->mu);
+    return (rc == SQLITE_DONE) ? 0 : -1;
+}
+
+void sqlite_e2ee_free_sender_key_rows(SQLiteE2EESenderKey *rows, size_t count) {
+    if (!rows) {
+        return;
+    }
+    for (size_t i = 0; i < count; ++i) {
+        free(rows[i].distribution);
+        rows[i].distribution = NULL;
+        rows[i].distribution_len = 0;
+    }
+    free(rows);
 }

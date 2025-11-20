@@ -11,6 +11,7 @@ from ming_drlms.core.mproto_v2_client import (
     RoomEvent,
     RoomMember,
 )
+from ming_drlms.proto.schema.v2 import room_pb2
 from ming_drlms.core.pysignal import SignalBridgeError
 from ming_drlms.core.e2ee_store import LocalKeyStore
 from ming_drlms.core.e2ee_runtime import E2EEngine, proto_type_from_lib
@@ -77,11 +78,10 @@ class RoomService:
         since_id: int,
         token_store: Optional[object],
         timeout: float,
-        e2ee_peer: Optional[str] = None,
         e2ee_store: Optional[Path | str] = None,
     ) -> Iterator[RoomEvent]:
         try:
-            key_store = self._build_key_store(e2ee_store) if e2ee_peer else None
+            key_store = self._build_key_store(e2ee_store) if e2ee_store else None
             with self._client_factory(
                 host,
                 port,
@@ -89,9 +89,7 @@ class RoomService:
                 token_store_path=token_store,
             ) as client:
                 engine = None
-                if e2ee_peer:
-                    if key_store is None:
-                        raise RoomServiceError("未配置密钥仓库路径")
+                if key_store is not None:
                     try:
                         engine = E2EEngine(
                             username=user,
@@ -100,21 +98,53 @@ class RoomService:
                         )
                     except SignalBridgeError as exc:
                         raise RoomServiceError(str(exc)) from exc
+                sender_key_callback = (
+                    engine.process_sender_key_distribution
+                    if engine is not None
+                    else None
+                )
                 try:
-                    for event in client.subscribe(user, room, since_id=since_id):
+                    for event in client.subscribe(
+                        user,
+                        room,
+                        since_id=since_id,
+                        sender_key_callback=sender_key_callback,
+                    ):
                         if engine is not None:
                             try:
-                                result = engine.decrypt(event)
+                                if (
+                                    event.kind
+                                    == room_pb2.RoomEventKind.ROOM_EVENT_KIND_MEMBER_JOINED
+                                    and event.presence is not None
+                                ):
+                                    new_member = event.presence.get("user_id", "")
+                                    if new_member and new_member != user:
+                                        engine.distribute_sender_key(
+                                            room, room, new_member
+                                        )
+
+                                if event.group_id:
+                                    group_result = engine.decrypt_group(event)
+                                    event = replace(
+                                        event,
+                                        payload=group_result.plaintext,
+                                        sender_key_iteration=group_result.iteration,
+                                        payload_type=room_pb2.SignalCiphertextType.SIGNAL_CIPHERTEXT_TYPE_MESSAGE,  # type: ignore[attr-defined]
+                                    )
+                                else:
+                                    result = engine.decrypt(event)
+                                    event = replace(
+                                        event,
+                                        payload=result.plaintext,
+                                        payload_type=proto_type_from_lib(
+                                            result.info.message_type
+                                        ),
+                                    )
                             except SignalBridgeError as exc:
                                 raise RoomServiceError(f"E2EE 解密失败: {exc}") from exc
-                            event = replace(
-                                event,
-                                payload=result.plaintext,
-                                payload_type=proto_type_from_lib(
-                                    result.info.message_type
-                                ),
-                            )
                         yield event
+                except SignalBridgeError as exc:
+                    raise RoomServiceError(f"E2EE sender key 处理失败: {exc}") from exc
                 finally:
                     if engine is not None:
                         engine.close()
@@ -132,11 +162,10 @@ class RoomService:
         ephemeral: bool,
         token_store: Optional[object],
         timeout: float,
-        e2ee_peer: Optional[str] = None,
         e2ee_store: Optional[Path | str] = None,
     ) -> PublishResult:
         try:
-            key_store = self._build_key_store(e2ee_store) if e2ee_peer else None
+            key_store = self._build_key_store(e2ee_store) if e2ee_store else None
             with self._client_factory(
                 host,
                 port,
@@ -146,17 +175,22 @@ class RoomService:
                 engine = None
                 ciphertext = payload
                 encrypted_proto = None
-                if e2ee_peer:
-                    if key_store is None:
-                        raise RoomServiceError("未配置密钥仓库路径")
+                if key_store is not None:
                     try:
                         engine = E2EEngine(
                             username=user,
                             key_store=key_store,
                             mp2_client=client,
                         )
-                        encrypted_proto = engine.encrypt(e2ee_peer, payload)
-                        ciphertext = bytes(encrypted_proto.ciphertext)
+                        try:
+                            members = client.get_room_members(user, room)
+                        except (AuthenticationError, MP2Error) as exc:
+                            raise RoomServiceError(str(exc)) from exc
+                        for member in members:
+                            if member.user_id != user:
+                                engine.distribute_sender_key(room, room, member.user_id)
+                        encrypted_proto = engine.encrypt_group(room, room, payload)
+                        ciphertext = bytes(encrypted_proto.ciphertext)  # type: ignore[attr-defined]
                     except SignalBridgeError as exc:
                         raise RoomServiceError(str(exc)) from exc
                 try:
