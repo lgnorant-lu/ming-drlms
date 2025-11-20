@@ -29,20 +29,11 @@ dependencies = [
     "packaging>=24.2",
 ]
 
-[project.optional-dependencies]
-gui = [
-    "flet>=0.28.3,<0.29.0",
-    "pillow>=10.0.0",
-]
-
 [project.urls]
 "Source" = "https://github.com/lgnorant-lu/ming-drlms"
 
 [project.scripts]
 ming-drlms = "ming_drlms.main:app"
-
-[project.gui-scripts]
-ming-drlms-gui = "ming_drlms_gui.app:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
@@ -50,7 +41,6 @@ include-package-data = true
 
 [tool.setuptools.package-data]
 "ming_drlms" = ["cli_help/*.md"]
-"ming_drlms_gui" = ["assets/**/*", "i18n/*.json"]
 
 [tool.setuptools_scm]
 write_to = "src/ming_drlms/_version.py"
