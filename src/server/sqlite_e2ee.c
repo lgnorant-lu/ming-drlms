@@ -5,6 +5,10 @@
 #include <string.h>
 #include <stdio.h>
 
+#ifndef SQLITE_NOMEM
+#define SQLITE_NOMEM 7
+#endif
+
 static unsigned char *dup_blob(const void *data, size_t len) {
     if (!data || len == 0) {
         return NULL;
