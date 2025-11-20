@@ -1727,8 +1727,9 @@ struct _Textsecure__SenderKeyDistributionMessage {
 typedef struct _Textsecure__SenderKeyDistributionMessage
     Textsecure__SenderKeyDistributionMessage;
 
-extern const ProtobufCMessageDescriptor
-    textsecure__sender_key_distribution_message__descriptor;
+/* Removed extern descriptor declaration to avoid Windows linker issues */
+/* The descriptor is not actually needed for packing - only the struct layout
+ * matters */
 
 size_t protobuf_c_message_get_packed_size(const ProtobufCMessage *message);
 size_t protobuf_c_message_pack(const ProtobufCMessage *message, uint8_t *out);
@@ -1741,9 +1742,10 @@ void textsecure__sender_key_distribution_message__free_unpacked(
     Textsecure__SenderKeyDistributionMessage *message,
     ProtobufCAllocator *allocator);
 
-#define PROTOBUF_C_MESSAGE_INIT(descriptor)                                    \
+/* Use zero-initialization instead of PROTOBUF_C_MESSAGE_INIT */
+#define DRLMS_PROTOBUF_C_MESSAGE_ZERO_INIT                                     \
     {                                                                          \
-        { descriptor, 0, NULL }                                                \
+        { NULL, 0, NULL }                                                      \
     }
 
 signal_buffer *drlms_sender_key_distribution_message_get_serialized(
@@ -1752,8 +1754,9 @@ signal_buffer *drlms_sender_key_distribution_message_get_serialized(
         return NULL;
     }
 
-    Textsecure__SenderKeyDistributionMessage msg = PROTOBUF_C_MESSAGE_INIT(
-        &textsecure__sender_key_distribution_message__descriptor);
+    /* Use zero-initialization to avoid descriptor dependency */
+    Textsecure__SenderKeyDistributionMessage msg =
+        DRLMS_PROTOBUF_C_MESSAGE_ZERO_INIT;
 
     msg.has_id = 1;
     msg.id = sender_key_distribution_message_get_id(message);
