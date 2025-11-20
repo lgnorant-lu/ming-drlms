@@ -37,10 +37,15 @@ ming-drlms = "ming_drlms.main:app"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
-include-package-data = true
+include-package-data = false
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["ming_drlms*"]
+exclude = ["tests*"]
 
 [tool.setuptools.package-data]
-"ming_drlms" = ["cli_help/*.md"]
+"ming_drlms" = ["cli_help/*.md", "proto/schema/v2/*_pb2.py"]
 
 [tool.setuptools_scm]
 write_to = "src/ming_drlms/_version.py"
