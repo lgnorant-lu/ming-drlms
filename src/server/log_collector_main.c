@@ -739,6 +739,11 @@ static void *handle_client(void *arg) {
     }
     // Clean up any room subscriptions linked to this fd
     rooms_remove_fd_from_all(fd);
+
+    /* Ensure fd is unregistered from MP2 registry BEFORE closing socket
+     * to avoid race condition with new connections reusing the same fd */
+    mp2_protocol_unregister_fd(fd);
+
     platform_socket_close(fd);
 
     // Decrement active connection count
@@ -747,9 +752,6 @@ static void *handle_client(void *arg) {
         g_active_conn--;
     }
     platform_mutex_unlock(&g_conn_mu);
-
-    /* Ensure fd is unregistered from MP2 registry */
-    mp2_protocol_unregister_fd(fd);
 
     free(ctx);
     return NULL;

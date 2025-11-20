@@ -21,6 +21,7 @@ from .pysignal import (
     GroupSessionBuilder,
     SenderKeyName,
     SignalBridgeError,
+    SignalContext,
     SignalStore,
     create_signal_context,
     encode_pre_key_record,
@@ -58,18 +59,30 @@ class E2EEngine:
         username: str,
         key_store: LocalKeyStore,
         mp2_client: MP2Client,
+        signal_context: SignalContext | None = None,
+        signal_store: SignalStore | None = None,
+        group_builder: GroupSessionBuilder | None = None,
+        group_cipher: GroupCipher | None = None,
     ) -> None:
         self._username = username
         self._key_store = key_store
         self._client = mp2_client
-        self._context = create_signal_context()
-        self._store = SignalStore(self._context)
+        self._context = (
+            signal_context if signal_context is not None else create_signal_context()
+        )
+        self._store = (
+            signal_store if signal_store is not None else SignalStore(self._context)
+        )
         self._state = self._load_local_state()
         self._sessions: Dict[Tuple[str, int], _PeerSession] = {}
-        self._group_builder: GroupSessionBuilder | None = GroupSessionBuilder(
-            self._store, self._context
+        self._group_builder: GroupSessionBuilder | None = (
+            group_builder
+            if group_builder is not None
+            else GroupSessionBuilder(self._store, self._context)
         )
-        self._group_cipher = GroupCipher(self._store)
+        self._group_cipher = (
+            group_cipher if group_cipher is not None else GroupCipher(self._store)
+        )
         self._group_sender_keys: Dict[str, SenderKeyRecord] = {}
         self._group_distribution_targets: Dict[str, set[str]] = {}
         self._load_cached_sender_keys()

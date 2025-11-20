@@ -149,6 +149,44 @@ int server_core_accept_loop(platform_socket_t listen_fd,
     if (!opt || !opt->conn_mu || !opt->active_conn || !client_fn)
         return -1;
     for (;;) {
+        if (stop_flag && *stop_flag)
+            break;
+
+        fd_set rset;
+        FD_ZERO(&rset);
+        FD_SET(listen_fd, &rset);
+        struct timeval tv;
+        tv.tv_sec = 0;
+        tv.tv_usec = 100000; // 100ms timeout
+
+        int sel_rc = select((int)listen_fd + 1, &rset, NULL, NULL, &tv);
+        if (sel_rc < 0) {
+#if defined(_WIN32)
+            int err = WSAGetLastError();
+            if (err == WSAEINTR) {
+                if (stop_flag && *stop_flag)
+                    break;
+                continue;
+            }
+            platform_net_set_last_error(err);
+            perror("select");
+            break;
+#else
+            if (errno == EINTR) {
+                if (stop_flag && *stop_flag)
+                    break;
+                continue;
+            }
+            platform_net_set_last_error(errno);
+            perror("select");
+            break;
+#endif
+        }
+        if (sel_rc == 0) {
+            // Timeout, check stop flag
+            continue;
+        }
+
         struct sockaddr_in cli;
         socklen_t len = sizeof(cli);
         platform_socket_t cfd =

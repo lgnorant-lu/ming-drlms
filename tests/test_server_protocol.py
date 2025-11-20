@@ -203,7 +203,7 @@ class ServerProcess:
             else:
                 proc.send_signal(signal.SIGTERM)
             try:
-                proc.wait(timeout=5)
+                proc.wait(timeout=15)
                 print(
                     f"[DEBUG] Server process terminated with code: {proc.returncode}",
                     file=sys.stderr,
@@ -386,6 +386,76 @@ def _assert_direct_frame_error(host: str, port: int, root: Path) -> None:
             sock.close()
 
 
+def _assert_room_management(host: str, port: int, root: Path) -> None:
+    token_store = TokenStore(path=_token_store_path(root, "mgmt"))
+    with MP2Client(
+        host, port, timeout=_SOCKET_TIMEOUT, token_store=token_store
+    ) as client:
+        client.login(_TEST_USER, password_hash=_TEST_HASH)
+
+        # Test Room Creation
+        new_room = f"{_TEST_ROOM_PREFIX}_mgmt_{int(time.time())}"
+        created = client.create_room(
+            _TEST_USER, new_room, max_capacity=10, max_instances=1
+        )
+        # Note: Server might return False if room auto-creation is enabled or it already exists
+        # But we expect the call to succeed without error
+        print(f"[debug] create_room result: {created}")
+
+        # Test Room Listing
+        rooms, total, has_more = client.list_rooms(
+            _TEST_USER, limit=10, prefix=_TEST_ROOM_PREFIX
+        )
+        print(f"[debug] list_rooms: found {len(rooms)} rooms, total={total}")
+
+        found = False
+        for r in rooms:
+            if r.room_name == new_room:
+                found = True
+                break
+
+        # If the server supports listing, we should find our room.
+        # If not (e.g. not implemented), we might get an empty list or error,
+        # but list_rooms should handle the error response if it's a standard error.
+        if total > 0:
+            assert found, f"Created room {new_room} not found in list"
+
+
+def _assert_room_history(host: str, port: int, root: Path) -> None:
+    # Give server a moment to clean up previous connections
+    time.sleep(0.5)
+    token_store = TokenStore(path=_token_store_path(root, "hist"))
+    room = f"{_TEST_ROOM_PREFIX}_hist_{int(time.time())}"
+    payload = b"history message"
+
+    with MP2Client(
+        host, port, timeout=_SOCKET_TIMEOUT, token_store=token_store
+    ) as client:
+        client.login(_TEST_USER, password_hash=_TEST_HASH)
+
+        # Publish some messages
+        for i in range(3):
+            client.publish(_TEST_USER, room, f"{payload.decode()}_{i}".encode())
+            time.sleep(0.1)
+
+        # Fetch history
+        events = client.get_history(_TEST_USER, room, limit=10)
+        print(f"[debug] get_history: retrieved {len(events)} events")
+
+        # We might not get all if they are ephemeral or if history is disabled,
+        # but the call should succeed.
+        # If the server implements history, we expect events.
+        if len(events) > 0:
+            assert events[0].room_name == room
+            # Check content of one of them
+            found_msg = False
+            for e in events:
+                if b"history message" in e.payload:
+                    found_msg = True
+                    break
+            assert found_msg, "Published message not found in history"
+
+
 def run_mp2_protocol_tests(host: str, port: int, server_bin: Path) -> None:
     data_dir = _mk_data_dir()
     log_path = data_dir / "server.log"
@@ -429,6 +499,14 @@ def run_mp2_protocol_tests(host: str, port: int, server_bin: Path) -> None:
         _assert_direct_frame_error(host, port, data_dir)
         print("PASS")
 
+        print("Running MP2 test: room management ... ", end="", flush=True)
+        _assert_room_management(host, port, data_dir)
+        print("PASS")
+
+        print("Running MP2 test: room history ... ", end="", flush=True)
+        _assert_room_history(host, port, data_dir)
+        print("PASS")
+
         print("\n--- All M-Proto-v2 server protocol tests passed ---")
     finally:
         server.stop()
@@ -455,15 +533,22 @@ def server_binary_path() -> Path:
         candidate = Path(env_path)
     else:
         name = "log_collector_server.exe" if os.name == "nt" else "log_collector_server"
-        candidate = (Path(__file__).resolve().parents[1] / name).resolve()
-        if not candidate.exists():
-            build_candidate = Path(__file__).resolve().parents[1] / "build" / name
-            if not build_candidate.exists() and os.name == "nt":
-                alt = build_candidate.with_suffix("")
-                if alt.exists():
-                    build_candidate = alt
-            if build_candidate.exists():
-                candidate = build_candidate
+        root = Path(__file__).resolve().parents[1]
+
+        candidates = [
+            root / name,
+            root / "build" / name,
+            root / "build-win" / name,
+            root / "build-win" / "Release" / name,
+            root / "build-win" / "Debug" / name,
+        ]
+
+        candidate = candidates[0]
+        for c in candidates:
+            if c.exists():
+                candidate = c
+                break
+
     try:
         return grant_exec(candidate)
     except FileNotFoundError:

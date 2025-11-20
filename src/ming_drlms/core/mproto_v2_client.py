@@ -293,6 +293,209 @@ class MP2Client:
             refresh_token=record.refresh_token,
         )
 
+    def create_room(
+        self,
+        username: str,
+        room_name: str,
+        *,
+        storage_policy: int = 0,  # ROOM_STORAGE_PERSISTENT
+        max_capacity: int = 0,
+        max_instances: int = 0,
+        max_ephemeral_events: int = 0,
+    ) -> bool:
+        record = self.ensure_access_token(username)
+        self.connect()
+        sock = self._require_socket()
+
+        req = room_pb2.RoomCreateRequest()
+        req.room_name = room_name
+        req.access_token = record.access_token
+        req.storage_policy = storage_policy
+        req.max_capacity = max_capacity
+        req.max_instances = max_instances
+        req.max_ephemeral_events = max_ephemeral_events
+
+        write_frame(
+            sock,
+            common_pb2.MSG_TYPE_ROOM_CREATE_REQUEST,
+            req.SerializeToString(),
+        )
+
+        frame = read_frame(sock)
+        if frame.msg_type == common_pb2.MSG_TYPE_ROOM_CREATE_RESPONSE:
+            resp = room_pb2.RoomCreateResponse()
+            resp.ParseFromString(frame.payload)
+            return bool(resp.created)
+        if frame.msg_type == common_pb2.MSG_TYPE_ERROR_RESPONSE:
+            err = common_pb2.ErrorResponse()
+            err.ParseFromString(frame.payload)
+            raise MP2Error(f"create room failed: {err.code}: {err.message}")
+        raise MP2Error(f"unexpected msg_type={frame.msg_type} during create room")
+
+    def list_rooms(
+        self,
+        username: str,
+        *,
+        offset: int = 0,
+        limit: int = 100,
+        prefix: str = "",
+    ) -> tuple[list[Any], int, bool]:
+        record = self.ensure_access_token(username)
+        self.connect()
+        sock = self._require_socket()
+
+        req = room_pb2.RoomListRequest()
+        req.access_token = record.access_token
+        req.offset = offset
+        req.limit = limit
+        req.prefix = prefix
+
+        write_frame(
+            sock,
+            common_pb2.MSG_TYPE_ROOM_LIST_REQUEST,
+            req.SerializeToString(),
+        )
+
+        frame = read_frame(sock)
+        if frame.msg_type == common_pb2.MSG_TYPE_ROOM_LIST_RESPONSE:
+            resp = room_pb2.RoomListResponse()
+            resp.ParseFromString(frame.payload)
+            return list(resp.rooms), int(resp.total), bool(resp.has_more)
+        if frame.msg_type == common_pb2.MSG_TYPE_ERROR_RESPONSE:
+            err = common_pb2.ErrorResponse()
+            err.ParseFromString(frame.payload)
+            raise MP2Error(f"list rooms failed: {err.code}: {err.message}")
+        raise MP2Error(f"unexpected msg_type={frame.msg_type} during list rooms")
+
+    def get_history(
+        self,
+        username: str,
+        room_name: str,
+        *,
+        since_id: int = 0,
+        limit: int = 100,
+        include_text: bool = True,
+        include_files: bool = False,
+    ) -> list[RoomEvent]:
+        record = self.ensure_access_token(username)
+        self.connect()
+        sock = self._require_socket()
+
+        req = room_pb2.RoomHistoryRequest()
+        req.room_name = room_name
+        req.access_token = record.access_token
+        req.since_id = since_id
+        req.limit = limit
+        req.include_text = include_text
+        req.include_files = include_files
+
+        write_frame(
+            sock,
+            common_pb2.MSG_TYPE_ROOM_HISTORY_REQUEST,
+            req.SerializeToString(),
+        )
+
+        events: list[RoomEvent] = []
+        while True:
+            frame = read_frame(sock)
+            if frame.msg_type == common_pb2.MSG_TYPE_ROOM_HISTORY_CHUNK:
+                chunk = room_pb2.RoomHistoryChunk()
+                chunk.ParseFromString(frame.payload)
+                for event in chunk.events:
+                    # Reuse parsing logic from subscribe if possible, or duplicate for now
+                    # Duplicating for simplicity and to avoid refactoring subscribe right now
+                    file_meta: RoomFileMeta | None = None
+                    try:
+                        if getattr(event, "file", None):
+                            file_meta = RoomFileMeta(
+                                filename=event.file.filename,
+                                size_bytes=int(event.file.size_bytes),
+                                sha256_hex=event.file.sha256_hex or "",
+                                ephemeral=bool(event.file.ephemeral),
+                                timestamp=event.file.timestamp or "",
+                            )
+                    except Exception:
+                        file_meta = None
+
+                    ciphertext = bytes(event.payload.ciphertext)
+                    payload_type = (
+                        int(event.payload.type)
+                        if hasattr(event.payload, "type")
+                        else None
+                    )
+                    sender = event.payload.sender or None
+                    sender_device_id = (
+                        int(event.payload.sender_device_id)
+                        if getattr(event.payload, "sender_device_id", 0)
+                        else None
+                    )
+                    sender_registration_id = (
+                        int(event.payload.sender_registration_id)
+                        if getattr(event.payload, "sender_registration_id", 0)
+                        else None
+                    )
+                    pre_key_id = (
+                        int(event.payload.pre_key_id)
+                        if getattr(event.payload, "pre_key_id", 0)
+                        else None
+                    )
+                    signed_pre_key_id = (
+                        int(event.payload.signed_pre_key_id)
+                        if getattr(event.payload, "signed_pre_key_id", 0)
+                        else None
+                    )
+                    group_id = getattr(event.payload, "group_id", "") or None
+                    sender_key_iteration = (
+                        int(event.payload.sender_key_iteration)
+                        if getattr(event.payload, "sender_key_iteration", 0)
+                        else None
+                    )
+
+                    events.append(
+                        RoomEvent(
+                            room_name=event.room_name,
+                            event_id=int(event.event_id),
+                            payload=ciphertext,
+                            display_token=event.display_token,
+                            kind=int(getattr(event, "kind", 0))
+                            if hasattr(event, "kind")
+                            else None,
+                            sha256_hex=(event.sha256_hex or None)
+                            if hasattr(event, "sha256_hex")
+                            else None,
+                            instance_id=(event.instance_id or None)
+                            if hasattr(event, "instance_id")
+                            else None,
+                            timestamp=(event.timestamp or None)
+                            if hasattr(event, "timestamp")
+                            else None,
+                            file=file_meta,
+                            payload_type=payload_type,
+                            sender=sender,
+                            sender_device_id=sender_device_id,
+                            sender_registration_id=sender_registration_id,
+                            pre_key_id=pre_key_id,
+                            signed_pre_key_id=signed_pre_key_id,
+                            group_id=group_id,
+                            sender_key_iteration=sender_key_iteration,
+                        )
+                    )
+
+                if not chunk.has_more:
+                    break
+            elif frame.msg_type == common_pb2.MSG_TYPE_ROOM_HISTORY_DONE:
+                break
+            elif frame.msg_type == common_pb2.MSG_TYPE_ERROR_RESPONSE:
+                err = common_pb2.ErrorResponse()
+                err.ParseFromString(frame.payload)
+                raise MP2Error(f"get history failed: {err.code}: {err.message}")
+            else:
+                raise MP2Error(
+                    f"unexpected msg_type={frame.msg_type} during get history"
+                )
+
+        return events
+
     def publish(
         self,
         username: str,

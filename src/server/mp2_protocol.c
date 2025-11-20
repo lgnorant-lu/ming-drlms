@@ -9,6 +9,8 @@
 #include <string.h>
 #include <time.h>
 
+#include "platform/thread.h"
+
 #if !defined(_WIN32)
 #include <unistd.h>
 #include <arpa/inet.h>
@@ -23,6 +25,29 @@
 #define MP2_FD_MAX 4096
 static platform_socket_t g_mp2_fds[MP2_FD_MAX];
 static int g_mp2_fds_count = 0;
+static platform_mutex_t g_mp2_fds_mu;
+static int g_mp2_fds_mu_ready = 0;
+
+static void mp2_registry_init_once(void) {
+    if (!g_mp2_fds_mu_ready) {
+        if (platform_mutex_init(&g_mp2_fds_mu) == 0) {
+            g_mp2_fds_mu_ready = 1;
+        }
+    }
+}
+
+static void mp2_registry_lock(void) {
+    mp2_registry_init_once();
+    if (g_mp2_fds_mu_ready) {
+        platform_mutex_lock(&g_mp2_fds_mu);
+    }
+}
+
+static void mp2_registry_unlock(void) {
+    if (g_mp2_fds_mu_ready) {
+        platform_mutex_unlock(&g_mp2_fds_mu);
+    }
+}
 
 static int mp2_registry_find(platform_socket_t fd) {
     for (int i = 0; i < g_mp2_fds_count; ++i) {
@@ -35,23 +60,32 @@ static int mp2_registry_find(platform_socket_t fd) {
 void mp2_protocol_register_fd(platform_socket_t fd) {
     if (fd == PLATFORM_INVALID_SOCKET)
         return;
-    if (mp2_registry_find(fd) >= 0)
-        return;
-    if (g_mp2_fds_count < MP2_FD_MAX) {
-        g_mp2_fds[g_mp2_fds_count++] = fd;
+    mp2_registry_lock();
+    if (mp2_registry_find(fd) < 0) {
+        if (g_mp2_fds_count < MP2_FD_MAX) {
+            g_mp2_fds[g_mp2_fds_count++] = fd;
+        }
     }
+    mp2_registry_unlock();
 }
 
 void mp2_protocol_unregister_fd(platform_socket_t fd) {
+    mp2_registry_lock();
     int idx = mp2_registry_find(fd);
     if (idx < 0)
-        return;
+        goto out;
     g_mp2_fds[idx] = g_mp2_fds[g_mp2_fds_count - 1];
     g_mp2_fds_count -= 1;
+out:
+    mp2_registry_unlock();
 }
 
 int mp2_protocol_is_fd_mp2(platform_socket_t fd) {
-    return mp2_registry_find(fd) >= 0 ? 1 : 0;
+    int result;
+    mp2_registry_lock();
+    result = mp2_registry_find(fd) >= 0 ? 1 : 0;
+    mp2_registry_unlock();
+    return result;
 }
 
 static void mp2_protocol_sleep_microseconds(unsigned long long usec) {
