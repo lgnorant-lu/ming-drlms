@@ -162,6 +162,17 @@ python test_heartbeat.py
 
 ### TUI 使用
 
+**PowerShell (Windows)**:
+```powershell
+# 方法1: 使用便捷脚本
+.\scripts\run_tui.ps1
+
+# 方法2: 手动设置环境变量
+$env:PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION = 'python'
+ming-drlms tui
+```
+
+**Bash (WSL/Linux/macOS)**:
 ```bash
 export PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python
 ming-drlms tui
@@ -174,20 +185,56 @@ ming-drlms tui
 ## 🐛 已知问题
 
 ### 1. Protobuf 版本兼容性
-**问题**: protoc 3.12.4 太旧，与 protobuf-python 6.33.1 不兼容
+**问题**: protoc 3.12.4 太旧,与 protobuf-python 6.33.1 不兼容
 
-**临时方案**: 
+**✅ 已修复**: protoc 已升级到 33.1，Python protobuf 代码已重新生成，无需环境变量即可运行。
+
+**如果仍遇到问题 - 临时方案 (已提供便捷脚本)**:
+
+PowerShell (Windows):
+```powershell
+.\scripts\run_tui.ps1        # TUI 启动脚本
+.\scripts\run_test_client.sh # 需在 WSL 运行
+```
+
+Bash (WSL/Linux):
 ```bash
 export PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python
+ming-drlms tui
 ```
 
-**永久方案**: 升级 protoc 到 >= 3.19.0
+**永久方案 1: 升级 protoc 并重新生成代码 (✅ 已完成)**
+
+当前环境：
+- protoc 版本: 33.1 ✅
+- 路径: /usr/local/bin/protoc
+- Python protobuf 代码已重新生成
+
+如需在其他环境重现，执行：
 ```bash
-# Ubuntu/Debian
-wget https://github.com/protocolbuffers/protobuf/releases/download/v25.1/protoc-25.1-linux-x86_64.zip
-unzip protoc-25.1-linux-x86_64.zip -d $HOME/.local
-export PATH="$HOME/.local/bin:$PATH"
+# 重新生成 Python protobuf 代码
+cd /mnt/d/dogepy/pythonProject1/schoolworks/DRLMS
+protoc --python_out=src/ming_drlms/proto schema/v2/*.proto
 ```
+
+Windows (使用预编译二进制):
+```powershell
+# 下载 https://github.com/protocolbuffers/protobuf/releases/download/v25.1/protoc-25.1-win64.zip
+# 解压到 C:\protoc
+# 添加 C:\protoc\bin 到系统 PATH
+
+# 重新生成 Python protobuf 代码 (在项目根目录)
+protoc --python_out=src\ming_drlms\proto schema\v2\*.proto
+```
+
+**永久方案 2: 降级 protobuf 包到 3.20.x**
+
+```bash
+# 在虚拟环境中
+pip install "protobuf>=3.20.0,<4.0.0"
+```
+
+> ⚠️ **注意**: 降级 protobuf 可能影响其他依赖项，建议优先使用方案 1 (升级 protoc)。
 
 ### 2. TUI 集成
 **状态**: screens.py 语法错误已修复，但仍需测试
