@@ -27,6 +27,16 @@ dependencies = [
     "protobuf==6.33.1",
     "requests",
     "packaging>=24.2",
+    "textual>=0.47.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov",
+    "nuitka>=2.0",
+    "patchelf",
+    "ccache",
 ]
 
 [project.urls]

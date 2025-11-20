@@ -144,6 +144,20 @@ app.add_typer(_e2ee.e2ee_app, name="e2ee")
 _server.register_top_level_aliases(app)
 
 
+# TUI Command
+@app.command("tui", help="Launch the Textual TUI interface (experimental)")
+def cli_tui():
+    """Launch the Textual TUI interface."""
+    try:
+        from ..tui.app import main as tui_main
+    except ImportError:
+        print("[red]TUI dependencies not installed[/red]")
+        print("Install with: pip install ming-drlms[dev]")
+        raise typer.Exit(code=1)
+
+    tui_main()
+
+
 # Import and register dev group (test/coverage/pkg/artifacts)
 from .dev import dev_app as _dev_app  # noqa: E402
 

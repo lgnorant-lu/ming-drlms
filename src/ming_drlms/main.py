@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .cli import app
+from ming_drlms.cli import app
 
 
 if __name__ == "__main__":
