@@ -107,72 +107,81 @@ elif [[ "${IS_WINDOWS}" -eq 1 ]]; then
   taskkill //F //IM log_collector_server.exe >/dev/null 2>&1 || true
 fi
 
-rm -rf "${BUILD_DIR}"
-mkdir -p "${BUILD_DIR}"
-
-printf '%s\n' "--> Configuring CMake project (coverage instrumentation when supported)..."
-CMAKE_SOURCE_ARG="${ROOT_DIR}"
-CMAKE_BUILD_ARG="${BUILD_DIR}"
-if [[ "${IS_WINDOWS}" -eq 1 ]]; then
-  CMAKE_SOURCE_ARG=$(to_mixed_path "${ROOT_DIR}")
-  CMAKE_BUILD_ARG=$(to_mixed_path "${BUILD_DIR}")
-fi
-declare -a EXTRA_CMAKE_ARGS=()
-if [[ -n "${CMAKE_TOOLCHAIN_FILE:-}" ]]; then
-  TOOLCHAIN_POSIX="${CMAKE_TOOLCHAIN_FILE}"
-  if [[ "${IS_WINDOWS}" -eq 1 ]]; then
-    TOOLCHAIN_POSIX=$(cygpath -u "${CMAKE_TOOLCHAIN_FILE}")
-  fi
-  if [[ -f "${TOOLCHAIN_POSIX}" ]]; then
-    TOOLCHAIN_ARG="${TOOLCHAIN_POSIX}"
-    if [[ "${IS_WINDOWS}" -eq 1 ]]; then
-      TOOLCHAIN_ARG=$(to_mixed_path "${TOOLCHAIN_POSIX}")
-    fi
-    EXTRA_CMAKE_ARGS+=(-DCMAKE_TOOLCHAIN_FILE="${TOOLCHAIN_ARG}")
-  fi
-elif [[ -n "${VCPKG_ROOT:-}" ]]; then
-  VCPKG_POSIX="${VCPKG_ROOT}"
-  if [[ "${IS_WINDOWS}" -eq 1 ]]; then
-    VCPKG_POSIX=$(cygpath -u "${VCPKG_ROOT}")
-  fi
-  VCPKG_TC_POSIX="${VCPKG_POSIX}/scripts/buildsystems/vcpkg.cmake"
-  if [[ -f "${VCPKG_TC_POSIX}" ]]; then
-    TOOLCHAIN_ARG="${VCPKG_TC_POSIX}"
-    if [[ "${IS_WINDOWS}" -eq 1 ]]; then
-      TOOLCHAIN_ARG=$(to_mixed_path "${VCPKG_TC_POSIX}")
-    fi
-    EXTRA_CMAKE_ARGS+=(-DCMAKE_TOOLCHAIN_FILE="${TOOLCHAIN_ARG}")
-  fi
-fi
-if [[ -n "${VCPKG_TARGET_TRIPLET:-}" ]]; then
-  EXTRA_CMAKE_ARGS+=(-DVCPKG_TARGET_TRIPLET="${VCPKG_TARGET_TRIPLET}")
-fi
-declare -a CMAKE_CONFIG_ARGS=(-DENABLE_TESTS=ON)
-if [[ "${C_COVERAGE_SUPPORTED}" -eq 1 ]]; then
-  CMAKE_CONFIG_ARGS+=(-DENABLE_COVERAGE=ON)
-else
-  CMAKE_CONFIG_ARGS+=(-DENABLE_COVERAGE=OFF)
-fi
-if ((${#EXTRA_CMAKE_ARGS[@]} > 0)); then
-  CMAKE_CONFIG_ARGS+=("${EXTRA_CMAKE_ARGS[@]}")
-fi
 BUILD_CONFIG="${CMAKE_BUILD_CONFIGURATION:-${CMAKE_BUILD_CONFIG:-}}"
 if [[ "${IS_WINDOWS}" -eq 1 ]]; then
   BUILD_CONFIG="${BUILD_CONFIG:-RelWithDebInfo}"
 fi
-"${CMAKE_BIN[@]}" -S "${CMAKE_SOURCE_ARG}" -B "${CMAKE_BUILD_ARG}" "${CMAKE_CONFIG_ARGS[@]}"
 
-printf '%s\n' "--> Building all C targets with coverage flags..."
-build_targets=(log_collector_server log_agent log_consumer ipc_sender ipc_shared ipc_static test_ipc_suite)
-if [[ "${IS_WINDOWS}" -ne 1 ]]; then
-  build_targets+=(proc_launcher)
+if [[ "${SKIP_BUILD:-0}" -ne 1 ]]; then
+  rm -rf "${BUILD_DIR}"
+  mkdir -p "${BUILD_DIR}"
+
+  printf '%s\n' "--> Configuring CMake project (coverage instrumentation when supported)..."
+  CMAKE_SOURCE_ARG="${ROOT_DIR}"
+  CMAKE_BUILD_ARG="${BUILD_DIR}"
+  if [[ "${IS_WINDOWS}" -eq 1 ]]; then
+    CMAKE_SOURCE_ARG=$(to_mixed_path "${ROOT_DIR}")
+    CMAKE_BUILD_ARG=$(to_mixed_path "${BUILD_DIR}")
+  fi
+  declare -a EXTRA_CMAKE_ARGS=()
+  if [[ -n "${CMAKE_TOOLCHAIN_FILE:-}" ]]; then
+    TOOLCHAIN_POSIX="${CMAKE_TOOLCHAIN_FILE}"
+    if [[ "${IS_WINDOWS}" -eq 1 ]]; then
+      TOOLCHAIN_POSIX=$(cygpath -u "${CMAKE_TOOLCHAIN_FILE}")
+    fi
+    if [[ -f "${TOOLCHAIN_POSIX}" ]]; then
+      TOOLCHAIN_ARG="${TOOLCHAIN_POSIX}"
+      if [[ "${IS_WINDOWS}" -eq 1 ]]; then
+        TOOLCHAIN_ARG=$(to_mixed_path "${TOOLCHAIN_POSIX}")
+      fi
+      EXTRA_CMAKE_ARGS+=(-DCMAKE_TOOLCHAIN_FILE="${TOOLCHAIN_ARG}")
+    fi
+  elif [[ -n "${VCPKG_ROOT:-}" ]]; then
+    VCPKG_POSIX="${VCPKG_ROOT}"
+    if [[ "${IS_WINDOWS}" -eq 1 ]]; then
+      VCPKG_POSIX=$(cygpath -u "${VCPKG_ROOT}")
+    fi
+    VCPKG_TC_POSIX="${VCPKG_POSIX}/scripts/buildsystems/vcpkg.cmake"
+    if [[ -f "${VCPKG_TC_POSIX}" ]]; then
+      TOOLCHAIN_ARG="${VCPKG_TC_POSIX}"
+      if [[ "${IS_WINDOWS}" -eq 1 ]]; then
+        TOOLCHAIN_ARG=$(to_mixed_path "${VCPKG_TC_POSIX}")
+      fi
+      EXTRA_CMAKE_ARGS+=(-DCMAKE_TOOLCHAIN_FILE="${TOOLCHAIN_ARG}")
+    fi
+  fi
+  if [[ -n "${VCPKG_TARGET_TRIPLET:-}" ]]; then
+    EXTRA_CMAKE_ARGS+=(-DVCPKG_TARGET_TRIPLET="${VCPKG_TARGET_TRIPLET}")
+  fi
+  declare -a CMAKE_CONFIG_ARGS=(-DENABLE_TESTS=ON)
+  if [[ "${C_COVERAGE_SUPPORTED}" -eq 1 ]]; then
+    CMAKE_CONFIG_ARGS+=(-DENABLE_COVERAGE=ON)
+  else
+    CMAKE_CONFIG_ARGS+=(-DENABLE_COVERAGE=OFF)
+  fi
+  if ((${#EXTRA_CMAKE_ARGS[@]} > 0)); then
+    CMAKE_CONFIG_ARGS+=("${EXTRA_CMAKE_ARGS[@]}")
+  fi
+  "${CMAKE_BIN[@]}" -S "${CMAKE_SOURCE_ARG}" -B "${CMAKE_BUILD_ARG}" "${CMAKE_CONFIG_ARGS[@]}"
+
+  printf '%s\n' "--> Building all C targets with coverage flags..."
+  build_targets=(log_collector_server log_agent log_consumer ipc_sender ipc_shared ipc_static test_ipc_suite)
+  if [[ "${IS_WINDOWS}" -ne 1 ]]; then
+    build_targets+=(proc_launcher)
+  fi
+  build_cmd=("${CMAKE_BIN[@]}" --build "${CMAKE_BUILD_ARG}")
+  if [[ -n "${BUILD_CONFIG}" ]]; then
+    build_cmd+=(--config "${BUILD_CONFIG}")
+  fi
+  build_cmd+=(--target "${build_targets[@]}")
+  "${build_cmd[@]}"
+else
+  printf '%s\n' "--> Skipping build steps (SKIP_BUILD=1)..."
+  if [[ ! -d "${BUILD_DIR}" ]]; then
+    printf '[error] Build directory not found; cannot skip build.\n' >&2
+    exit 1
+  fi
 fi
-build_cmd=("${CMAKE_BIN[@]}" --build "${CMAKE_BUILD_ARG}")
-if [[ -n "${BUILD_CONFIG}" ]]; then
-  build_cmd+=(--config "${BUILD_CONFIG}")
-fi
-build_cmd+=(--target "${build_targets[@]}")
-"${build_cmd[@]}"
 
 pushd "${BUILD_DIR}" >/dev/null
 
@@ -496,19 +505,32 @@ else
   printf '%s\n' "--> Generating C coverage report with lcov (branch coverage) ..."
   if command -v lcov >/dev/null 2>&1 && command -v genhtml >/dev/null 2>&1; then
     mkdir -p "${ROOT_DIR}/coverage" "${ROOT_DIR}/coverage/html/c"
-    if find . \( -name '*.gcda' -o -name '*.gcno' \) | grep -q .; then
+    echo "DEBUG: PWD=$(pwd)"
+    echo "DEBUG: Finding gcda files..."
+    # Use || true to prevent SIGPIPE from find causing script exit due to pipefail
+    (find . \( -name '*.gcda' -o -name '*.gcno' \) | head -n 5) || true
+    
+    # Check if any coverage files exist (disable pipefail to avoid SIGPIPE from head/grep killing the check)
+    set +o pipefail
+    HAS_COVERAGE_FILES=$(find . \( -name '*.gcda' -o -name '*.gcno' \) | head -n 1)
+    set -o pipefail
+
+    if [[ -n "${HAS_COVERAGE_FILES}" ]]; then
       # Capture coverage data; don't fail the whole script on errors
-      if ! lcov --quiet --rc lcov_branch_coverage=1 --capture --directory . --output-file "${ROOT_DIR}/coverage/c_coverage.info" --no-external; then
+      if ! lcov --quiet --rc lcov_branch_coverage=1 --capture --directory . --output-file "${ROOT_DIR}/coverage/c_coverage.info"; then
         printf '[warn] lcov capture failed; skipping C coverage report\n'
       else
         # Some environments produce empty tracefiles; detect and skip gracefully
         if ! grep -q '^SF:' "${ROOT_DIR}/coverage/c_coverage.info" 2>/dev/null; then
           printf '[warn] no valid records in c_coverage.info; skipping C coverage report\n'
         else
-          if ! lcov --quiet --rc lcov_branch_coverage=1 --remove "${ROOT_DIR}/coverage/c_coverage.info" '*/tests/*' --output-file "${ROOT_DIR}/coverage/c_coverage.filtered.info"; then
+          if ! lcov --quiet --rc lcov_branch_coverage=1 --remove "${ROOT_DIR}/coverage/c_coverage.info" '*/tests/*' '*/generated/schema/*' '/usr/*' --output-file "${ROOT_DIR}/coverage/c_coverage.filtered.info"; then
             printf '[warn] lcov filter failed; skipping C coverage report\n'
           elif ! genhtml --quiet --branch-coverage "${ROOT_DIR}/coverage/c_coverage.filtered.info" --output-directory "${ROOT_DIR}/coverage/html/c"; then
             printf '[warn] genhtml failed; skipping C coverage report\n'
+          else
+            printf '\n%s\n' "--- C Coverage Summary ---"
+            lcov --list "${ROOT_DIR}/coverage/c_coverage.filtered.info"
           fi
         fi
       fi
@@ -524,17 +546,25 @@ fi
 rm -f .coverage
 "${PYTHON_BIN[@]}" -c "import coverage" >/dev/null 2>&1 || "${PYTHON_BIN[@]}" -m pip install --user -q coverage
 "${PYTHON_BIN[@]}" -c "import pytest" >/dev/null 2>&1 || "${PYTHON_BIN[@]}" -m pip install --user -q pytest pytest-cov
+
+# Export COVERAGE_FILE to ensure all tools use the same file
+export COVERAGE_FILE="${BUILD_DIR}/.coverage"
+
+# Enable MP2 debug logging for better coverage
+export DRLMS_MP2_DEBUG=1
+
 PYTHONPATH="${ROOT_DIR}/src" timeout_cmd 240s "${PYTHON_BIN[@]}" -m coverage run --branch -a -m pytest -q \
   "${ROOT_DIR}/tests/python/test_mproto_v2_client.py" \
   "${ROOT_DIR}/tests/python/test_cli_mproto_commands.py" \
   "${ROOT_DIR}/tests/python/test_cli_room_space.py" \
-  "${ROOT_DIR}/tests/python/test_pysignal_bridge.py" || true
+  "${ROOT_DIR}/tests/python/test_pysignal_bridge.py" \
+  "${ROOT_DIR}/tests/test_e2ee_core.py" || true
 
 printf '%s\n' "--> Generating Python coverage report..."
 mkdir -p "${ROOT_DIR}/coverage/html/python"
 COVERAGE_INCLUDE_PATTERN="*/ming_drlms/*"
-COVERAGE_FILE="${BUILD_DIR}/.coverage" "${PYTHON_BIN[@]}" -m coverage report --include "${COVERAGE_INCLUDE_PATTERN}"
-COVERAGE_FILE="${BUILD_DIR}/.coverage" "${PYTHON_BIN[@]}" -m coverage html --include "${COVERAGE_INCLUDE_PATTERN}" -d "${ROOT_DIR}/coverage/html/python"
+"${PYTHON_BIN[@]}" -m coverage report --include "${COVERAGE_INCLUDE_PATTERN}"
+"${PYTHON_BIN[@]}" -m coverage html --include "${COVERAGE_INCLUDE_PATTERN}" -d "${ROOT_DIR}/coverage/html/python"
 
 if [[ "${C_COVERAGE_SUPPORTED}" -eq 1 && "${IS_DARWIN}" -ne 1 ]]; then
   printf "C coverage report: %s\n" "file://${ROOT_DIR}/coverage/html/c/index.html"
