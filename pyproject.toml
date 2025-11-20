@@ -28,6 +28,8 @@ dependencies = [
     "requests",
     "packaging>=24.2",
     "textual>=0.47.0",
+    "tomli>=2.0.0; python_version < '3.11'",
+    "tomli-w>=1.0.0",
 ]
 
 [project.optional-dependencies]
@@ -35,8 +37,6 @@ dev = [
     "pytest>=7.0",
     "pytest-cov",
     "nuitka>=2.0",
-    "patchelf",
-    "ccache",
 ]
 
 [project.urls]

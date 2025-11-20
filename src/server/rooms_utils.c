@@ -121,8 +121,9 @@ int rooms_valid_name(const char *name) {
         return 0;
     for (const char *p = name; *p; ++p) {
         unsigned char c = (unsigned char)*p;
-        if (!(c == '.' || c == '_' || c == '-' || (c >= '0' && c <= '9') ||
-              (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')))
+        if (!(c == ' ' || c == '.' || c == '_' || c == '-' ||
+              (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') ||
+              (c >= 'a' && c <= 'z')))
             return 0;
     }
     return 1;

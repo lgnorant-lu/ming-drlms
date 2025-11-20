@@ -1,7 +1,14 @@
-from __future__ import annotations
+from .utils.startup_debug import log_time
+from .cli import app
 
-from ming_drlms.cli import app
+log_time("Imports started")
+log_time("CLI app imported")
+
+
+def main():
+    log_time("Entering main")
+    app()
 
 
 if __name__ == "__main__":
-    app()
+    main()

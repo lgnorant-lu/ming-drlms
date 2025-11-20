@@ -148,10 +148,21 @@ _server.register_top_level_aliases(app)
 @app.command("tui", help="Launch the Textual TUI interface (experimental)")
 def cli_tui():
     """Launch the Textual TUI interface."""
+    import time
+    import sys
+
+    start = time.time()
+    print(f"[DEBUG] TUI Command triggered at {0.0:.3f}s", file=sys.stderr)
+
     try:
         from ..tui.app import main as tui_main
-    except ImportError:
-        print("[red]TUI dependencies not installed[/red]")
+
+        print(
+            f"[DEBUG] TUI imports loaded at {time.time() - start:.3f}s", file=sys.stderr
+        )
+    except ImportError as e:
+        print("[red]TUI dependencies not installed or import failed[/red]")
+        print(f"Error details: {e}")
         print("Install with: pip install ming-drlms[dev]")
         raise typer.Exit(code=1)
 

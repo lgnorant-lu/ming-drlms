@@ -15,6 +15,8 @@ PROTOBUF_C__BEGIN_DECLS
 #endif
 
 typedef struct _Mingdrlms__V2__ErrorResponse Mingdrlms__V2__ErrorResponse;
+typedef struct _Mingdrlms__V2__PingRequest Mingdrlms__V2__PingRequest;
+typedef struct _Mingdrlms__V2__PongResponse Mingdrlms__V2__PongResponse;
 
 /* --- enums --- */
 
@@ -79,10 +81,12 @@ typedef enum _Mingdrlms__V2__MessageType {
     MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_S2S_SUB_REQUEST = 302,
     MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_S2S_SUB_RESPONSE = 303,
     /*
-     * 通用错误 (400-499)
+     * 通用错误和控制 (400-499)
      */
-    MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ERROR_RESPONSE =
-        400 PROTOBUF_C__FORCE_ENUM_TO_BE_INT_SIZE(MINGDRLMS__V2__MESSAGE_TYPE)
+    MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ERROR_RESPONSE = 400,
+    MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_PING = 401,
+    MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_PONG =
+        402 PROTOBUF_C__FORCE_ENUM_TO_BE_INT_SIZE(MINGDRLMS__V2__MESSAGE_TYPE)
 } Mingdrlms__V2__MessageType;
 
 /* --- messages --- */
@@ -101,6 +105,43 @@ struct _Mingdrlms__V2__ErrorResponse {
         , 0, (char *)protobuf_c_empty_string                                   \
     }
 
+/*
+ * 心跳检测
+ */
+struct _Mingdrlms__V2__PingRequest {
+    ProtobufCMessage base;
+    /*
+     * 客户端发送时间戳（毫秒）
+     */
+    int64_t timestamp_ms;
+    /*
+     * 可选：客户端标识
+     */
+    char *client_id;
+};
+#define MINGDRLMS__V2__PING_REQUEST__INIT                                      \
+    {                                                                          \
+        PROTOBUF_C_MESSAGE_INIT(&mingdrlms__v2__ping_request__descriptor)      \
+        , 0, (char *)protobuf_c_empty_string                                   \
+    }
+
+struct _Mingdrlms__V2__PongResponse {
+    ProtobufCMessage base;
+    /*
+     * 服务器响应时间戳（毫秒）
+     */
+    int64_t timestamp_ms;
+    /*
+     * 回显客户端时间戳
+     */
+    int64_t client_timestamp_ms;
+};
+#define MINGDRLMS__V2__PONG_RESPONSE__INIT                                     \
+    {                                                                          \
+        PROTOBUF_C_MESSAGE_INIT(&mingdrlms__v2__pong_response__descriptor)     \
+        , 0, 0                                                                 \
+    }
+
 /* Mingdrlms__V2__ErrorResponse methods */
 void mingdrlms__v2__error_response__init(Mingdrlms__V2__ErrorResponse *message);
 size_t mingdrlms__v2__error_response__get_packed_size(
@@ -115,10 +156,42 @@ mingdrlms__v2__error_response__unpack(ProtobufCAllocator *allocator, size_t len,
                                       const uint8_t *data);
 void mingdrlms__v2__error_response__free_unpacked(
     Mingdrlms__V2__ErrorResponse *message, ProtobufCAllocator *allocator);
+/* Mingdrlms__V2__PingRequest methods */
+void mingdrlms__v2__ping_request__init(Mingdrlms__V2__PingRequest *message);
+size_t mingdrlms__v2__ping_request__get_packed_size(
+    const Mingdrlms__V2__PingRequest *message);
+size_t
+mingdrlms__v2__ping_request__pack(const Mingdrlms__V2__PingRequest *message,
+                                  uint8_t *out);
+size_t mingdrlms__v2__ping_request__pack_to_buffer(
+    const Mingdrlms__V2__PingRequest *message, ProtobufCBuffer *buffer);
+Mingdrlms__V2__PingRequest *
+mingdrlms__v2__ping_request__unpack(ProtobufCAllocator *allocator, size_t len,
+                                    const uint8_t *data);
+void mingdrlms__v2__ping_request__free_unpacked(
+    Mingdrlms__V2__PingRequest *message, ProtobufCAllocator *allocator);
+/* Mingdrlms__V2__PongResponse methods */
+void mingdrlms__v2__pong_response__init(Mingdrlms__V2__PongResponse *message);
+size_t mingdrlms__v2__pong_response__get_packed_size(
+    const Mingdrlms__V2__PongResponse *message);
+size_t
+mingdrlms__v2__pong_response__pack(const Mingdrlms__V2__PongResponse *message,
+                                   uint8_t *out);
+size_t mingdrlms__v2__pong_response__pack_to_buffer(
+    const Mingdrlms__V2__PongResponse *message, ProtobufCBuffer *buffer);
+Mingdrlms__V2__PongResponse *
+mingdrlms__v2__pong_response__unpack(ProtobufCAllocator *allocator, size_t len,
+                                     const uint8_t *data);
+void mingdrlms__v2__pong_response__free_unpacked(
+    Mingdrlms__V2__PongResponse *message, ProtobufCAllocator *allocator);
 /* --- per-message closures --- */
 
 typedef void (*Mingdrlms__V2__ErrorResponse_Closure)(
     const Mingdrlms__V2__ErrorResponse *message, void *closure_data);
+typedef void (*Mingdrlms__V2__PingRequest_Closure)(
+    const Mingdrlms__V2__PingRequest *message, void *closure_data);
+typedef void (*Mingdrlms__V2__PongResponse_Closure)(
+    const Mingdrlms__V2__PongResponse *message, void *closure_data);
 
 /* --- services --- */
 
@@ -127,6 +200,9 @@ typedef void (*Mingdrlms__V2__ErrorResponse_Closure)(
 extern const ProtobufCEnumDescriptor mingdrlms__v2__message_type__descriptor;
 extern const ProtobufCMessageDescriptor
     mingdrlms__v2__error_response__descriptor;
+extern const ProtobufCMessageDescriptor mingdrlms__v2__ping_request__descriptor;
+extern const ProtobufCMessageDescriptor
+    mingdrlms__v2__pong_response__descriptor;
 
 PROTOBUF_C__END_DECLS
 

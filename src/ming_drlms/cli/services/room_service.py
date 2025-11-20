@@ -208,6 +208,30 @@ class RoomService:
             raise RoomServiceError(str(exc)) from exc
         return PublishResult(bytes_sent=len(payload), ephemeral=ephemeral)
 
+    def list_rooms(
+        self,
+        *,
+        host: str,
+        port: int,
+        user: str,
+        token_store_path: Optional[object] = None,
+        offset: int = 0,
+        limit: int = 100,
+        prefix: str = "",
+    ) -> tuple[list[object], int, bool]:
+        try:
+            with self._client_factory(
+                host,
+                port,
+                timeout=10.0,
+                token_store_path=token_store_path,
+            ) as client:
+                return client.list_rooms(
+                    user, offset=offset, limit=limit, prefix=prefix
+                )
+        except (MP2Error, AuthenticationError) as exc:
+            raise RoomServiceError(str(exc)) from exc
+
     # ------------------------------------------------------------------
     # Legacy protocol helpers
     # ------------------------------------------------------------------

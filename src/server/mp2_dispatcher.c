@@ -10,11 +10,53 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #ifdef HAVE_PROTOBUF_C
 #include "generated/schema/v2/common.pb-c.h"
 #include "generated/schema/v2/federation.pb-c.h"
 #include "generated/schema/v2/room.pb-c.h"
+
+// PING/PONG handler
+static int mp2_dispatcher_handle_ping(platform_socket_t fd,
+                                      const unsigned char *payload,
+                                      uint32_t payload_len) {
+    // 解析 PingRequest
+    Mingdrlms__V2__PingRequest *req =
+        mingdrlms__v2__ping_request__unpack(NULL, payload_len, payload);
+    if (!req) {
+        return -1;
+    }
+
+    // 构造 PongResponse
+    Mingdrlms__V2__PongResponse resp = MINGDRLMS__V2__PONG_RESPONSE__INIT;
+
+    // 获取当前时间戳（毫秒）
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    int64_t server_timestamp_ms =
+        (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+
+    resp.timestamp_ms = server_timestamp_ms;
+    resp.client_timestamp_ms = req->timestamp_ms; // 回显客户端时间戳
+
+    // 序列化并发送
+    size_t resp_sz = mingdrlms__v2__pong_response__get_packed_size(&resp);
+    unsigned char *resp_buf = (unsigned char *)malloc(resp_sz);
+    if (!resp_buf) {
+        mingdrlms__v2__ping_request__free_unpacked(req, NULL);
+        return -1;
+    }
+    mingdrlms__v2__pong_response__pack(&resp, resp_buf);
+
+    int result =
+        mp2_protocol_send_frame(fd, MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_PONG,
+                                resp_buf, (uint32_t)resp_sz);
+
+    free(resp_buf);
+    mingdrlms__v2__ping_request__free_unpacked(req, NULL);
+    return result;
+}
 
 #define S2S_PUBLISH_REQUEST__UNPACK mingdrlms__v2__s2_spublish_request__unpack
 #define S2S_PUBLISH_REQUEST__FREE_UNPACKED                                     \
@@ -180,6 +222,15 @@ int mp2_dispatcher_handle_frame(platform_socket_t fd, const mp2_frame_t *frame,
     case MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_E2EE_SENDER_KEY_PUSH:
         msg_type_name = "MSG_TYPE_E2EE_SENDER_KEY_PUSH";
         break;
+    case MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ROOM_LIST_REQUEST:
+        msg_type_name = "MSG_TYPE_ROOM_LIST_REQUEST";
+        break;
+    case MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_PING:
+        msg_type_name = "MSG_TYPE_PING";
+        break;
+    case MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_PONG:
+        msg_type_name = "MSG_TYPE_PONG";
+        break;
     default:
         // Keep as UNKNOWN for unrecognized message types
         break;
@@ -248,6 +299,9 @@ int mp2_dispatcher_handle_frame(platform_socket_t fd, const mp2_frame_t *frame,
     case MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_E2EE_SENDER_KEY_PUSH:
         return mp2_e2ee_handle_sender_key_push(fd, frame->payload,
                                                frame->payload_len);
+    case MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_PING:
+        return mp2_dispatcher_handle_ping(fd, frame->payload,
+                                          frame->payload_len);
     case 232:
         mp2_room_members_handle_list_request(fd, frame);
         return 0;

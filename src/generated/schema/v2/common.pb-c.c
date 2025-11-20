@@ -48,6 +48,86 @@ void mingdrlms__v2__error_response__free_unpacked(
            &mingdrlms__v2__error_response__descriptor);
     protobuf_c_message_free_unpacked((ProtobufCMessage *)message, allocator);
 }
+void mingdrlms__v2__ping_request__init(Mingdrlms__V2__PingRequest *message) {
+    static const Mingdrlms__V2__PingRequest init_value =
+        MINGDRLMS__V2__PING_REQUEST__INIT;
+    *message = init_value;
+}
+size_t mingdrlms__v2__ping_request__get_packed_size(
+    const Mingdrlms__V2__PingRequest *message) {
+    assert(message->base.descriptor ==
+           &mingdrlms__v2__ping_request__descriptor);
+    return protobuf_c_message_get_packed_size(
+        (const ProtobufCMessage *)(message));
+}
+size_t
+mingdrlms__v2__ping_request__pack(const Mingdrlms__V2__PingRequest *message,
+                                  uint8_t *out) {
+    assert(message->base.descriptor ==
+           &mingdrlms__v2__ping_request__descriptor);
+    return protobuf_c_message_pack((const ProtobufCMessage *)message, out);
+}
+size_t mingdrlms__v2__ping_request__pack_to_buffer(
+    const Mingdrlms__V2__PingRequest *message, ProtobufCBuffer *buffer) {
+    assert(message->base.descriptor ==
+           &mingdrlms__v2__ping_request__descriptor);
+    return protobuf_c_message_pack_to_buffer((const ProtobufCMessage *)message,
+                                             buffer);
+}
+Mingdrlms__V2__PingRequest *
+mingdrlms__v2__ping_request__unpack(ProtobufCAllocator *allocator, size_t len,
+                                    const uint8_t *data) {
+    return (Mingdrlms__V2__PingRequest *)protobuf_c_message_unpack(
+        &mingdrlms__v2__ping_request__descriptor, allocator, len, data);
+}
+void mingdrlms__v2__ping_request__free_unpacked(
+    Mingdrlms__V2__PingRequest *message, ProtobufCAllocator *allocator) {
+    if (!message)
+        return;
+    assert(message->base.descriptor ==
+           &mingdrlms__v2__ping_request__descriptor);
+    protobuf_c_message_free_unpacked((ProtobufCMessage *)message, allocator);
+}
+void mingdrlms__v2__pong_response__init(Mingdrlms__V2__PongResponse *message) {
+    static const Mingdrlms__V2__PongResponse init_value =
+        MINGDRLMS__V2__PONG_RESPONSE__INIT;
+    *message = init_value;
+}
+size_t mingdrlms__v2__pong_response__get_packed_size(
+    const Mingdrlms__V2__PongResponse *message) {
+    assert(message->base.descriptor ==
+           &mingdrlms__v2__pong_response__descriptor);
+    return protobuf_c_message_get_packed_size(
+        (const ProtobufCMessage *)(message));
+}
+size_t
+mingdrlms__v2__pong_response__pack(const Mingdrlms__V2__PongResponse *message,
+                                   uint8_t *out) {
+    assert(message->base.descriptor ==
+           &mingdrlms__v2__pong_response__descriptor);
+    return protobuf_c_message_pack((const ProtobufCMessage *)message, out);
+}
+size_t mingdrlms__v2__pong_response__pack_to_buffer(
+    const Mingdrlms__V2__PongResponse *message, ProtobufCBuffer *buffer) {
+    assert(message->base.descriptor ==
+           &mingdrlms__v2__pong_response__descriptor);
+    return protobuf_c_message_pack_to_buffer((const ProtobufCMessage *)message,
+                                             buffer);
+}
+Mingdrlms__V2__PongResponse *
+mingdrlms__v2__pong_response__unpack(ProtobufCAllocator *allocator, size_t len,
+                                     const uint8_t *data) {
+    return (Mingdrlms__V2__PongResponse *)protobuf_c_message_unpack(
+        &mingdrlms__v2__pong_response__descriptor, allocator, len, data);
+}
+void mingdrlms__v2__pong_response__free_unpacked(
+    Mingdrlms__V2__PongResponse *message, ProtobufCAllocator *allocator) {
+    if (!message)
+        return;
+    assert(message->base.descriptor ==
+           &mingdrlms__v2__pong_response__descriptor);
+    protobuf_c_message_free_unpacked((ProtobufCMessage *)message, allocator);
+}
 static const ProtobufCFieldDescriptor
     mingdrlms__v2__error_response__field_descriptors[2] = {
         {
@@ -88,8 +168,88 @@ const ProtobufCMessageDescriptor mingdrlms__v2__error_response__descriptor = {
     NULL,
     NULL /* reserved[123] */
 };
+static const ProtobufCFieldDescriptor
+    mingdrlms__v2__ping_request__field_descriptors[2] = {
+        {
+            "timestamp_ms", 1, PROTOBUF_C_LABEL_NONE, PROTOBUF_C_TYPE_INT64,
+            0, /* quantifier_offset */
+            offsetof(Mingdrlms__V2__PingRequest, timestamp_ms), NULL, NULL,
+            0,            /* flags */
+            0, NULL, NULL /* reserved1,reserved2, etc */
+        },
+        {
+            "client_id", 2, PROTOBUF_C_LABEL_NONE, PROTOBUF_C_TYPE_STRING,
+            0, /* quantifier_offset */
+            offsetof(Mingdrlms__V2__PingRequest, client_id), NULL,
+            &protobuf_c_empty_string, 0, /* flags */
+            0, NULL, NULL                /* reserved1,reserved2, etc */
+        },
+};
+static const unsigned mingdrlms__v2__ping_request__field_indices_by_name[] = {
+    1, /* field[1] = client_id */
+    0, /* field[0] = timestamp_ms */
+};
+static const ProtobufCIntRange
+    mingdrlms__v2__ping_request__number_ranges[1 + 1] = {{1, 0}, {0, 2}};
+const ProtobufCMessageDescriptor mingdrlms__v2__ping_request__descriptor = {
+    PROTOBUF_C__MESSAGE_DESCRIPTOR_MAGIC,
+    "mingdrlms.v2.PingRequest",
+    "PingRequest",
+    "Mingdrlms__V2__PingRequest",
+    "mingdrlms.v2",
+    sizeof(Mingdrlms__V2__PingRequest),
+    2,
+    mingdrlms__v2__ping_request__field_descriptors,
+    mingdrlms__v2__ping_request__field_indices_by_name,
+    1,
+    mingdrlms__v2__ping_request__number_ranges,
+    (ProtobufCMessageInit)mingdrlms__v2__ping_request__init,
+    NULL,
+    NULL,
+    NULL /* reserved[123] */
+};
+static const ProtobufCFieldDescriptor
+    mingdrlms__v2__pong_response__field_descriptors[2] = {
+        {
+            "timestamp_ms", 1, PROTOBUF_C_LABEL_NONE, PROTOBUF_C_TYPE_INT64,
+            0, /* quantifier_offset */
+            offsetof(Mingdrlms__V2__PongResponse, timestamp_ms), NULL, NULL,
+            0,            /* flags */
+            0, NULL, NULL /* reserved1,reserved2, etc */
+        },
+        {
+            "client_timestamp_ms", 2, PROTOBUF_C_LABEL_NONE,
+            PROTOBUF_C_TYPE_INT64, 0, /* quantifier_offset */
+            offsetof(Mingdrlms__V2__PongResponse, client_timestamp_ms), NULL,
+            NULL, 0,      /* flags */
+            0, NULL, NULL /* reserved1,reserved2, etc */
+        },
+};
+static const unsigned mingdrlms__v2__pong_response__field_indices_by_name[] = {
+    1, /* field[1] = client_timestamp_ms */
+    0, /* field[0] = timestamp_ms */
+};
+static const ProtobufCIntRange
+    mingdrlms__v2__pong_response__number_ranges[1 + 1] = {{1, 0}, {0, 2}};
+const ProtobufCMessageDescriptor mingdrlms__v2__pong_response__descriptor = {
+    PROTOBUF_C__MESSAGE_DESCRIPTOR_MAGIC,
+    "mingdrlms.v2.PongResponse",
+    "PongResponse",
+    "Mingdrlms__V2__PongResponse",
+    "mingdrlms.v2",
+    sizeof(Mingdrlms__V2__PongResponse),
+    2,
+    mingdrlms__v2__pong_response__field_descriptors,
+    mingdrlms__v2__pong_response__field_indices_by_name,
+    1,
+    mingdrlms__v2__pong_response__number_ranges,
+    (ProtobufCMessageInit)mingdrlms__v2__pong_response__init,
+    NULL,
+    NULL,
+    NULL /* reserved[123] */
+};
 static const ProtobufCEnumValue
-    mingdrlms__v2__message_type__enum_values_by_number[44] = {
+    mingdrlms__v2__message_type__enum_values_by_number[46] = {
         {"MSG_TYPE_UNKNOWN", "MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_UNKNOWN",
          0},
         {"MSG_TYPE_AUTH_CHALLENGE_REQUEST",
@@ -174,6 +334,8 @@ static const ProtobufCEnumValue
          "MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_S2S_SUB_RESPONSE", 303},
         {"MSG_TYPE_ERROR_RESPONSE",
          "MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ERROR_RESPONSE", 400},
+        {"MSG_TYPE_PING", "MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_PING", 401},
+        {"MSG_TYPE_PONG", "MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_PONG", 402},
         {"MSG_TYPE_E2EE_GENERATE_KEYS_REQUEST",
          "MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_E2EE_GENERATE_KEYS_REQUEST",
          500},
@@ -191,19 +353,21 @@ static const ProtobufCEnumValue
 };
 static const ProtobufCIntRange mingdrlms__v2__message_type__value_ranges[] = {
     {0, 0},    {100, 1},  {200, 7},  {210, 10},
-    {300, 34}, {400, 38}, {500, 39}, {0, 44}};
+    {300, 34}, {400, 38}, {500, 41}, {0, 46}};
 static const ProtobufCEnumValueIndex
-    mingdrlms__v2__message_type__enum_values_by_name[44] = {
+    mingdrlms__v2__message_type__enum_values_by_name[46] = {
         {"MSG_TYPE_AUTH_CHALLENGE_REQUEST", 1},
         {"MSG_TYPE_AUTH_CHALLENGE_RESPONSE", 2},
         {"MSG_TYPE_AUTH_REQUEST", 3},
         {"MSG_TYPE_AUTH_RESPONSE", 4},
-        {"MSG_TYPE_E2EE_GENERATE_KEYS_REQUEST", 39},
-        {"MSG_TYPE_E2EE_GENERATE_KEYS_RESPONSE", 40},
-        {"MSG_TYPE_E2EE_PREKEY_BUNDLE_REQUEST", 41},
-        {"MSG_TYPE_E2EE_PREKEY_BUNDLE_RESPONSE", 42},
-        {"MSG_TYPE_E2EE_SENDER_KEY_PUSH", 43},
+        {"MSG_TYPE_E2EE_GENERATE_KEYS_REQUEST", 41},
+        {"MSG_TYPE_E2EE_GENERATE_KEYS_RESPONSE", 42},
+        {"MSG_TYPE_E2EE_PREKEY_BUNDLE_REQUEST", 43},
+        {"MSG_TYPE_E2EE_PREKEY_BUNDLE_RESPONSE", 44},
+        {"MSG_TYPE_E2EE_SENDER_KEY_PUSH", 45},
         {"MSG_TYPE_ERROR_RESPONSE", 38},
+        {"MSG_TYPE_PING", 39},
+        {"MSG_TYPE_PONG", 40},
         {"MSG_TYPE_REFRESH_TOKEN_REQUEST", 5},
         {"MSG_TYPE_REFRESH_TOKEN_RESPONSE", 6},
         {"MSG_TYPE_ROOM_CREATE_REQUEST", 14},
@@ -245,9 +409,9 @@ const ProtobufCEnumDescriptor mingdrlms__v2__message_type__descriptor = {
     "MessageType",
     "Mingdrlms__V2__MessageType",
     "mingdrlms.v2",
-    44,
+    46,
     mingdrlms__v2__message_type__enum_values_by_number,
-    44,
+    46,
     mingdrlms__v2__message_type__enum_values_by_name,
     7,
     mingdrlms__v2__message_type__value_ranges,

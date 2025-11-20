@@ -1,8 +1,18 @@
-pytest
+# Development dependencies
+# Install with: pip install -e .[dev]
+
+pytest>=7.0
 pytest-cov
-ruff
-# graphviz
-protobuf==6.33.1
-argon2-cffi>=21.3.0
-pyyaml>=6.0.1
-cffi>=2.0.0
+nuitka>=2.0
+
+# System dependencies (install via apt/brew):
+# - build-essential (gcc, g++, make)
+# - ccache (optional, speeds up Nuitka builds)
+# - patchelf (required for Nuitka on Linux)
+# - python3-dev (Python headers)
+#
+# Linux/Ubuntu:
+#   sudo apt install build-essential ccache patchelf python3-dev
+#
+# macOS:
+#   brew install ccache patchelf

@@ -496,6 +496,41 @@ class MP2Client:
 
         return events
 
+    def send_ping(self) -> tuple[int, int] | None:
+        """Send PING to server and wait for PONG response.
+
+        Returns:
+            Tuple of (client_timestamp_ms, server_timestamp_ms) if successful, None otherwise.
+        """
+        self.connect()
+        sock = self._require_socket()
+
+        # Construct PingRequest
+        req = common_pb2.PingRequest()
+        req.timestamp_ms = int(time.time() * 1000)  # Current time in milliseconds
+        req.client_id = f"{self.host}:{self.port}"
+
+        write_frame(
+            sock,
+            common_pb2.MSG_TYPE_PING,
+            req.SerializeToString(),
+        )
+
+        # Wait for PONG response with short timeout
+        old_timeout = sock.gettimeout()
+        sock.settimeout(5.0)  # 5 second timeout for PONG
+        try:
+            frame = read_frame(sock)
+            if frame.msg_type == common_pb2.MSG_TYPE_PONG:
+                resp = common_pb2.PongResponse()
+                resp.ParseFromString(frame.payload)
+                return (resp.client_timestamp_ms, resp.timestamp_ms)
+            return None
+        except (ConnectionError, socket.timeout):
+            return None
+        finally:
+            sock.settimeout(old_timeout)
+
     def publish(
         self,
         username: str,

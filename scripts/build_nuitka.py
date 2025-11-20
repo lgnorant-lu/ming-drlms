@@ -62,6 +62,7 @@ def main():
         "--include-package=textual",
         "--include-package=typer",
         "--include-package=rich",
+        "--include-package=requests",
         "--include-data-files=src/ming_drlms/core/_pysignal_runtime.c=ming_drlms/core/_pysignal_runtime.c",
         # Note: anti-bloat plugin is auto-enabled in recent Nuitka versions
         "--follow-imports",

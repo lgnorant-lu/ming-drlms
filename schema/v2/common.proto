@@ -55,14 +55,27 @@ enum MessageType {
   MSG_TYPE_S2S_SUB_REQUEST = 302;
   MSG_TYPE_S2S_SUB_RESPONSE = 303;
 
-  // 通用错误 (400-499)
+  // 通用错误和控制 (400-499)
   MSG_TYPE_ERROR_RESPONSE = 400;
+  MSG_TYPE_PING = 401;
+  MSG_TYPE_PONG = 402;
 }
 
 // 通用错误响应
 message ErrorResponse {
   int32 code = 1;
   string message = 2;
+}
+
+// 心跳检测
+message PingRequest {
+  int64 timestamp_ms = 1;  // 客户端发送时间戳（毫秒）
+  string client_id = 2;    // 可选：客户端标识
+}
+
+message PongResponse {
+  int64 timestamp_ms = 1;  // 服务器响应时间戳（毫秒）
+  int64 client_timestamp_ms = 2;  // 回显客户端时间戳
 }
 
 
