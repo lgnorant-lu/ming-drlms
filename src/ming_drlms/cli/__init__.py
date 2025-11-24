@@ -56,7 +56,7 @@ def _app_entry(
 def cli_login(
     username: str = typer.Option(..., "--user", "-u", help="username"),
     host: str = typer.Option("127.0.0.1", "--host", "-H", help="server host"),
-    port: int = typer.Option(8080, "--port", "-p", help="server port"),
+    port: int = typer.Option(15035, "--port", "-p", help="server port"),
     password_hash: Optional[str] = typer.Option(
         None,
         "--password-hash",

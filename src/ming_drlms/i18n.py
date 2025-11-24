@@ -38,11 +38,11 @@ en_texts: Dict[str, str] = {
     "hello"
     " -H 127.0.0.1 -p 8080 -u alice -P password\n",
     # Room
-    "HELP.ROOM.INFO": "Query room info (ROOMINFO).\n\nExamples:\n  ming-drlms space room info -r demo -H 127.0.0.1 -p 8080 -u alice -P password\n",
-    "HELP.ROOM.SUB": "Subscribe to a room via M-Proto-v2 and print events.\n\nExamples:\n  ming-drlms room sub -r demo -u alice -H 127.0.0.1 -p 5000 --limit 10\n  ming-drlms room sub -r demo --json\n",
-    "HELP.ROOM.PUB": "Publish a text or binary payload into a room using M-Proto-v2.\n\nExamples:\n  ming-drlms room pub -r demo --text 'hello world'\n  ming-drlms room pub -r demo --file payload.bin --ephemeral\n",
-    "HELP.ROOM.SETPOLICY": "Set room policy (owner only).\n\nExamples:\n  ming-drlms space room set-policy -r demo --policy delegate -H 127.0.0.1 -p 8080 -u alice -P password\n",
-    "HELP.ROOM.TRANSFER": "Transfer room ownership (owner only).\n\nExamples:\n  ming-drlms space room transfer -r demo -n bob -H 127.0.0.1 -p 8080 -u alice -P password\n",
+    "HELP.ROOM.INFO": "Query room info.\n\nExamples:\n  ming-drlms room info --room demo --user alice\n",
+    "HELP.ROOM.SUB": "Subscribe to a room via M-Proto-v2 and print events.\n\nExamples:\n  ming-drlms room sub --room demo --user alice --limit 10\n  ming-drlms room sub --room demo --user alice --json\n",
+    "HELP.ROOM.PUB": "Publish a text or binary payload into a room using M-Proto-v2.\n\nExamples:\n  ming-drlms room pub --room demo --user alice --text 'hello world'\n  ming-drlms room pub --room demo --user alice --file payload.bin --ephemeral\n",
+    "HELP.ROOM.SETPOLICY": "Set room policy (owner only).\n\nExamples:\n  ming-drlms room set-policy --room demo --policy delegate --user alice\n",
+    "HELP.ROOM.TRANSFER": "Transfer room ownership (owner only).\n\nExamples:\n  ming-drlms room transfer --room demo --new-owner bob --user alice\n",
     # Config
     "HELP.CONFIG.INIT": "Write config template to a path.\n\nExamples:\n  ming-drlms config init --path drlms.yaml\n",
     # Server logs

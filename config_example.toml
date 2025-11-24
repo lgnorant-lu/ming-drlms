@@ -1,0 +1,36 @@
+# DRLMS Configuration Example
+# Copy this file to ~/.drlms/config.toml and customize as needed
+
+[general]
+# General application settings
+language = "en"
+
+[tui]
+# TUI-specific settings
+
+# Theme: "forest" (default) or custom theme name
+theme = "forest"
+
+# File picker root directory
+# - Empty string "" (default): Use current working directory
+# - Absolute path: e.g., "/home/user/drlms_data" or "C:/Users/Me/Documents"
+# - Relative path: e.g., "./uploads" (relative to where you run ming-drlms)
+# - Special tokens:
+#   - "$HOME" or "~": Your home directory
+#   - "$CWD": Current working directory (same as empty string)
+file_picker_root = ""
+
+# Examples:
+# file_picker_root = ""                                    # Current working directory (default)
+# file_picker_root = "~/Documents/DRLMS"                   # Home directory subfolder
+# file_picker_root = "/mnt/d/dogepy/pythonProject1/schoolworks/DRLMS"  # Absolute path (Linux/WSL)
+# file_picker_root = "D:\\dogepy\\pythonProject1\\schoolworks\\DRLMS"  # Absolute path (Windows)
+# file_picker_root = "./data"                              # Relative to launch directory
+
+[tui.custom_colors]
+# Override default Forest theme colors (optional)
+# Format: color_name = "#RRGGBB"
+# Available keys: primary, secondary, accent, background, surface, text, etc.
+# Example:
+# primary = "#b8bb26"
+# background = "#1d2021"

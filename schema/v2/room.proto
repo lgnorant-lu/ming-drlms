@@ -184,6 +184,18 @@ message RoomTransferResponse {
   string new_owner = 2;
 }
 
+message RoomClearOwnerRequest {
+  string room_name = 1;
+  string access_token = 2;
+}
+
+message RoomClearOwnerResponse {
+  string room_name = 1;
+  bool success = 2;
+  string message = 3;
+  string previous_owner = 4;  // The owner that was cleared (for logging)
+}
+
 // History ---------------------------------------------------------------
 
 message RoomHistoryRequest {

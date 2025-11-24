@@ -83,9 +83,11 @@ int sqlite_storage_init(SQLiteStorage *storage, const char *db_path) {
         "CREATE TABLE IF NOT EXISTS rooms ("
         "  name TEXT PRIMARY KEY,"
         "  owner TEXT,"
-        "  policy INTEGER DEFAULT 0,"
+        "  policy INTEGER DEFAULT 1,"
+        "  ownership_type INTEGER DEFAULT 0,"
         "  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
         "  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
+        "  last_activity DATETIME DEFAULT CURRENT_TIMESTAMP,"
         "  last_event_id INTEGER DEFAULT 0,"
         "  storage_policy_template INTEGER DEFAULT 0,"
         "  max_capacity_per_instance INTEGER DEFAULT 50,"
@@ -93,6 +95,16 @@ int sqlite_storage_init(SQLiteStorage *storage, const char *db_path) {
         "  total_instances INTEGER DEFAULT 0,"
         "  total_subs INTEGER DEFAULT 0,"
         "  max_ephemeral_events INTEGER DEFAULT 1000"
+        ");"
+        "CREATE TABLE IF NOT EXISTS room_members ("
+        "  room_name TEXT NOT NULL,"
+        "  username TEXT NOT NULL,"
+        "  power_level INTEGER DEFAULT 10,"
+        "  granted_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
+        "  granted_by TEXT,"
+        "  last_seen_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
+        "  PRIMARY KEY (room_name, username),"
+        "  FOREIGN KEY (room_name) REFERENCES rooms(name) ON DELETE CASCADE"
         ");"
         "CREATE TABLE IF NOT EXISTS room_instances ("
         "  instance_id TEXT PRIMARY KEY,"
@@ -206,7 +218,11 @@ int sqlite_storage_init(SQLiteStorage *storage, const char *db_path) {
         "CREATE INDEX IF NOT EXISTS idx_e2ee_pre_keys_active ON "
         "e2ee_pre_keys(user_name, device_id, is_active, pre_key_id);"
         "CREATE INDEX IF NOT EXISTS idx_e2ee_sender_keys_target ON "
-        "e2ee_sender_keys(target_user, room_name);";
+        "e2ee_sender_keys(target_user, room_name);"
+        "CREATE INDEX IF NOT EXISTS idx_room_members_power ON "
+        "room_members(room_name, power_level DESC);"
+        "CREATE INDEX IF NOT EXISTS idx_room_members_last_seen ON "
+        "room_members(room_name, last_seen_at DESC);";
 
     char *err_msg = NULL;
     rc = sqlite3_exec(storage->db, sql, NULL, NULL, &err_msg);

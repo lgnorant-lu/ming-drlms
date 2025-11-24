@@ -79,6 +79,15 @@ int mp2_rooms_extract_username(const char *access_token, char *username,
         return -1;
     }
 
+    const char *secret = mp2_auth_get_secret_or_default();
+    unsigned long long exp = 0;
+    int verify_result = mp2_auth_verify_access_token(
+        access_token, secret, username, username_cap, &exp);
+
+    if (verify_result == 0) {
+        return 0;
+    }
+
     // Test mode: accept any token if DRLMS_MP2_ACCEPT_ANY=1
     const char *accept_any = getenv("DRLMS_MP2_ACCEPT_ANY");
     if (accept_any && strcmp(accept_any, "1") == 0) {
@@ -94,10 +103,6 @@ int mp2_rooms_extract_username(const char *access_token, char *username,
         }
     }
 
-    const char *secret = mp2_auth_get_secret_or_default();
-    unsigned long long exp = 0;
-    int verify_result = mp2_auth_verify_access_token(
-        access_token, secret, username, username_cap, &exp);
     if (verify_result != 0) {
         if (err_code)
             *err_code = (verify_result == -2) ? 401 : 400;

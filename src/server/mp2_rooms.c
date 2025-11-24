@@ -98,6 +98,17 @@
     mingdrlms__v2__room_transfer_response__get_packed_size
 #define ROOM_TRANSFER_RESPONSE__PACK mingdrlms__v2__room_transfer_response__pack
 
+#define ROOM_CLEAR_OWNER_REQUEST__UNPACK                                       \
+    mingdrlms__v2__room_clear_owner_request__unpack
+#define ROOM_CLEAR_OWNER_REQUEST__FREE_UNPACKED                                \
+    mingdrlms__v2__room_clear_owner_request__free_unpacked
+#define ROOM_CLEAR_OWNER_RESPONSE__INIT                                        \
+    MINGDRLMS__V2__ROOM_CLEAR_OWNER_RESPONSE__INIT
+#define ROOM_CLEAR_OWNER_RESPONSE__GET_PACKED_SIZE                             \
+    mingdrlms__v2__room_clear_owner_response__get_packed_size
+#define ROOM_CLEAR_OWNER_RESPONSE__PACK                                        \
+    mingdrlms__v2__room_clear_owner_response__pack
+
 #define ROOM_HISTORY_REQUEST__UNPACK mingdrlms__v2__room_history_request__unpack
 #define ROOM_HISTORY_REQUEST__FREE_UNPACKED                                    \
     mingdrlms__v2__room_history_request__free_unpacked
@@ -164,6 +175,8 @@ typedef Mingdrlms__V2__RoomSetStoragePolicyResponse
     RoomSetStoragePolicyResponse;
 typedef Mingdrlms__V2__RoomTransferRequest RoomTransferRequest;
 typedef Mingdrlms__V2__RoomTransferResponse RoomTransferResponse;
+typedef Mingdrlms__V2__RoomClearOwnerRequest RoomClearOwnerRequest;
+typedef Mingdrlms__V2__RoomClearOwnerResponse RoomClearOwnerResponse;
 typedef Mingdrlms__V2__RoomHistoryRequest RoomHistoryRequest;
 typedef Mingdrlms__V2__RoomHistoryChunk RoomHistoryChunk;
 typedef Mingdrlms__V2__RoomHistoryDone RoomHistoryDone;
@@ -764,6 +777,91 @@ int mp2_rooms_handle_transfer_owner(platform_socket_t fd,
         (const ProtobufCMessage *)&resp);
 
     ROOM_TRANSFER_REQUEST__FREE_UNPACKED(req, NULL);
+    return 0;
+}
+
+int mp2_rooms_handle_clear_owner(platform_socket_t fd,
+                                 const unsigned char *payload,
+                                 uint32_t payload_len) {
+    RoomClearOwnerRequest *req =
+        ROOM_CLEAR_OWNER_REQUEST__UNPACK(NULL, payload_len, payload);
+    if (!req || !req->access_token || !req->room_name) {
+        if (req)
+            ROOM_CLEAR_OWNER_REQUEST__FREE_UNPACKED(req, NULL);
+        mp2_rooms_send_error(
+            fd, 400, "malformed request",
+            MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ERROR_RESPONSE);
+        return 0;
+    }
+
+    char username[64] = {0};
+    int err_code = 0;
+    const char *err_message = NULL;
+    if (mp2_rooms_extract_username(req->access_token, username,
+                                   sizeof(username), &err_code,
+                                   &err_message) != 0) {
+        mp2_rooms_send_error(
+            fd, err_code, err_message,
+            MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ERROR_RESPONSE);
+        ROOM_CLEAR_OWNER_REQUEST__FREE_UNPACKED(req, NULL);
+        return 0;
+    }
+
+    if (!rooms_valid_name(req->room_name)) {
+        mp2_rooms_send_error(
+            fd, 400, "invalid room name",
+            MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ERROR_RESPONSE);
+        ROOM_CLEAR_OWNER_REQUEST__FREE_UNPACKED(req, NULL);
+        return 0;
+    }
+
+    Room *room = rooms_get_or_create(req->room_name, NULL);
+    if (!room) {
+        mp2_rooms_send_error(
+            fd, 500, "failed to load room",
+            MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ERROR_RESPONSE);
+        ROOM_CLEAR_OWNER_REQUEST__FREE_UNPACKED(req, NULL);
+        return 0;
+    }
+
+    char owner_buf[65] = {0};
+    rooms_get_info(room, owner_buf, sizeof owner_buf, NULL, NULL, NULL, NULL,
+                   NULL, NULL, NULL);
+
+    fprintf(stderr, "[DEBUG] clear_owner: room=%s owner='%s' requester='%s'\n",
+            req->room_name, owner_buf, username);
+
+    // Permission check: only current owner or empty owner can clear
+    if (owner_buf[0] != '\0' && strcmp(owner_buf, username) != 0) {
+        mp2_rooms_send_error(
+            fd, 403, "permission denied: not owner",
+            MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ERROR_RESPONSE);
+        ROOM_CLEAR_OWNER_REQUEST__FREE_UNPACKED(req, NULL);
+        return 0;
+    }
+
+    // Save previous owner for response
+    char previous_owner[65] = {0};
+    snprintf(previous_owner, sizeof(previous_owner), "%s", owner_buf);
+
+    // Clear owner (set to empty string)
+    rooms_set_owner(room, req->room_name, "", PLATFORM_INVALID_SOCKET);
+
+    fprintf(stderr, "[room_clear_owner] room=%s previous_owner=%s by=%s\n",
+            req->room_name, previous_owner[0] ? previous_owner : "(none)",
+            username);
+
+    RoomClearOwnerResponse resp = ROOM_CLEAR_OWNER_RESPONSE__INIT;
+    resp.room_name = req->room_name;
+    resp.success = 1;
+    resp.message = "Owner cleared successfully";
+    resp.previous_owner = previous_owner;
+
+    (void)mp2_rooms_send_message(
+        fd, MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ROOM_CLEAR_OWNER_RESPONSE,
+        (const ProtobufCMessage *)&resp);
+
+    ROOM_CLEAR_OWNER_REQUEST__FREE_UNPACKED(req, NULL);
     return 0;
 }
 

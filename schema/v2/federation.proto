@@ -1,7 +1,7 @@
 syntax = "proto3";
 package mingdrlms.v2;
 
-import "schema/v2/room.proto";
+import "room.proto";
 
 // S2S (Server-to-Server) Federation Protocol
 // 用于联邦服务器之间的 Pub/Sub 消息转发

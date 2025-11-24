@@ -26,6 +26,7 @@ class TUIConfig:
 
     theme: str = "forest"
     language: str = "en"
+    file_picker_root: str = ""  # Empty string means use current working directory
     custom_colors: Dict[str, str] = field(default_factory=dict)
 
 
@@ -70,6 +71,7 @@ class ConfigManager:
             tui_config = TUIConfig(
                 theme=tui_data.get("theme", "forest"),
                 language=tui_data.get("language", "en"),
+                file_picker_root=tui_data.get("file_picker_root", ""),
                 custom_colors=tui_data.get("custom_colors", {}),
             )
 
@@ -88,6 +90,7 @@ class ConfigManager:
                 "tui": {
                     "theme": self.config.tui.theme,
                     "language": self.config.tui.language,
+                    "file_picker_root": self.config.tui.file_picker_root,
                     "custom_colors": self.config.tui.custom_colors,
                 },
             }

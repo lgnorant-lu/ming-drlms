@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable, Iterator, List, Optional
+import hashlib
 
 from ming_drlms.core.mproto_v2_client import (
     AuthenticationError,
@@ -208,6 +209,105 @@ class RoomService:
             raise RoomServiceError(str(exc)) from exc
         return PublishResult(bytes_sent=len(payload), ephemeral=ephemeral)
 
+    def publish_file(
+        self,
+        *,
+        host: str,
+        port: int,
+        user: str,
+        room: str,
+        file_path: Path | str,
+        ephemeral: bool = False,
+        token_store: Optional[object] = None,
+        timeout: float = 30.0,
+        chunk_size: int = 64 * 1024,  # 64KB chunks
+    ) -> PublishResult:
+        """Publish a file to the room."""
+        path = Path(file_path)
+        if not path.exists():
+            raise RoomServiceError(f"File not found: {path}")
+
+        # Calculate size and hash
+        file_size = path.stat().st_size
+        sha256 = hashlib.sha256()
+        with open(path, "rb") as f:
+            while chunk := f.read(8192):
+                sha256.update(chunk)
+        file_hash = sha256.hexdigest()
+
+        try:
+            with self._client_factory(
+                host,
+                port,
+                timeout=timeout,
+                token_store_path=token_store,
+            ) as client:
+                # 1. Begin upload
+                upload_id = client.publish_file_begin(
+                    user,
+                    room,
+                    path.name,
+                    file_size,
+                    file_hash,
+                    ephemeral=ephemeral,
+                )
+
+                # 2. Send chunks
+                with open(path, "rb") as f:
+                    offset = 0
+                    while True:
+                        chunk = f.read(chunk_size)
+                        if not chunk:
+                            break
+                        is_last = (offset + len(chunk)) >= file_size
+                        client.publish_file_chunk(
+                            upload_id,
+                            chunk,
+                            offset,
+                            is_last,
+                        )
+                        offset += len(chunk)
+
+                # 3. Commit
+                client.publish_file_commit(upload_id)
+
+        except (AuthenticationError, MP2Error, OSError) as exc:
+            raise RoomServiceError(str(exc)) from exc
+
+        return PublishResult(bytes_sent=file_size, ephemeral=ephemeral)
+
+    def download_file(
+        self,
+        *,
+        host: str,
+        port: int,
+        user: str,
+        room: str,
+        event_id: int,
+        output_path: Path | str,
+        token_store: Optional[object] = None,
+        timeout: float = 30.0,
+    ) -> int:
+        """Download a file from the room. Returns bytes downloaded."""
+        out_path = Path(output_path)
+        bytes_downloaded = 0
+
+        try:
+            with self._client_factory(
+                host,
+                port,
+                timeout=timeout,
+                token_store_path=token_store,
+            ) as client:
+                with open(out_path, "wb") as f:
+                    for chunk in client.download_file(user, room, event_id):
+                        f.write(chunk)
+                        bytes_downloaded += len(chunk)
+        except (AuthenticationError, MP2Error, OSError) as exc:
+            raise RoomServiceError(str(exc)) from exc
+
+        return bytes_downloaded
+
     def list_rooms(
         self,
         *,
@@ -268,35 +368,30 @@ class RoomService:
         host: str,
         port: int,
         user: str,
-        password: str,
         room: str,
+        token_store_path: Optional[object] = None,
     ) -> RoomInfo:
-        with self._legacy_connection(
-            host=host, port=port, user=user, password=password
-        ) as sock:
-            payload = f"ROOMINFO|{room}\n".encode()
-            sock.sendall(payload)
-            raw_lines: List[str] = []
-            info_payload: Optional[str] = None
-            while True:
-                line = self._recv_line(sock)
-                if not line:
-                    break
-                raw_lines.append(line)
-                if line.startswith("ERR|"):
-                    raise RoomServiceError(line)
-                if line.startswith("OK|ROOMINFO|"):
-                    info_payload = line[3:]
-                    break
-                if line.startswith("ROOMINFO|"):
-                    info_payload = line
-                    break
-                if line.startswith("OK"):
-                    continue
-            if not info_payload:
-                raise RoomServiceError("ROOMINFO not returned")
-            room_name, details = self._parse_roominfo(info_payload)
-            return RoomInfo(name=room_name, details=details, raw=raw_lines)
+        """Fetch room info using MP2 protocol"""
+        try:
+            with self._client_factory(
+                host, port, timeout=10.0, token_store_path=token_store_path
+            ) as client:
+                info = client.get_room_info(user, room)
+
+                # Adapt to RoomInfo structure expected by CLI
+                details = info["details"]
+                details["policy"] = info["policy"]
+                details["policy_name"] = info["policy_name"]
+                details["storage_policy"] = info["storage_policy"]
+                details["storage_policy_name"] = info["storage_policy_name"]
+                details["owner"] = info["owner"]
+                details["subscribers"] = info["subscribers"]
+                details["last_event_id"] = info["last_event_id"]
+                details["created_at"] = info["created_at"]
+
+                return RoomInfo(name=info["name"], details=details, raw=[])
+        except (AuthenticationError, MP2Error, OSError) as exc:
+            raise RoomServiceError(str(exc)) from exc
 
     @staticmethod
     def _build_key_store(path: Optional[Path | str]) -> LocalKeyStore:
@@ -314,17 +409,27 @@ class RoomService:
         host: str,
         port: int,
         user: str,
-        password: str,
         room: str,
         policy: str,
-    ) -> CommandResult:
-        return self._execute_simple_command(
-            host=host,
-            port=port,
-            user=user,
-            password=password,
-            command=f"CREATE|{room}|{policy}\n",
-        )
+        token_store_path: Optional[object] = None,
+    ) -> dict:
+        """Create room using MP2 protocol"""
+        storage_policy_map = {"persistent": 0, "ephemeral": 1}
+        storage_policy = storage_policy_map.get(policy.lower(), 0)
+
+        try:
+            with self._client_factory(
+                host, port, timeout=10.0, token_store_path=token_store_path
+            ) as client:
+                return client.create_room(
+                    user,
+                    room,
+                    storage_policy=storage_policy,
+                    max_capacity=50,
+                    max_instances=20,
+                )
+        except (AuthenticationError, MP2Error, OSError) as exc:
+            raise RoomServiceError(str(exc)) from exc
 
     def set_policy(
         self,
@@ -332,17 +437,23 @@ class RoomService:
         host: str,
         port: int,
         user: str,
-        password: str,
         room: str,
         policy: str,
-    ) -> CommandResult:
-        return self._execute_simple_command(
-            host=host,
-            port=port,
-            user=user,
-            password=password,
-            command=f"SETPOLICY|{room}|{policy}\n",
-        )
+        token_store_path: Optional[object] = None,
+    ) -> dict:
+        """Set room policy using MP2 protocol"""
+        policy_map = {"retain": 0, "delegate": 1, "teardown": 2}
+        policy_int = policy_map.get(policy.lower())
+        if policy_int is None:
+            raise RoomServiceError(f"Invalid policy: {policy}")
+
+        try:
+            with self._client_factory(
+                host, port, timeout=10.0, token_store_path=token_store_path
+            ) as client:
+                return client.set_room_policy(user, room, policy_int)
+        except (AuthenticationError, MP2Error, OSError) as exc:
+            raise RoomServiceError(str(exc)) from exc
 
     def set_storage_policy(
         self,
@@ -350,17 +461,23 @@ class RoomService:
         host: str,
         port: int,
         user: str,
-        password: str,
         room: str,
         policy: str,
-    ) -> CommandResult:
-        return self._execute_simple_command(
-            host=host,
-            port=port,
-            user=user,
-            password=password,
-            command=f"SETSTORAGE|{room}|{policy}\n",
-        )
+        token_store_path: Optional[object] = None,
+    ) -> dict:
+        """Set room storage policy using MP2 protocol"""
+        policy_map = {"persistent": 0, "ephemeral": 1}
+        policy_int = policy_map.get(policy.lower())
+        if policy_int is None:
+            raise RoomServiceError(f"Invalid storage policy: {policy}")
+
+        try:
+            with self._client_factory(
+                host, port, timeout=10.0, token_store_path=token_store_path
+            ) as client:
+                return client.set_room_storage_policy(user, room, policy_int)
+        except (AuthenticationError, MP2Error, OSError) as exc:
+            raise RoomServiceError(str(exc)) from exc
 
     def transfer_owner(
         self,
@@ -368,18 +485,45 @@ class RoomService:
         host: str,
         port: int,
         user: str,
-        password: str,
         room: str,
         new_owner: str,
-    ) -> CommandResult:
-        return self._execute_simple_command(
-            host=host,
-            port=port,
-            user=user,
-            password=password,
-            command=f"TRANSFER|{room}|{new_owner}\n",
-            capture_additional=True,
-        )
+        token_store_path: Optional[object] = None,
+    ) -> dict:
+        """Transfer room ownership using MP2 protocol"""
+        try:
+            with self._client_factory(
+                host, port, timeout=10.0, token_store_path=token_store_path
+            ) as client:
+                return client.transfer_room_ownership(user, room, new_owner)
+        except (AuthenticationError, MP2Error, OSError) as exc:
+            raise RoomServiceError(str(exc)) from exc
+
+    def clear_owner(
+        self,
+        *,
+        host: str,
+        port: int,
+        user: str,
+        room: str,
+        token_store_path: Optional[object] = None,
+        timeout: float = 10.0,
+    ) -> dict:
+        """Clear room owner (return to system ownership using MP2 protocol)
+
+        Returns:
+            dict with 'success', 'message', 'previous_owner', 'room_name'
+        """
+        try:
+            with self._client_factory(
+                host,
+                port,
+                timeout=timeout,
+                token_store_path=token_store_path,
+            ) as client:
+                result = client.clear_room_owner(user, room)
+                return result
+        except (AuthenticationError, MP2Error, OSError) as exc:
+            raise RoomServiceError(str(exc)) from exc
 
     # ------------------------------------------------------------------
     # Private helpers

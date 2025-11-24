@@ -947,6 +947,384 @@ class MP2Client:
             raise MP2Error(f"sender key push failed: {err.code}: {err.message}")
         raise MP2Error(f"unexpected msg_type={frame.msg_type} during sender key push")
 
+    # ------------------------------------------------------------------
+    # File Protocol
+    # ------------------------------------------------------------------
+    def publish_file_begin(
+        self,
+        username: str,
+        room_name: str,
+        filename: str,
+        size_bytes: int,
+        sha256_hex: str,
+        ephemeral: bool = False,
+    ) -> str:
+        """Begin file upload. Returns upload_id."""
+        record = self.ensure_access_token(username)
+        self.connect()
+        sock = self._require_socket()
+
+        req = room_pb2.RoomFilePublishBegin()
+        req.room_name = room_name
+        req.access_token = record.access_token
+        req.filename = filename
+        req.size_bytes = size_bytes
+        req.sha256_hex = sha256_hex
+        req.ephemeral = ephemeral
+
+        write_frame(
+            sock,
+            common_pb2.MSG_TYPE_ROOM_FILE_PUB_BEGIN,
+            req.SerializeToString(),
+        )
+
+        frame = read_frame(sock)
+        if frame.msg_type == common_pb2.MSG_TYPE_ROOM_FILE_PUB_BEGIN:
+            resp = room_pb2.RoomFilePublishBegin()
+            resp.ParseFromString(frame.payload)
+            return resp.upload_id
+        if frame.msg_type == common_pb2.MSG_TYPE_ERROR_RESPONSE:
+            err = common_pb2.ErrorResponse()
+            err.ParseFromString(frame.payload)
+            raise MP2Error(f"file publish begin failed: {err.code}: {err.message}")
+        raise MP2Error(
+            f"unexpected msg_type={frame.msg_type} during file publish begin"
+        )
+
+    def publish_file_chunk(
+        self,
+        upload_id: str,
+        data: bytes,
+        offset: int,
+        last_chunk: bool,
+    ) -> None:
+        """Send a file chunk."""
+        self.connect()
+        sock = self._require_socket()
+
+        req = room_pb2.RoomFilePublishChunk()
+        req.upload_id = upload_id
+        req.data = data
+        req.offset = offset
+        req.last_chunk = last_chunk
+
+        write_frame(
+            sock,
+            common_pb2.MSG_TYPE_ROOM_FILE_PUB_CHUNK,
+            req.SerializeToString(),
+        )
+
+    def publish_file_commit(
+        self,
+        upload_id: str,
+    ) -> tuple[str, int]:
+        """Commit file upload. Returns (room_name, event_id)."""
+        self.connect()
+        sock = self._require_socket()
+
+        req = room_pb2.RoomFilePublishCommit()
+        req.upload_id = upload_id
+
+        write_frame(
+            sock,
+            common_pb2.MSG_TYPE_ROOM_FILE_PUB_COMMIT,
+            req.SerializeToString(),
+        )
+
+        frame = read_frame(sock)
+        if frame.msg_type == common_pb2.MSG_TYPE_ROOM_FILE_PUB_RESULT:
+            resp = room_pb2.RoomFilePublishResult()
+            resp.ParseFromString(frame.payload)
+            return resp.room_name, int(resp.event_id)
+        if frame.msg_type == common_pb2.MSG_TYPE_ERROR_RESPONSE:
+            err = common_pb2.ErrorResponse()
+            err.ParseFromString(frame.payload)
+            raise MP2Error(f"file publish commit failed: {err.code}: {err.message}")
+        raise MP2Error(
+            f"unexpected msg_type={frame.msg_type} during file publish commit"
+        )
+
+    def download_file(
+        self,
+        username: str,
+        room_name: str,
+        event_id: int,
+    ) -> Generator[bytes, None, None]:
+        """Download file. Yields data chunks."""
+        record = self.ensure_access_token(username)
+        self.connect()
+        sock = self._require_socket()
+
+        req = room_pb2.RoomFileDownloadRequest()
+        req.room_name = room_name
+        req.access_token = record.access_token
+        req.event_id = event_id
+
+        write_frame(
+            sock,
+            common_pb2.MSG_TYPE_ROOM_FILE_DOWNLOAD_REQUEST,
+            req.SerializeToString(),
+        )
+
+        while True:
+            frame = read_frame(sock)
+            if frame.msg_type == common_pb2.MSG_TYPE_ROOM_FILE_DOWNLOAD_CHUNK:
+                chunk = room_pb2.RoomFileDownloadChunk()
+                chunk.ParseFromString(frame.payload)
+                yield chunk.data
+                if chunk.last_chunk:
+                    break
+            elif frame.msg_type == common_pb2.MSG_TYPE_ROOM_FILE_DOWNLOAD_DONE:
+                break
+            elif frame.msg_type == common_pb2.MSG_TYPE_ERROR_RESPONSE:
+                err = common_pb2.ErrorResponse()
+                err.ParseFromString(frame.payload)
+                raise MP2Error(f"file download failed: {err.code}: {err.message}")
+            else:
+                raise MP2Error(
+                    f"unexpected msg_type={frame.msg_type} during file download"
+                )
+
+    def clear_room_owner(self, username: str, room_name: str) -> dict:
+        """Clear room owner (return to system ownership)
+
+        Args:
+            username: User performing the action
+            room_name: Name of the room
+
+        Returns:
+            dict with 'success', 'message', 'previous_owner', 'room_name'
+
+        Raises:
+            MP2Error: If the operation fails
+        """
+        record = self.ensure_access_token(username)
+        self.connect()
+        sock = self._require_socket()
+
+        # Build request
+        req = room_pb2.RoomClearOwnerRequest()
+        req.room_name = room_name
+        req.access_token = record.access_token
+
+        # Send request
+        write_frame(
+            sock,
+            common_pb2.MSG_TYPE_ROOM_CLEAR_OWNER_REQUEST,
+            req.SerializeToString(),
+        )
+
+        # Read response
+        frame = read_frame(sock)
+
+        if frame.msg_type == common_pb2.MSG_TYPE_ROOM_CLEAR_OWNER_RESPONSE:
+            resp = room_pb2.RoomClearOwnerResponse()
+            resp.ParseFromString(frame.payload)
+            return {
+                "success": resp.success,
+                "message": resp.message,
+                "previous_owner": resp.previous_owner,
+                "room_name": resp.room_name,
+            }
+
+        if frame.msg_type == common_pb2.MSG_TYPE_ERROR_RESPONSE:
+            err = common_pb2.ErrorResponse()
+            err.ParseFromString(frame.payload)
+            raise MP2Error(f"clear owner failed: {err.code}: {err.message}")
+
+        raise MP2Error(f"unexpected msg_type={frame.msg_type} during clear owner")
+
+    def set_room_policy(
+        self,
+        username: str,
+        room_name: str,
+        policy: int,  # 0=retain, 1=delegate, 2=teardown
+    ) -> dict:
+        """Set room policy using MP2 protocol
+
+        Args:
+            username: User performing the action
+            room_name: Name of the room
+            policy: Policy value (0=retain, 1=delegate, 2=teardown)
+
+        Returns:
+            dict with 'room_name', 'policy'
+        """
+        record = self.ensure_access_token(username)
+        self.connect()
+        sock = self._require_socket()
+
+        req = room_pb2.RoomSetPolicyRequest()
+        req.room_name = room_name
+        req.access_token = record.access_token
+        req.policy = policy
+
+        write_frame(
+            sock,
+            common_pb2.MSG_TYPE_ROOM_SET_POLICY_REQUEST,
+            req.SerializeToString(),
+        )
+
+        frame = read_frame(sock)
+
+        if frame.msg_type == common_pb2.MSG_TYPE_ROOM_SET_POLICY_RESPONSE:
+            resp = room_pb2.RoomSetPolicyResponse()
+            resp.ParseFromString(frame.payload)
+            return {"room_name": resp.room_name, "policy": resp.policy}
+
+        if frame.msg_type == common_pb2.MSG_TYPE_ERROR_RESPONSE:
+            err = common_pb2.ErrorResponse()
+            err.ParseFromString(frame.payload)
+            raise MP2Error(f"set policy failed: {err.code}: {err.message}")
+
+        raise MP2Error(f"unexpected msg_type={frame.msg_type}")
+
+    def set_room_storage_policy(
+        self,
+        username: str,
+        room_name: str,
+        storage_policy: int,  # 0=persistent, 1=ephemeral
+    ) -> dict:
+        """Set room storage policy using MP2 protocol
+
+        Args:
+            username: User performing the action
+            room_name: Name of the room
+            storage_policy: Storage policy (0=persistent, 1=ephemeral)
+
+        Returns:
+            dict with 'room_name', 'storage_policy'
+        """
+        record = self.ensure_access_token(username)
+        self.connect()
+        sock = self._require_socket()
+
+        req = room_pb2.RoomSetStoragePolicyRequest()
+        req.room_name = room_name
+        req.access_token = record.access_token
+        req.storage_policy = storage_policy
+
+        write_frame(
+            sock,
+            common_pb2.MSG_TYPE_ROOM_SET_STORAGE_POLICY_REQUEST,
+            req.SerializeToString(),
+        )
+
+        frame = read_frame(sock)
+
+        if frame.msg_type == common_pb2.MSG_TYPE_ROOM_SET_STORAGE_POLICY_RESPONSE:
+            resp = room_pb2.RoomSetStoragePolicyResponse()
+            resp.ParseFromString(frame.payload)
+            return {"room_name": resp.room_name, "storage_policy": resp.storage_policy}
+
+        if frame.msg_type == common_pb2.MSG_TYPE_ERROR_RESPONSE:
+            err = common_pb2.ErrorResponse()
+            err.ParseFromString(frame.payload)
+            raise MP2Error(f"set storage policy failed: {err.code}: {err.message}")
+
+        raise MP2Error(f"unexpected msg_type={frame.msg_type}")
+
+    def transfer_room_ownership(
+        self, username: str, room_name: str, new_owner: str
+    ) -> dict:
+        """Transfer room ownership using MP2 protocol
+
+        Args:
+            username: Current owner
+            room_name: Name of the room
+            new_owner: New owner username
+
+        Returns:
+            dict with 'room_name', 'new_owner'
+        """
+        record = self.ensure_access_token(username)
+        self.connect()
+        sock = self._require_socket()
+
+        req = room_pb2.RoomTransferRequest()
+        req.room_name = room_name
+        req.access_token = record.access_token
+        req.new_owner = new_owner
+
+        write_frame(
+            sock,
+            common_pb2.MSG_TYPE_ROOM_TRANSFER_REQUEST,
+            req.SerializeToString(),
+        )
+
+        frame = read_frame(sock)
+
+        if frame.msg_type == common_pb2.MSG_TYPE_ROOM_TRANSFER_RESPONSE:
+            resp = room_pb2.RoomTransferResponse()
+            resp.ParseFromString(frame.payload)
+            return {"room_name": resp.room_name, "new_owner": resp.new_owner}
+
+        if frame.msg_type == common_pb2.MSG_TYPE_ERROR_RESPONSE:
+            err = common_pb2.ErrorResponse()
+            err.ParseFromString(frame.payload)
+            raise MP2Error(f"transfer ownership failed: {err.code}: {err.message}")
+
+        raise MP2Error(f"unexpected msg_type={frame.msg_type}")
+
+    def get_room_info(
+        self,
+        username: str,
+        room_name: str,
+    ) -> dict:
+        """Get room info using MP2 protocol
+
+        Args:
+            username: User performing the action
+            room_name: Name of the room
+
+        Returns:
+            dict containing room info
+        """
+        record = self.ensure_access_token(username)
+        self.connect()
+        sock = self._require_socket()
+
+        req = room_pb2.RoomInfoRequest()
+        req.access_token = record.access_token
+        req.room_name = room_name
+
+        write_frame(
+            sock,
+            common_pb2.MSG_TYPE_ROOM_INFO_REQUEST,
+            req.SerializeToString(),
+        )
+
+        frame = read_frame(sock)
+        if frame.msg_type == common_pb2.MSG_TYPE_ROOM_INFO_RESPONSE:
+            resp = room_pb2.RoomInfoResponse()
+            resp.ParseFromString(frame.payload)
+
+            policy_map = {0: "retain", 1: "delegate", 2: "teardown"}
+            storage_map = {0: "persistent", 1: "ephemeral"}
+
+            return {
+                "name": resp.room_name,
+                "owner": resp.owner,
+                "policy": resp.policy,
+                "policy_name": policy_map.get(resp.policy, "unknown"),
+                "storage_policy": resp.storage_policy,
+                "storage_policy_name": storage_map.get(resp.storage_policy, "unknown"),
+                "subscribers": resp.total_subscribers,
+                "last_event_id": resp.last_event_id,
+                "created_at": resp.created_at_epoch,
+                "details": {
+                    "subs": resp.total_subscribers,
+                    "last_event_id": resp.last_event_id,
+                },
+            }
+
+        if frame.msg_type == common_pb2.MSG_TYPE_ERROR_RESPONSE:
+            err = common_pb2.ErrorResponse()
+            err.ParseFromString(frame.payload)
+            raise MP2Error(f"get room info failed: {err.code}: {err.message}")
+
+        raise MP2Error(f"unexpected msg_type={frame.msg_type}")
+
     def _require_socket(self) -> socket.socket:
         if self._sock is None:
             raise RuntimeError("socket not connected")

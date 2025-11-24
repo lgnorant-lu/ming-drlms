@@ -36,6 +36,10 @@ int mp2_rooms_handle_transfer_owner(platform_socket_t fd,
                                     const unsigned char *payload,
                                     uint32_t payload_len);
 
+int mp2_rooms_handle_clear_owner(platform_socket_t fd,
+                                 const unsigned char *payload,
+                                 uint32_t payload_len);
+
 int mp2_rooms_handle_history_request(platform_socket_t fd,
                                      const unsigned char *payload,
                                      uint32_t payload_len);

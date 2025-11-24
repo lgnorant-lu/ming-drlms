@@ -275,6 +275,10 @@ int mp2_dispatcher_handle_frame(platform_socket_t fd, const mp2_frame_t *frame,
     case MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ROOM_TRANSFER_REQUEST:
         return mp2_rooms_handle_transfer_owner(fd, frame->payload,
                                                frame->payload_len);
+    case MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ROOM_CLEAR_OWNER_REQUEST:
+        fprintf(stderr, "Received MSG_TYPE_ROOM_CLEAR_OWNER_REQUEST\n");
+        return mp2_rooms_handle_clear_owner(fd, frame->payload,
+                                            frame->payload_len);
     case MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ROOM_HISTORY_REQUEST:
         return mp2_rooms_handle_history_request(fd, frame->payload,
                                                 frame->payload_len);

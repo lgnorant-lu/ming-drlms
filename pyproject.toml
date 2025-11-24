@@ -55,7 +55,7 @@ include = ["ming_drlms*"]
 exclude = ["tests*"]
 
 [tool.setuptools.package-data]
-"ming_drlms" = ["cli_help/*.md", "proto/schema/v2/*_pb2.py"]
+"ming_drlms" = ["cli_help/*.md", "proto/schema/v2/*_pb2.py", "core/_pysignal_runtime.c"]
 
 [tool.setuptools_scm]
 write_to = "src/ming_drlms/_version.py"

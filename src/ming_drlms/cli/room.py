@@ -172,7 +172,7 @@ def room_pub(
         False, "--ephemeral/--persistent", help="使用阅后即焚事件"
     ),
     host: str = typer.Option("127.0.0.1", "--host", "-H"),
-    port: int = typer.Option(8080, "--port", "-p"),
+    port: int = typer.Option(15035, "--port", "-p"),
     user: str = typer.Option("alice", "--user", "-u"),
     token_store: Optional[Path] = typer.Option(
         None,
@@ -203,58 +203,92 @@ def room_pub(
         raise typer.Exit(code=2)
 
     if text is not None:
-        payload = text.encode("utf-8")
-    elif file is not None:
-        path = file.expanduser()
-        if not path.exists():
-            print(f"[red]文件不存在[/red]: {path}")
-            raise typer.Exit(code=2)
-        payload = path.read_bytes()
-    else:
-        payload = sys.stdin.buffer.read()
+        try:
+            result = room_service.publish(
+                host=host,
+                port=port,
+                user=user,
+                room=room,
+                payload=text.encode("utf-8"),
+                ephemeral=ephemeral,
+                token_store=token_store,
+                timeout=timeout,
+                e2ee_store=e2ee_store,
+            )
+            mode = "ephemeral" if result.ephemeral else "persistent"
+            print(
+                f"[green]published {result.bytes_sent} bytes to {room} ({mode})[/green]"
+            )
+        except RoomServiceError as exc:
+            print(f"[red]{exc}[/red]")
+            raise typer.Exit(code=1)
 
-    try:
-        result = room_service.publish(
-            host=host,
-            port=port,
-            user=user,
-            room=room,
-            payload=payload,
-            ephemeral=ephemeral,
-            token_store=token_store,
-            timeout=timeout,
-            e2ee_store=e2ee_store,
-        )
-    except RoomServiceError as exc:
-        print(f"[red]{exc}[/red]")
-        raise typer.Exit(code=1)
-    else:
-        mode = "ephemeral" if result.ephemeral else "persistent"
-        print(f"[green]published {result.bytes_sent} bytes to {room} ({mode})[/green]")
+    elif file is not None:
+        try:
+            result = room_service.publish_file(
+                host=host,
+                port=port,
+                user=user,
+                room=room,
+                file_path=file,
+                ephemeral=ephemeral,
+                token_store=token_store,
+                timeout=timeout,
+            )
+            mode = "ephemeral" if result.ephemeral else "persistent"
+            print(
+                f"[green]published file {file.name} ({result.bytes_sent} bytes) to {room} ({mode})[/green]"
+            )
+        except RoomServiceError as exc:
+            print(f"[red]{exc}[/red]")
+            raise typer.Exit(code=1)
+
+    elif stdin:
+        payload = sys.stdin.buffer.read()
+        try:
+            result = room_service.publish(
+                host=host,
+                port=port,
+                user=user,
+                room=room,
+                payload=payload,
+                ephemeral=ephemeral,
+                token_store=token_store,
+                timeout=timeout,
+                e2ee_store=e2ee_store,
+            )
+            mode = "ephemeral" if result.ephemeral else "persistent"
+            print(
+                f"[green]published {result.bytes_sent} bytes to {room} ({mode})[/green]"
+            )
+        except RoomServiceError as exc:
+            print(f"[red]{exc}[/red]")
+            raise typer.Exit(code=1)
 
 
 @room_app.command("info", help=t("HELP.ROOM.INFO"))
 def room_info(
     room: str = typer.Option(..., "--room", "-r", help="房间名"),
     host: str = typer.Option("127.0.0.1", "--host", "-H"),
-    port: int = typer.Option(8080, "--port", "-p"),
+    port: int = typer.Option(15035, "--port", "-p"),
     user: str = typer.Option("alice", "--user", "-u"),
-    password: str = typer.Option("password", "--password", "-P"),
+    token_store: Optional[Path] = typer.Option(
+        None, "--token-store", "-t", help="Token存储路径"
+    ),
     json_out: bool = typer.Option(False, "--json", "-j", help="以 JSON 方式输出"),
 ):
     room = _option_value(room, "room")
     host = _option_value(host, "host")
     port = _option_value(port, "port")
     user = _option_value(user, "user")
-    password = _option_value(password, "password")
     json_out = _option_value(json_out, "json_out")
     try:
         info = room_service.fetch_info(
             host=host,
             port=port,
             user=user,
-            password=password,
             room=room,
+            token_store_path=token_store,
         )
     except RoomServiceError as exc:
         print(f"[red]{exc}[/red]")
@@ -302,31 +336,32 @@ def room_create(
         False, "--ephemeral/--persistent", help="使用阅后即焚存储策略"
     ),
     host: str = typer.Option("127.0.0.1", "--host", "-H"),
-    port: int = typer.Option(8080, "--port", "-p"),
+    port: int = typer.Option(15035, "--port", "-p"),
     user: str = typer.Option("alice", "--user", "-u"),
-    password: str = typer.Option("password", "--password", "-P"),
+    token_store: Optional[Path] = typer.Option(
+        None, "--token-store", "-t", help="Token存储路径"
+    ),
 ):
     room = _option_value(room, "room")
     ephemeral = _option_value(ephemeral, "ephemeral")
     host = _option_value(host, "host")
     port = _option_value(port, "port")
     user = _option_value(user, "user")
-    password = _option_value(password, "password")
     policy = "ephemeral" if ephemeral else "persistent"
     try:
-        result = room_service.create_room(
+        room_service.create_room(
             host=host,
             port=port,
             user=user,
-            password=password,
             room=room,
             policy=policy,
+            token_store_path=token_store,
         )
+        storage_type = "ephemeral" if ephemeral else "persistent"
+        print(f"[green]✓ Room '{room}' created with {storage_type} storage[/green]")
     except RoomServiceError as exc:
         print(f"[red]{exc}[/red]")
         raise typer.Exit(code=1)
-    for line in result.lines:
-        print(line if line != "OK" else "OK|CREATE")
 
 
 @room_app.command("set-policy", help=t("HELP.ROOM.SETPOLICY"))
@@ -334,35 +369,35 @@ def room_set_policy(
     room: str = typer.Option(..., "--room", "-r", help="房间名"),
     policy: str = typer.Option(..., "--policy", help="策略名", case_sensitive=False),
     host: str = typer.Option("127.0.0.1", "--host", "-H"),
-    port: int = typer.Option(8080, "--port", "-p"),
+    port: int = typer.Option(15035, "--port", "-p"),
     user: str = typer.Option("alice", "--user", "-u"),
-    password: str = typer.Option("password", "--password", "-P"),
+    token_store: Optional[Path] = typer.Option(
+        None, "--token-store", "-t", help="Token存储路径"
+    ),
 ):
     room = _option_value(room, "room")
     policy = _option_value(policy, "policy")
     host = _option_value(host, "host")
     port = _option_value(port, "port")
     user = _option_value(user, "user")
-    password = _option_value(password, "password")
     allowed = {"retain", "delegate", "teardown"}
     pol = policy.lower()
     if pol not in allowed:
         print(f"[red]unknown policy[/red]: {policy}; expect one of {sorted(allowed)}")
         raise typer.Exit(code=2)
     try:
-        result = room_service.set_policy(
+        room_service.set_policy(
             host=host,
             port=port,
             user=user,
-            password=password,
             room=room,
             policy=pol,
+            token_store_path=token_store,
         )
+        print(f"[green]✓ Policy set to {pol} for room '{room}'[/green]")
     except RoomServiceError as exc:
         print(f"[red]{exc}[/red]")
         raise typer.Exit(code=1)
-    for line in result.lines:
-        print(line if line != "OK" else "OK|SETPOLICY")
 
 
 @room_app.command("set-storage-policy", help="设置房间存储策略")
@@ -372,16 +407,17 @@ def room_set_storage_policy(
         ..., "--policy", help="storage policy", case_sensitive=False
     ),
     host: str = typer.Option("127.0.0.1", "--host", "-H"),
-    port: int = typer.Option(8080, "--port", "-p"),
+    port: int = typer.Option(15035, "--port", "-p"),
     user: str = typer.Option("alice", "--user", "-u"),
-    password: str = typer.Option("password", "--password", "-P"),
+    token_store: Optional[Path] = typer.Option(
+        None, "--token-store", "-t", help="Token存储路径"
+    ),
 ):
     room = _option_value(room, "room")
     policy = _option_value(policy, "policy")
     host = _option_value(host, "host")
     port = _option_value(port, "port")
     user = _option_value(user, "user")
-    password = _option_value(password, "password")
     allowed = {"persistent", "ephemeral"}
     pol = policy.lower()
     if pol not in allowed:
@@ -390,19 +426,18 @@ def room_set_storage_policy(
         )
         raise typer.Exit(code=2)
     try:
-        result = room_service.set_storage_policy(
+        room_service.set_storage_policy(
             host=host,
             port=port,
             user=user,
-            password=password,
             room=room,
             policy=pol,
+            token_store_path=token_store,
         )
+        print(f"[green]✓ Storage policy set to {pol} for room '{room}'[/green]")
     except RoomServiceError as exc:
         print(f"[red]{exc}[/red]")
         raise typer.Exit(code=1)
-    for line in result.lines:
-        print(line if line != "OK" else "OK|SETSTORAGE")
 
 
 @room_app.command("transfer", help=t("HELP.ROOM.TRANSFER"))
@@ -410,37 +445,37 @@ def room_transfer(
     room: str = typer.Option(..., "--room", "-r", help="房间名"),
     new_owner: str = typer.Option(..., "--new-owner", "-n", help="新的拥有者用户名"),
     host: str = typer.Option("127.0.0.1", "--host", "-H"),
-    port: int = typer.Option(8080, "--port", "-p"),
+    port: int = typer.Option(15035, "--port", "-p"),
     user: str = typer.Option("alice", "--user", "-u"),
-    password: str = typer.Option("password", "--password", "-P"),
+    token_store: Optional[Path] = typer.Option(
+        None, "--token-store", "-t", help="Token存储路径"
+    ),
 ):
     room = _option_value(room, "room")
     new_owner = _option_value(new_owner, "new_owner")
     host = _option_value(host, "host")
     port = _option_value(port, "port")
     user = _option_value(user, "user")
-    password = _option_value(password, "password")
     try:
-        result = room_service.transfer_owner(
+        room_service.transfer_owner(
             host=host,
             port=port,
             user=user,
-            password=password,
             room=room,
             new_owner=new_owner,
+            token_store_path=token_store,
         )
+        print(f"[green]✓ Ownership transferred to {new_owner}[/green]")
     except RoomServiceError as exc:
         print(f"[red]{exc}[/red]")
-        raise typer.Exit(code=2)
-    for line in result.lines:
-        print(line)
+        raise typer.Exit(code=1)
 
 
-@room_app.command("members", help="显示房间成员列表")
+@room_app.command("members", help="查看房间成员列表")
 def room_members(
     room: str = typer.Option(..., "--room", "-r", help="房间名"),
     host: str = typer.Option("127.0.0.1", "--host", "-H"),
-    port: int = typer.Option(8080, "--port", "-p"),
+    port: int = typer.Option(15035, "--port", "-p"),
     user: str = typer.Option("alice", "--user", "-u"),
     password: str = typer.Option("password", "--password", "-P"),
     json_output: bool = typer.Option(False, "--json", help="JSON格式输出"),
@@ -489,6 +524,82 @@ def room_members(
             print(f"[yellow]房间 '{room}' 没有成员[/yellow]")
 
 
+@room_app.command("download", help="下载房间文件")
+def room_download(
+    room: str = typer.Option(..., "--room", "-r", help="房间名"),
+    event_id: int = typer.Option(..., "--event-id", "-e", help="文件事件ID"),
+    output: Path = typer.Option(..., "--output", "-o", help="输出文件路径"),
+    host: str = typer.Option("127.0.0.1", "--host", "-H"),
+    port: int = typer.Option(8080, "--port", "-p"),
+    user: str = typer.Option("alice", "--user", "-u"),
+    token_store: Optional[Path] = typer.Option(None, "--token-store"),
+    timeout: float = typer.Option(10.0, "--timeout", help="socket 超时时间"),
+):
+    """下载房间中的文件。"""
+    try:
+        bytes_downloaded = room_service.download_file(
+            host=host,
+            port=port,
+            user=user,
+            room=room,
+            event_id=event_id,
+            output_path=output,
+            token_store=token_store,
+            timeout=timeout,
+        )
+        print(f"[green]Downloaded {bytes_downloaded} bytes to {output}[/green]")
+    except RoomServiceError as exc:
+        print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1)
+
+
+@room_app.command("clear-owner", help="清空房间owner（回归系统所有）")
+def room_clear_owner(
+    room: str = typer.Option(..., "--room", "-r", help="房间名"),
+    host: str = typer.Option("127.0.0.1", "--host", "-H"),
+    port: int = typer.Option(15035, "--port", "-p"),
+    user: str = typer.Option(..., "--user", "-u", help="执行者用户名"),
+    token_store: Optional[Path] = typer.Option(
+        None,
+        "--token-store",
+        "-t",
+        help="Token存储路径",
+    ),
+):
+    """清空房间owner，使房间回归系统所有。
+
+    注意：此操作需要当前owner权限。
+    清空后房间将采用delegate策略，自动将所有权委托给活跃用户。
+    """
+    try:
+        print(f"[blue]正在清空房间 '{room}' 的owner...[/blue]")
+
+        # 调用MP2协议
+        result = room_service.clear_owner(
+            host=host,
+            port=port,
+            user=user,
+            room=room,
+            token_store_path=token_store,
+        )
+
+        # 处理响应（dict格式）
+        if result.get("success"):
+            prev_owner = result.get("previous_owner", "")
+            if prev_owner:
+                print(f"[green]✓ 已清空owner: {prev_owner}[/green]")
+            else:
+                print("[green]✓ 房间已回归系统所有[/green]")
+            print(f"[blue]房间 '{room}' 现在使用delegate策略[/blue]")
+        else:
+            message = result.get("message", "操作未成功")
+            print(f"[yellow]⚠ {message}[/yellow]")
+
+    except RoomServiceError as e:
+        print(f"[red]✗ 清空失败: {e}[/red]")
+        raise typer.Exit(code=1)
+
+
 __all__ = [
     "room_app",
     "room_sub",
@@ -499,4 +610,6 @@ __all__ = [
     "room_set_storage_policy",
     "room_transfer",
     "room_members",
+    "room_download",
+    "room_clear_owner",
 ]

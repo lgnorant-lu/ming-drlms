@@ -336,7 +336,7 @@ Room *rooms_get_or_create(const char *name, int *out_created) {
     }
     node->room.owner[0] = '\0';
     node->room.owner_fd = PLATFORM_INVALID_SOCKET;
-    node->room.policy = 0; // retain
+    node->room.policy = 1; // delegate (auto-transfer ownership)
     node->room.storage_policy_template = ROOM_STORAGE_PERSISTENT;
     node->room.created_at = time(NULL);
     node->room.updated_at = node->room.created_at;
@@ -360,8 +360,32 @@ Room *rooms_get_or_create(const char *name, int *out_created) {
             0) {
             platform_mutex_lock(&room->mu);
             if (info.owner[0] != '\0') {
-                snprintf(room->owner, sizeof room->owner, "%.*s",
-                         (int)sizeof(room->owner) - 1, info.owner);
+                // Check owner validity and expiry
+                time_t now = time(NULL);
+                time_t owner_age =
+                    (info.updated_at > 0) ? (now - info.updated_at) : 0;
+                const time_t OWNER_EXPIRY = 7 * 24 * 3600; // 7 days
+
+                if (owner_age > 0 && owner_age < OWNER_EXPIRY) {
+                    // Owner is recent, restore it
+                    snprintf(room->owner, sizeof room->owner, "%.*s",
+                             (int)sizeof(room->owner) - 1, info.owner);
+                } else if (owner_age >= OWNER_EXPIRY) {
+                    // Owner expired, clear it
+                    fprintf(stderr,
+                            "[room_restore] room='%s' owner='%s' expired (%ld "
+                            "days), clearing\n",
+                            name, info.owner, owner_age / 86400);
+                    room->owner[0] = '\0';
+                } else {
+                    // No valid timestamp, restore but log warning
+                    fprintf(stderr,
+                            "[room_restore] room='%s' owner='%s' has no valid "
+                            "timestamp, restoring anyway\n",
+                            name, info.owner);
+                    snprintf(room->owner, sizeof room->owner, "%.*s",
+                             (int)sizeof(room->owner) - 1, info.owner);
+                }
             }
             room->policy = info.policy;
             if (info.last_event_id > room->last_event_id) {
@@ -693,7 +717,8 @@ static RoomInstance *room_select_instance_locked(Room *room) {
         return NULL;
     // For ephemeral rooms, prefer reusing existing instances to maintain
     // message delivery between subscribers and publishers
-    if (room->storage_policy_template == ROOM_STORAGE_EPHEMERAL && room->instances) {
+    if (room->storage_policy_template == ROOM_STORAGE_EPHEMERAL &&
+        room->instances) {
         return room->instances; // Return first available instance
     }
     RoomInstance *selected = NULL;
@@ -920,13 +945,17 @@ void rooms_apply_policy_on_owner_offline_if_needed(Room *room,
     policy_snapshot = room->policy;
     for (RoomInstance *inst = room->instances; inst; inst = inst->next) {
         platform_mutex_lock(&inst->mu);
-        fprintf(stderr, "[DEBUG] policy_check: checking instance with %zu subs\n", inst->subs_len);
+        fprintf(stderr,
+                "[DEBUG] policy_check: checking instance with %zu subs\n",
+                inst->subs_len);
         if (num_instances <
             (int)(sizeof instances_to_notify / sizeof instances_to_notify[0]))
             instances_to_notify[num_instances++] = inst;
         for (size_t i = 0; i < inst->subs_len; ++i) {
             Subscriber *sub = &inst->subs[i];
-            fprintf(stderr, "[DEBUG] policy_check: sub[%zu]: user='%s', fd=%d, owner_now='%s'\n",
+            fprintf(stderr,
+                    "[DEBUG] policy_check: sub[%zu]: user='%s', fd=%d, "
+                    "owner_now='%s'\n",
                     i, sub->user, (int)sub->fd, owner_now);
             if (owner_now[0] != '\0' && sub->user[0] != '\0' &&
                 strcmp(sub->user, owner_now) == 0) {
@@ -947,7 +976,8 @@ void rooms_apply_policy_on_owner_offline_if_needed(Room *room,
     }
     platform_mutex_unlock(&room->mu);
 
-    fprintf(stderr, "[DEBUG] policy_check: START room=%s, total_instances=%zu\n",
+    fprintf(stderr,
+            "[DEBUG] policy_check: START room=%s, total_instances=%zu\n",
             room->name, room->total_instances);
     fprintf(stderr, "[policy_check] room=%s owner='%s' present=%d policy=%d\n",
             room->name, owner_now, owner_still_present, policy_snapshot);

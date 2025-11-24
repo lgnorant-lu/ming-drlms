@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from rich.text import Text
 from textual.app import ComposeResult
-from textual.containers import Container, Horizontal, ScrollableContainer
+from textual.containers import Container, Horizontal
 from textual.screen import Screen
 from textual.widgets import (
     Header,
@@ -21,6 +21,15 @@ from textual.widgets import (
 )
 from textual.message import Message
 from textual import on
+from pathlib import Path
+import os
+from typing import Optional
+
+from .widgets import FileMessage, MessageList, HistoryInput
+from .logic import ChatController
+from .commands import CommandHandler
+from .file_selector import FileSelectionModal
+from .config import ConfigManager
 
 
 class LoginScreen(Screen):
@@ -262,68 +271,14 @@ class LoginScreen(Screen):
             error_box.remove_class("-visible")
 
 
-class MessageList(ScrollableContainer):
-    """Scrollable message display with nature theme."""
-
-    DEFAULT_CSS = """
-    MessageList {
-        height: 1fr;
-        background: $background;
-        border: none;
-        padding: 1;
-        scrollbar-gutter: stable;
-    }
-
-    .message-line {
-        margin-bottom: 0;
-        padding-left: 1;
-        border-left: solid $surface-light;
-        color: $text;
-    }
-
-    .message-line:hover {
-        background: $surface;
-        border-left: solid $primary;
-    }
-
-    .message-system {
-        text-align: center;
-        color: $text-muted;
-        border: none;
-        padding: 1 0;
-        text-style: italic;
-    }
-    """
-
-    def __init__(self, **kwargs) -> None:
-        super().__init__(**kwargs)
-        self.messages: list[Static] = []
-
-    def add_message(self, text: str, message_type: str = "normal") -> None:
-        """Add a message to the display."""
-        if message_type == "system":
-            msg_widget = Static(f"~ {text} ~", classes="message-system")
-        else:
-            msg_widget = Static(text, classes="message-line")
-
-        self.mount(msg_widget)
-        self.messages.append(msg_widget)
-
-        if len(self.messages) > 100:
-            old_msg = self.messages.pop(0)
-            old_msg.remove()
-
-        self.scroll_end(animate=True)
-
-    def clear(self) -> None:
-        """Clear all messages."""
-        for msg in self.messages:
-            msg.remove()
-        self.messages.clear()
-
-
 class ChatScreen(Screen):
     """Forest-themed chat screen."""
+
+    BINDINGS = [
+        ("ctrl+u", "show_upload_help", "Upload File"),
+        ("ctrl+h", "show_command_help", "Help"),
+        ("ctrl+e", "show_e2ee_info", "E2EE Info"),
+    ]
 
     CSS = """
     ChatScreen {
@@ -332,13 +287,28 @@ class ChatScreen(Screen):
     }
     
     #connection-status {
-        dock: top;
+        dock: bottom;
         height: 1;
         background: $surface;
         color: $text-muted;
         padding: 0 2;
         content-align: center middle;
         text-style: italic;
+        layer: status;
+    }
+
+    #e2ee-status {
+        dock: top;
+        height: 1;
+        width: 4;
+        content-align: center middle;
+        background: $surface;
+        color: $text-muted;
+        dock: right;
+    }
+    
+    #e2ee-status.encrypted {
+        color: $success;
     }
     
     #connection-status.connected {
@@ -456,6 +426,21 @@ class ChatScreen(Screen):
     #message-input:focus {
         border: none;
     }
+    
+    #upload-button {
+        width: 5;
+        min-width: 5;
+        background: $surface-light;
+        color: $text-muted;
+        border: none;
+        margin-right: 1;
+    }
+    
+    #upload-button:hover {
+        background: $primary;
+        color: $background;
+        text-style: bold;
+    }
     """
 
     def __init__(self, username: str, server: str) -> None:
@@ -463,20 +448,45 @@ class ChatScreen(Screen):
         self.username = username
         self.server = server
         self.current_room = "Town Square"
-        from typing import Optional
-        from ..core.threaded_client import RobustThreadedRoomClient
-
-        self.client: Optional[RobustThreadedRoomClient] = None
-        self.connection_state = "disconnected"
-        self._reconnect_attempt = 0
-        self._last_error_type = ""
-        self._connection_start_time = 0.0
-        self._status_hide_timer = None  # Timer for auto-hiding status bar
 
         # Parse server
         parts = server.split(":")
         self.host = parts[0]
-        self.port = int(parts[1]) if len(parts) > 1 else 8080
+        self.port = int(parts[1]) if len(parts) > 1 else 15035
+
+        # Load configuration
+        self.config_manager = ConfigManager()
+        self.config_manager.load()
+
+        # Determine file picker root directory
+        file_picker_root_str = self.config_manager.config.tui.file_picker_root
+        if file_picker_root_str:
+            self.file_picker_root = Path(file_picker_root_str)
+        else:
+            # Default: current working directory
+            self.file_picker_root = Path(os.getcwd())
+
+        # Controller
+        self.controller = ChatController(
+            username=username,
+            host=self.host,
+            port=self.port,
+            on_event=self._handle_room_event,
+            on_error=self._handle_client_error,
+            on_connection_state=self._handle_connection_state,
+        )
+
+        # Command handler (initialized in on_mount after widgets are ready)
+        self.command_handler: Optional[CommandHandler] = (
+            None  # Will be initialized after compose
+        )
+
+        self.connection_state = "disconnected"
+        self._reconnect_attempt = 0
+        self._last_error_type = ""
+        self._connection_start_time = 0.0
+        self._status_hide_timer = None
+        self._sending = False  # Flag to prevent duplicate sends
 
     def compose(self) -> ComposeResult:
         """Create chat interface."""
@@ -484,6 +494,7 @@ class ChatScreen(Screen):
 
         # Connection status indicator
         yield Static("✕ Disconnected", id="connection-status", classes="disconnected")
+        yield Static("🔓", id="e2ee-status")
 
         tm = self.app.theme_manager
         icon_room = tm.get_asset("icon_room", "[R]")
@@ -507,40 +518,40 @@ class ChatScreen(Screen):
             yield MessageList()
             with Container(id="input-bar"):
                 yield Label(prompt, id="prompt-label")
-                yield Input(
-                    placeholder="Say something...",
+                yield HistoryInput(
+                    placeholder="Say something... (or /help for commands)",
                     id="message-input",
                 )
+                # File upload button
+                upload_icon = tm.get_asset("icon_upload", "📎")
+                yield Button(upload_icon, id="upload-button")
 
         yield Footer()
 
     def on_mount(self) -> None:
         """Initialize chat screen with animation and connection."""
         self.set_timer(0.1, self._animate_in)
-        self.query_one("#message-input", Input).focus()
+        self.query_one("#message-input", HistoryInput).focus()
+
+        # Show welcome message
+        self._show_welcome_message()
+
+        # Initialize command handler after widgets are ready
+        self.command_handler = CommandHandler(self.controller, self)
 
         # Start connection
         self._connect_to_room(self.current_room)
+
+        # Check E2EE availability
+        self._check_e2ee()
 
         # Fetch room list
         self.app.run_worker(self._fetch_rooms, thread=True)
 
     def _fetch_rooms(self) -> None:
         """Fetch room list from server."""
-        from ..cli.services.room_service import RoomService
-        from pathlib import Path
-
         try:
-            service = RoomService()
-            token_path = Path.home() / ".drlms" / "tokens.json"
-
-            rooms, _, _ = service.list_rooms(
-                host=self.host,
-                port=self.port,
-                user=self.username,
-                token_store_path=token_path,
-            )
-
+            rooms = self.controller.fetch_rooms()
             self.app.call_from_thread(self._update_room_list, rooms)
         except Exception as e:
             # Fallback to default list if fetch fails
@@ -573,56 +584,56 @@ class ChatScreen(Screen):
         """Trigger entrance animations."""
         self.add_class("-visible")
 
+    def _show_welcome_message(self) -> None:
+        """Display welcome message with quick tips."""
+        msg_list = self.query_one(MessageList)
+        msg_list.add_message(f"🌲 Welcome to DRLMS Chat, {self.username}! 🌲", "system")
+        msg_list.add_message(
+            "Quick Tips:\n"
+            "  • Press Enter to send messages\n"
+            "  • Use ↑/↓ arrows for command history\n"
+            "  • Click 📎 or Ctrl+U for visual file picker 🎯\n"
+            "  • Type /upload or /help for commands\n"
+            "  • Ctrl+H for help | Ctrl+E for E2EE info",
+            "system",
+        )
+
+    def _check_e2ee(self) -> None:
+        """Check E2EE availability and update status indicator."""
+        try:
+            e2ee_path = Path.home() / ".drlms" / "identity.db"
+            if e2ee_path.exists():
+                from ..core.e2ee_store import LocalKeyStore
+
+                store = LocalKeyStore(e2ee_path)
+                if store.load_identity_key_pair(self.username):
+                    # E2EE enabled
+                    e2ee_widget = self.query_one("#e2ee-status", Static)
+                    e2ee_widget.update("🔒")
+                    e2ee_widget.add_class("encrypted")
+                    return
+        except Exception:
+            pass
+
+        # E2EE not available
+        try:
+            e2ee_widget = self.query_one("#e2ee-status", Static)
+            e2ee_widget.update("🔓")
+            e2ee_widget.remove_class("encrypted")
+        except Exception:
+            pass
+
     def _connect_to_room(self, room_name: str) -> None:
         """Connect to a chat room with auto-reconnect support."""
-        from ..core.threaded_client import RobustThreadedRoomClient
-        from pathlib import Path
-        import json
-
-        # Stop existing client if any
-        if self.client:
-            self.client.stop()
-
         msg_list = self.query_one(MessageList)
-        msg_list.add_message(f"Traveling to {room_name}...", "system")
+        msg_list.add_message(f"🚶 Traveling to {room_name}...", "system")
 
         try:
-            token_path = Path.home() / ".drlms" / "tokens.json"
-
-            # Load last seen event ID for persistent history position
-            state_path = Path.home() / ".drlms" / "tui_state.json"
-            since_id = 0
-            try:
-                if state_path.exists():
-                    with open(state_path, "r") as f:
-                        state = json.load(f)
-                        room_key = (
-                            f"{self.username}@{self.host}:{self.port}/{room_name}"
-                        )
-                        since_id = state.get(room_key, {}).get("last_seen_event_id", 0)
-            except Exception:
-                pass  # Ignore state load errors, start from beginning
-
-            self.client = RobustThreadedRoomClient(
-                host=self.host,
-                port=self.port,
-                username=self.username,
-                room=room_name,
-                since_id=since_id,  # Resume from last position
-                token_store_path=token_path,
-                enable_heartbeat=True,
-                enable_auto_reconnect=True,
-            )
-
-            self.client.start(
-                on_event=self._handle_room_event,
-                on_error=self._handle_client_error,
-                on_connection_state=self._handle_connection_state,
-            )
-            msg_list.add_message(f"Arrived at {room_name}", "system")
-
+            self.controller.connect(room_name)
+            msg_list.add_message(f"✅ Arrived at {room_name}", "system")
+            msg_list.add_message("You can now chat with others in this room!", "system")
         except Exception as e:
-            msg_list.add_message(f"Failed to reach {room_name}: {e}", "system")
+            msg_list.add_message(f"❌ Failed to reach {room_name}: {e}", "system")
 
     def _handle_room_event(self, event) -> None:
         """Handle incoming room event (called from worker thread)."""
@@ -632,6 +643,7 @@ class ChatScreen(Screen):
     def _process_event(self, event) -> None:
         """Process event on main thread."""
         from ..core.mproto_v2_client import RoomEvent
+        from ..proto.schema.v2.room_pb2 import RoomEventKind
         from datetime import datetime
 
         if not isinstance(event, RoomEvent):
@@ -641,57 +653,66 @@ class ChatScreen(Screen):
         time_str = datetime.now().strftime("%H:%M")
         colors = self.app.theme_manager.current_theme.colors
 
-        if event.payload:
-            # Chat message
+        # Handle based on event kind
+        if event.kind == RoomEventKind.ROOM_EVENT_KIND_TEXT:
+            if event.payload:
+                msg_text = Text()
+                msg_text.append(f"[{time_str}] ", style=f"dim {colors['text-muted']}")
+                msg_text.append(f"{event.sender}", style=f"bold {colors['primary']}")
+
+                # Decode payload if bytes
+                payload_str = (
+                    event.payload.ciphertext
+                    if hasattr(event.payload, "ciphertext")
+                    else event.payload
+                )
+                if hasattr(event, "payload") and hasattr(event.payload, "ciphertext"):
+                    # It's a SignalEncryptedPayload
+                    # In TUI, it should have been decrypted by RobustThreadedRoomClient if E2EE is on.
+                    # But RobustThreadedRoomClient yields the RAW event?
+                    # No, RobustThreadedRoomClient decrypts and replaces payload.
+                    # Let's assume event.payload is the decrypted bytes or string.
+                    pass
+
+                # RobustThreadedRoomClient.subscribe yields RoomEvent.
+                # If decrypted, payload is bytes.
+                if isinstance(payload_str, bytes):
+                    try:
+                        payload_str = payload_str.decode("utf-8")
+                    except Exception:
+                        payload_str = str(payload_str)
+                elif hasattr(payload_str, "ciphertext"):  # It's still a proto object?
+                    payload_str = "[Encrypted Message]"
+
+                msg_text.append(f": {payload_str}", style=colors["text"])
+                msg_list.add_message(msg_text)
+
+        elif event.kind == RoomEventKind.ROOM_EVENT_KIND_FILE:
+            # Show sender info for file too
             msg_text = Text()
             msg_text.append(f"[{time_str}] ", style=f"dim {colors['text-muted']}")
             msg_text.append(f"{event.sender}", style=f"bold {colors['primary']}")
-
-            # Decode payload if bytes
-            payload_str = event.payload
-            if isinstance(payload_str, bytes):
-                try:
-                    payload_str = payload_str.decode("utf-8")
-                except Exception:
-                    payload_str = str(payload_str)
-
-            msg_text.append(f": {payload_str}", style=colors["text"])
+            msg_text.append(" sent a file:", style=colors["text"])
             msg_list.add_message(msg_text)
-        elif event.kind == 1:  # JOIN
-            msg_list.add_message(f"{event.sender} arrived.", "system")
-        elif event.kind == 2:  # LEAVE
-            msg_list.add_message(f"{event.sender} left.", "system")
+
+            if event.HasField("file"):
+                msg_list.add_file_message(event)
+            else:
+                msg_list.add_message("[Invalid File Event]", "system")
+
+        elif event.kind == RoomEventKind.ROOM_EVENT_KIND_MEMBER_JOINED:
+            msg_list.add_message(f"{event.sender} joined the room.", "system")
+
+        elif event.kind == RoomEventKind.ROOM_EVENT_KIND_MEMBER_LEFT:
+            msg_list.add_message(f"{event.sender} left the room.", "system")
 
         # Save last seen event ID for persistent history
         if hasattr(event, "event_id") and event.event_id:
-            self._save_last_seen_event_id(event.event_id)
+            self.controller.save_last_seen(self.current_room, event.event_id)
 
     def _save_last_seen_event_id(self, event_id: int) -> None:
-        """Save last seen event ID to persistent state."""
-        from pathlib import Path
-        import json
-
-        try:
-            state_path = Path.home() / ".drlms" / "tui_state.json"
-            state_path.parent.mkdir(parents=True, exist_ok=True)
-
-            # Load existing state
-            state = {}
-            if state_path.exists():
-                with open(state_path, "r") as f:
-                    state = json.load(f)
-
-            # Update for current room
-            room_key = f"{self.username}@{self.host}:{self.port}/{self.current_room}"
-            if room_key not in state:
-                state[room_key] = {}
-            state[room_key]["last_seen_event_id"] = event_id
-
-            # Save atomically
-            with open(state_path, "w") as f:
-                json.dump(state, f, indent=2)
-        except Exception:
-            pass  # Ignore save errors, non-critical feature
+        """Deprecated: Use controller.save_last_seen."""
+        pass
 
     def _handle_client_error(self, exc: Exception) -> None:
         """Handle client error (called from worker thread)."""
@@ -749,52 +770,68 @@ class ChatScreen(Screen):
         # Generic error with exception type
         return ("unknown", f"~ {exc_type}: {exc} ~")
 
+    @on(FileMessage.Pressed)
+    def on_file_message_pressed(self, event: FileMessage.Pressed) -> None:
+        """Handle click on file message."""
+        file_msg = event.control
+        if isinstance(file_msg, FileMessage):
+            self._handle_download(file_msg.event)
+
+    def _handle_download(self, event) -> None:
+        """Initiate file download."""
+        filename = event.file.filename
+        self.query_one(MessageList).add_message(f"Downloading {filename}...", "system")
+
+        # Default download location: Downloads folder or current dir
+        downloads_dir = Path.home() / "Downloads"
+        if not downloads_dir.exists():
+            downloads_dir = Path.cwd()
+
+        out_path = downloads_dir / filename
+
+        self.app.run_worker(
+            self._download_worker(event.event_id, out_path),
+            exclusive=False,
+            thread=True,
+        )
+
+    def _download_worker(self, event_id: int, out_path: Path) -> None:
+        """Worker for file download."""
+        try:
+            self.controller.download_file(self.current_room, event_id, out_path)
+            self.app.call_from_thread(
+                lambda: self.query_one(MessageList).add_message(
+                    f"Saved to {out_path}", "system"
+                )
+            )
+        except Exception as e:
+            err_msg = str(e)
+            self.app.call_from_thread(
+                lambda: self.query_one(MessageList).add_message(
+                    f"Download failed: {err_msg}", "system"
+                )
+            )
+
     def _handle_connection_state(self, state) -> None:
         """Handle connection state change (called from worker thread)."""
         from ..core.threaded_client import ConnectionState
-        import time
 
-        # Track connection timing for RTT calculation
-        rtt_ms = 0  # Initialize RTT
-        if state == ConnectionState.CONNECTING:
-            self._connection_start_time = time.time()
-            self._reconnect_attempt = 0
-        elif state == ConnectionState.RECONNECTING:
-            self._reconnect_attempt += 1
-        elif state == ConnectionState.CONNECTED:
-            # Calculate connection RTT
-            if self._connection_start_time > 0:
-                rtt_ms = int((time.time() - self._connection_start_time) * 1000)
-                self._connection_start_time = 0.0
-            self._reconnect_attempt = 0
+        # Map state to UI text and CSS class
+        state_map = {
+            ConnectionState.DISCONNECTED: ("✕ Disconnected", "disconnected"),
+            ConnectionState.CONNECTING: ("⟳ Connecting...", "connecting"),
+            ConnectionState.CONNECTED: ("✓ Connected", "connected"),
+            ConnectionState.RECONNECTING: ("⟳ Reconnecting...", "reconnecting"),
+        }
 
-        # Map state to UI representation with enhanced info
-        if state == ConnectionState.DISCONNECTED:
-            text, css_class = ("✕ Disconnected", "disconnected")
-        elif state == ConnectionState.CONNECTING:
-            text, css_class = ("○ Connecting...", "connecting")
-        elif state == ConnectionState.CONNECTED:
-            if rtt_ms > 0:
-                text = f"● Connected ({rtt_ms}ms)"
-            else:
-                text = "● Connected"
-            css_class = "connected"
-        elif state == ConnectionState.RECONNECTING:
-            # Show reconnect attempt count
-            if self.client and hasattr(self.client, "_reconnect_attempt"):
-                attempt = self.client._reconnect_attempt + 1
-            else:
-                attempt = self._reconnect_attempt
-            text = f"◐ Reconnecting... (attempt {attempt})"
-            css_class = "reconnecting"
-        else:
-            text, css_class = ("? Unknown", "disconnected")
+        text, css_class = state_map.get(state, ("? Unknown", "disconnected"))
+        self.connection_state = css_class
 
         # Update UI on main thread
         self.app.call_from_thread(self._update_connection_status, text, css_class)
 
     def _update_connection_status(self, text: str, css_class: str) -> None:
-        """Update connection status indicator (must be called from main thread)."""
+        """Update connection status widget (main thread)."""
         try:
             status_widget = self.query_one("#connection-status", Static)
 
@@ -831,44 +868,13 @@ class ChatScreen(Screen):
 
     def on_unmount(self) -> None:
         """Cleanup on exit."""
-        if self.client is not None:  # Type guard for Optional
-            self.client.stop()
-            self.client = None
-
-    @on(Input.Submitted, "#message-input")
-    def handle_send_message(self, event: Input.Submitted) -> None:
-        """Handle message send."""
-        message = event.value.strip()
-        if not message:
-            return
-
-        # Send via RoomService
-
-        # Clear input immediately for better UX
-        event.input.value = ""
-
-        # Run publish in worker
-        self.app.run_worker(lambda: self._publish_message(message), thread=True)
-
-    def _publish_message(self, message: str) -> None:
-        """Publish message in background using the thread-safe publish method."""
-        try:
-            if not self.client or not self.client.is_running():
-                raise RuntimeError("Not connected to room")
-
-            # Use thread-safe publish method
-            self.client.publish(message.encode(), ephemeral=False)
-        except Exception as e:
-            self.app.call_from_thread(
-                lambda e=e: self.query_one(MessageList).add_message(
-                    f"Failed to send: {e}", "system"
-                )
-            )
+        if self.controller:
+            self.controller.disconnect()
 
     @on(ListView.Selected, "#room-list")
     def handle_room_select(self, event: ListView.Selected) -> None:
         """Handle room selection."""
-        if event.item and event.item.children:
+        if event.item and event.item.children and len(event.item.children) > 0:
             label_widget = event.item.children[0]
             label_text = (
                 label_widget.render().plain
@@ -890,3 +896,109 @@ class ChatScreen(Screen):
 
                 # Reconnect
                 self._connect_to_room(room_name)
+
+    @on(Input.Submitted, "#message-input")
+    def handle_message_submit(self, event: Input.Submitted) -> None:
+        """Handle message submission (Enter key)."""
+        if self._sending:
+            return
+
+        msg_input = event.input
+        text = msg_input.value.strip()
+        if not text:
+            return
+
+        # Add to history
+        if isinstance(msg_input, HistoryInput):
+            msg_input.add_to_history(text)
+
+        # Clear input immediately for better UX
+        msg_input.value = ""
+
+        # Check if it's a command
+        if self.command_handler and self.command_handler.handle(text):
+            return
+
+        # Send as regular message
+        self._send_text_message(text)
+
+    def _send_text_message(self, text: str) -> None:
+        """Send a text message to the current room."""
+        if self._sending:
+            return
+
+        self._sending = True
+        try:
+            self.controller.send_message(text)
+        except Exception as e:
+            self.query_one(MessageList).add_message(f"Failed to send: {e}", "system")
+        finally:
+            self._sending = False
+
+    # Methods required by CommandHandler interface
+    def show_system_message(self, msg: str) -> None:
+        """Display a system message."""
+        self.query_one(MessageList).add_message(msg, "system")
+
+    def run_worker_task(self, task, success_msg: str, error_msg: str) -> None:
+        """Run a task in worker thread with success/error handling."""
+
+        def worker_wrapper():
+            try:
+                task()
+                self.app.call_from_thread(lambda: self.show_system_message(success_msg))
+            except Exception as e:
+                err_msg = str(e)
+                self.app.call_from_thread(
+                    lambda: self.show_system_message(f"{error_msg}: {err_msg}")
+                )
+
+        self.app.run_worker(worker_wrapper, thread=True, exclusive=False)
+
+    @on(Button.Pressed, "#upload-button")
+    def handle_upload_button(self, event: Button.Pressed) -> None:
+        """Handle upload button press - open file selector."""
+        self.action_show_upload_help()
+
+    def action_show_upload_help(self) -> None:
+        """Open visual file selector (Ctrl+U)."""
+        # Run in worker to allow push_screen_wait
+        self.app.run_worker(self._show_file_selector_worker, exclusive=False)
+
+    async def _show_file_selector_worker(self) -> None:
+        """Worker to show file selector and handle result."""
+        try:
+            # Push the file selection modal with configured root directory
+            selected_file = await self.app.push_screen_wait(
+                FileSelectionModal(self.file_picker_root)
+            )
+
+            if selected_file:
+                # User selected a file
+                self.show_system_message(f"📤 Uploading {selected_file.name}...")
+                self.run_worker_task(
+                    lambda: self.controller.upload_file(
+                        self.current_room, selected_file
+                    ),
+                    success_msg=f"✅ Uploaded {selected_file.name}",
+                    error_msg=f"❌ Upload failed for {selected_file.name}",
+                )
+            else:
+                # User cancelled
+                self.show_system_message("📎 Upload cancelled")
+        except Exception as e:
+            self.show_system_message(f"❌ Failed to open file selector: {e}")
+
+    def action_show_command_help(self) -> None:
+        """Show command help (Ctrl+H)."""
+        if self.command_handler:
+            self.command_handler.handle("/help")
+        else:
+            self.show_system_message("Commands not initialized yet")
+
+    def action_show_e2ee_info(self) -> None:
+        """Show E2EE information (Ctrl+E)."""
+        if self.command_handler:
+            self.command_handler.handle("/fingerprint")
+        else:
+            self.show_system_message("E2EE not initialized yet")
