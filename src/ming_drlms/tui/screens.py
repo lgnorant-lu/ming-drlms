@@ -463,8 +463,15 @@ class ChatScreen(Screen):
         self.username = username
         self.server = server
         self.current_room = "Town Square"
-        self.client = None  # type: RobustThreadedRoomClient | None
+        from typing import Optional
+        from ..core.threaded_client import RobustThreadedRoomClient
+
+        self.client: Optional[RobustThreadedRoomClient] = None
         self.connection_state = "disconnected"
+        self._reconnect_attempt = 0
+        self._last_error_type = ""
+        self._connection_start_time = 0.0
+        self._status_hide_timer = None  # Timer for auto-hiding status bar
 
         # Parse server
         parts = server.split(":")
@@ -474,6 +481,9 @@ class ChatScreen(Screen):
     def compose(self) -> ComposeResult:
         """Create chat interface."""
         yield Header(show_clock=True)
+
+        # Connection status indicator
+        yield Static("✕ Disconnected", id="connection-status", classes="disconnected")
 
         tm = self.app.theme_manager
         icon_room = tm.get_asset("icon_room", "[R]")
@@ -549,8 +559,8 @@ class ChatScreen(Screen):
         icon_room = tm.get_asset("icon_room", "[R]")
 
         for room in rooms:
-            # room object from list_rooms might be a dict or object depending on implementation
-            # MP2Client.list_rooms returns list[Any] which are Room objects from protobuf
+            # room object from list_rooms might be a dict or object
+            # MP2Client.list_rooms returns list[Any] (Room from protobuf)
             if hasattr(room, "room_name"):
                 room_name = room.room_name
             elif hasattr(room, "name"):
@@ -564,9 +574,10 @@ class ChatScreen(Screen):
         self.add_class("-visible")
 
     def _connect_to_room(self, room_name: str) -> None:
-        """Connect to a chat room."""
-        from ..core.threaded_client import ThreadedRoomClient
+        """Connect to a chat room with auto-reconnect support."""
+        from ..core.threaded_client import RobustThreadedRoomClient
         from pathlib import Path
+        import json
 
         # Stop existing client if any
         if self.client:
@@ -577,17 +588,36 @@ class ChatScreen(Screen):
 
         try:
             token_path = Path.home() / ".drlms" / "tokens.json"
-            self.client = ThreadedRoomClient(
+
+            # Load last seen event ID for persistent history position
+            state_path = Path.home() / ".drlms" / "tui_state.json"
+            since_id = 0
+            try:
+                if state_path.exists():
+                    with open(state_path, "r") as f:
+                        state = json.load(f)
+                        room_key = (
+                            f"{self.username}@{self.host}:{self.port}/{room_name}"
+                        )
+                        since_id = state.get(room_key, {}).get("last_seen_event_id", 0)
+            except Exception:
+                pass  # Ignore state load errors, start from beginning
+
+            self.client = RobustThreadedRoomClient(
                 host=self.host,
                 port=self.port,
                 username=self.username,
                 room=room_name,
+                since_id=since_id,  # Resume from last position
                 token_store_path=token_path,
-                timeout=None,  # No timeout for long-lived connections
+                enable_heartbeat=True,
+                enable_auto_reconnect=True,
             )
 
             self.client.start(
-                on_event=self._handle_room_event, on_error=self._handle_client_error
+                on_event=self._handle_room_event,
+                on_error=self._handle_client_error,
+                on_connection_state=self._handle_connection_state,
             )
             msg_list.add_message(f"Arrived at {room_name}", "system")
 
@@ -632,18 +662,178 @@ class ChatScreen(Screen):
         elif event.kind == 2:  # LEAVE
             msg_list.add_message(f"{event.sender} left.", "system")
 
+        # Save last seen event ID for persistent history
+        if hasattr(event, "event_id") and event.event_id:
+            self._save_last_seen_event_id(event.event_id)
+
+    def _save_last_seen_event_id(self, event_id: int) -> None:
+        """Save last seen event ID to persistent state."""
+        from pathlib import Path
+        import json
+
+        try:
+            state_path = Path.home() / ".drlms" / "tui_state.json"
+            state_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Load existing state
+            state = {}
+            if state_path.exists():
+                with open(state_path, "r") as f:
+                    state = json.load(f)
+
+            # Update for current room
+            room_key = f"{self.username}@{self.host}:{self.port}/{self.current_room}"
+            if room_key not in state:
+                state[room_key] = {}
+            state[room_key]["last_seen_event_id"] = event_id
+
+            # Save atomically
+            with open(state_path, "w") as f:
+                json.dump(state, f, indent=2)
+        except Exception:
+            pass  # Ignore save errors, non-critical feature
+
     def _handle_client_error(self, exc: Exception) -> None:
         """Handle client error (called from worker thread)."""
-        self.app.call_from_thread(
-            lambda: self.query_one(MessageList).add_message(
-                f"Connection error: {exc}", "system"
+        # Throttle error messages to avoid UI flooding
+        import time
+
+        current_time = time.time()
+        if not hasattr(self, "_last_error_time"):
+            self._last_error_time = 0
+
+        # Classify error type for better user feedback
+        error_type, friendly_message = self._classify_error(exc)
+
+        # Only show errors if at least 5 seconds have passed since last error
+        # or if error type changed
+        if (
+            current_time - self._last_error_time >= 5.0
+            or error_type != self._last_error_type
+        ):
+            self._last_error_time = current_time
+            self._last_error_type = error_type
+            self.app.call_from_thread(
+                lambda: self.query_one(MessageList).add_message(
+                    friendly_message, "system"
+                )
             )
-        )
+
+    def _classify_error(self, exc: Exception) -> tuple[str, str]:
+        """Classify error and return (type, friendly_message)."""
+        exc_str = str(exc).lower()
+        exc_type = type(exc).__name__
+
+        # Network errors
+        if "connection refused" in exc_str or "10061" in exc_str:
+            return ("network", "~ Server unavailable. Retrying... ~")
+        elif "timed out" in exc_str or "timeout" in exc_str:
+            return ("network", "~ Connection timeout. Check your network... ~")
+        elif "connection reset" in exc_str or "10054" in exc_str:
+            return ("network", "~ Connection lost. Reconnecting... ~")
+        elif "connection closed" in exc_str:
+            return ("network", "~ Server disconnected. Reconnecting... ~")
+
+        # Authentication errors
+        elif "auth" in exc_str or "unauthorized" in exc_str:
+            return ("auth", f"~ Authentication failed: {exc} ~")
+        elif "token" in exc_str and ("invalid" in exc_str or "expired" in exc_str):
+            return ("auth", "~ Session expired. Please re-login ~")
+
+        # Protocol errors
+        elif "invalid mp2 magic" in exc_str:
+            return ("protocol", "~ Protocol error. Server might be outdated ~")
+        elif "protobuf" in exc_str or "decode" in exc_str:
+            return ("protocol", "~ Message format error ~")
+
+        # Generic error with exception type
+        return ("unknown", f"~ {exc_type}: {exc} ~")
+
+    def _handle_connection_state(self, state) -> None:
+        """Handle connection state change (called from worker thread)."""
+        from ..core.threaded_client import ConnectionState
+        import time
+
+        # Track connection timing for RTT calculation
+        rtt_ms = 0  # Initialize RTT
+        if state == ConnectionState.CONNECTING:
+            self._connection_start_time = time.time()
+            self._reconnect_attempt = 0
+        elif state == ConnectionState.RECONNECTING:
+            self._reconnect_attempt += 1
+        elif state == ConnectionState.CONNECTED:
+            # Calculate connection RTT
+            if self._connection_start_time > 0:
+                rtt_ms = int((time.time() - self._connection_start_time) * 1000)
+                self._connection_start_time = 0.0
+            self._reconnect_attempt = 0
+
+        # Map state to UI representation with enhanced info
+        if state == ConnectionState.DISCONNECTED:
+            text, css_class = ("✕ Disconnected", "disconnected")
+        elif state == ConnectionState.CONNECTING:
+            text, css_class = ("○ Connecting...", "connecting")
+        elif state == ConnectionState.CONNECTED:
+            if rtt_ms > 0:
+                text = f"● Connected ({rtt_ms}ms)"
+            else:
+                text = "● Connected"
+            css_class = "connected"
+        elif state == ConnectionState.RECONNECTING:
+            # Show reconnect attempt count
+            if self.client and hasattr(self.client, "_reconnect_attempt"):
+                attempt = self.client._reconnect_attempt + 1
+            else:
+                attempt = self._reconnect_attempt
+            text = f"◐ Reconnecting... (attempt {attempt})"
+            css_class = "reconnecting"
+        else:
+            text, css_class = ("? Unknown", "disconnected")
+
+        # Update UI on main thread
+        self.app.call_from_thread(self._update_connection_status, text, css_class)
+
+    def _update_connection_status(self, text: str, css_class: str) -> None:
+        """Update connection status indicator (must be called from main thread)."""
+        try:
+            status_widget = self.query_one("#connection-status", Static)
+
+            # Cancel previous hide timer if exists
+            if self._status_hide_timer is not None:
+                self._status_hide_timer.stop()
+                self._status_hide_timer = None
+
+            # Show status widget
+            status_widget.display = True
+            status_widget.update(text)
+
+            # Remove all state classes and add the current one
+            for cls in ["disconnected", "connecting", "connected", "reconnecting"]:
+                status_widget.remove_class(cls)
+            status_widget.add_class(css_class)
+
+            # Auto-hide after 3 seconds if connected successfully
+            if css_class == "connected":
+                self._status_hide_timer = self.set_timer(
+                    3.0, lambda: self._hide_connection_status()
+                )
+        except Exception:
+            pass  # Widget might not exist yet
+
+    def _hide_connection_status(self) -> None:
+        """Hide connection status indicator with fade effect."""
+        try:
+            status_widget = self.query_one("#connection-status", Static)
+            status_widget.display = False
+            self._status_hide_timer = None
+        except Exception:
+            pass
 
     def on_unmount(self) -> None:
         """Cleanup on exit."""
-        if self.client:
+        if self.client is not None:  # Type guard for Optional
             self.client.stop()
+            self.client = None
 
     @on(Input.Submitted, "#message-input")
     def handle_send_message(self, event: Input.Submitted) -> None:

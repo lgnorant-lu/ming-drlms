@@ -13,12 +13,12 @@
 - **实现位置**: 
   - 协议层: `schema/v2/common.proto` (MSG_TYPE_PING=401, MSG_TYPE_PONG=402)
   - 服务器: `mp2_dispatcher.c` (自动响应 PING 返回 PONG)
-  - 客户端: `mproto_v2_client.py::send_ping()` + `threaded_client_v2.py::_run_heartbeat_loop()`
+  - 客户端: `mproto_v2_client.py::send_ping()` + `threaded_client.py::_run_heartbeat_loop()`
 
 ### 2. 自动重连 (Auto-Reconnect)
 - **策略**: 指数退避 [1s, 2s, 4s, 8s, 16s, 30s]
 - **重连逻辑**: 断线后自动重新订阅房间，保持用户无感知
-- **实现位置**: `threaded_client_v2.py::_run_with_reconnect()`
+- **实现位置**: `threaded_client.py::_run_with_reconnect()`
 
 ### 3. 连接状态管理 (Connection State)
 - **状态枚举**: 
@@ -27,7 +27,7 @@
   - `CONNECTED` ● - 已连接
   - `RECONNECTING` ◐ - 重连中
 - **回调通知**: `on_connection_state(state: ConnectionState)` 实时通知上层
-- **实现位置**: `threaded_client_v2.py::ConnectionState`
+- **实现位置**: `threaded_client.py::ConnectionState`
 
 ### 4. TUI 状态指示器
 - **位置**: ChatScreen 顶部状态栏

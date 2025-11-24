@@ -8,7 +8,7 @@ from pathlib import Path
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
-from ming_drlms.core.threaded_client_v2 import RobustThreadedRoomClient, ConnectionState
+from ming_drlms.core.threaded_client import RobustThreadedRoomClient, ConnectionState
 
 
 def main():
