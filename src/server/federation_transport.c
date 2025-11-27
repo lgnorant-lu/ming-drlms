@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include "logger.h"
 
 #if defined(_WIN32)
 #include <winsock2.h>
@@ -67,11 +68,10 @@ int recv_mp2_frame(platform_socket_t fd, uint16_t *out_msg_type,
     uint16_t msg_type = ntohs(msg_type_net);
     uint32_t payload_len = ntohl(payload_len_net);
 
-    fprintf(stderr,
-            "[recv_mp2_frame] header magic=0x%08x version=%u msg_type=%u "
-            "payload_len=%u\n",
-            magic, (unsigned)version, (unsigned)msg_type,
-            (unsigned)payload_len);
+    LOG_DEBUG("[recv_mp2_frame] header magic=0x%08x version=%u msg_type=%u "
+              "payload_len=%u",
+              magic, (unsigned)version, (unsigned)msg_type,
+              (unsigned)payload_len);
 
     if (magic != MP2_MAGIC || version != MP2_VERSION) {
         return -1;
@@ -107,14 +107,13 @@ static platform_socket_t federation_connect(const TrustedServer *srv) {
 
     platform_socket_t sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock == PLATFORM_INVALID_SOCKET) {
-        fprintf(stderr, "[federation] Failed to create socket\n");
+        LOG_ERROR("[federation] Failed to create socket");
         return PLATFORM_INVALID_SOCKET;
     }
 
     struct hostent *he = gethostbyname(srv->host);
     if (!he) {
-        fprintf(stderr, "[federation] Failed to resolve hostname: %s\n",
-                srv->host);
+        LOG_ERROR("[federation] Failed to resolve hostname: %s", srv->host);
         platform_socket_close(sock);
         return PLATFORM_INVALID_SOCKET;
     }
@@ -126,8 +125,8 @@ static platform_socket_t federation_connect(const TrustedServer *srv) {
     memcpy(&addr.sin_addr, he->h_addr_list[0], he->h_length);
 
     if (connect(sock, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
-        fprintf(stderr, "[federation] Failed to connect to %s:%d\n", srv->host,
-                srv->port);
+        LOG_WARN("[federation] Failed to connect to %s:%d", srv->host,
+                 srv->port);
         platform_socket_close(sock);
         return PLATFORM_INVALID_SOCKET;
     }
@@ -145,12 +144,12 @@ int federation_send_request(const TrustedServer *srv, uint16_t msg_type,
         return -1;
     }
 
-    fprintf(stderr, "[federation_send_request] sending msg_type=%u to %s:%d\n",
-            (unsigned)msg_type, srv->host, srv->port);
+    LOG_DEBUG("[federation_send_request] sending msg_type=%u to %s:%d",
+              (unsigned)msg_type, srv->host, srv->port);
     int rc = send_mp2_frame(sock, msg_type, payload, payload_len);
     if (rc != 0) {
-        fprintf(stderr, "[federation] Failed to send msg_type=%u to %s:%d\n",
-                (unsigned)msg_type, srv->host, srv->port);
+        LOG_WARN("[federation] Failed to send msg_type=%u to %s:%d",
+                 (unsigned)msg_type, srv->host, srv->port);
         platform_socket_close(sock);
         return -1;
     }
@@ -160,16 +159,14 @@ int federation_send_request(const TrustedServer *srv, uint16_t msg_type,
         uint32_t resp_len = 0;
         uint16_t resp_type = 0;
         if (recv_mp2_frame(sock, &resp_type, &resp_payload, &resp_len) != 0) {
-            fprintf(stderr,
-                    "[federation] Failed to receive response from %s:%d\n",
-                    srv->host, srv->port);
+            LOG_WARN("[federation] Failed to receive response from %s:%d",
+                     srv->host, srv->port);
             platform_socket_close(sock);
             return -1;
         }
-        fprintf(stderr,
-                "[federation_send_request] received resp_type=%u len=%u from "
-                "%s:%d\n",
-                (unsigned)resp_type, (unsigned)resp_len, srv->host, srv->port);
+        LOG_DEBUG(
+            "[federation_send_request] received resp_type=%u len=%u from %s:%d",
+            (unsigned)resp_type, (unsigned)resp_len, srv->host, srv->port);
         *out_resp_type = resp_type;
         int retain_payload = (out_resp_payload != NULL);
         if (out_resp_payload) {

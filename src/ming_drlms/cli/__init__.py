@@ -47,7 +47,34 @@ def _app_entry(
             is_eager=True,
         ),
     ] = False,
+    log_level: Annotated[
+        Optional[str],
+        typer.Option("--log-level", help="override logging level for this run"),
+    ] = None,
+    log_dir: Annotated[
+        Optional[Path],
+        typer.Option("--log-dir", help="override logging directory for this run"),
+    ] = None,
+    log_console: Annotated[
+        Optional[bool],
+        typer.Option(
+            "--log-console/--no-log-console",
+            help="enable/disable console logging for this run",
+        ),
+    ] = None,
 ):
+    # Initialize logging globally for all CLI commands, honoring overrides
+    import os
+    from .. import log
+
+    if log_level:
+        os.environ["DRLMS_LOG_LEVEL"] = str(log_level)
+    if log_dir:
+        os.environ["DRLMS_LOG_DIR"] = str(log_dir)
+    if log_console is not None:
+        os.environ["DRLMS_LOG_CONSOLE"] = "1" if log_console else "0"
+    log.setup_logging()
+
     # 延迟到程序退出时统一提醒版本更新（非侵入）
     pass
 
@@ -149,17 +176,16 @@ _server.register_top_level_aliases(app)
 def cli_tui():
     """Launch the Textual TUI interface."""
     import time
-    import sys
+    from .. import log
 
     start = time.time()
-    print(f"[DEBUG] TUI Command triggered at {0.0:.3f}s", file=sys.stderr)
+    logger = log.get_logger("cli.tui")
+    logger.debug("TUI Command triggered at %.3fs", 0.0)
 
     try:
         from ..tui.app import main as tui_main
 
-        print(
-            f"[DEBUG] TUI imports loaded at {time.time() - start:.3f}s", file=sys.stderr
-        )
+        logger.debug("TUI imports loaded at %.3fs", time.time() - start)
     except ImportError as e:
         print("[red]TUI dependencies not installed or import failed[/red]")
         print(f"Error details: {e}")

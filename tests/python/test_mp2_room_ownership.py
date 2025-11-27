@@ -40,8 +40,8 @@ def client_with_socket(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
         host="127.0.0.1",
         port=15035,
         access_token="fake_token_123",
-        access_expires_at=9999999999.0,
         refresh_token="refresh_456",
+        access_expires_at=9999999999.0,
     )
     token_store.store(record)
 

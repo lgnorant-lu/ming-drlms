@@ -5,6 +5,7 @@
 #if !defined(_WIN32)
 #include <unistd.h>
 #endif
+#include "logger.h"
 
 static void core_sleep_microseconds(unsigned long long usec) {
 #if defined(_WIN32)
@@ -25,14 +26,14 @@ platform_socket_t server_core_create_server_socket(int port) {
     platform_socket_t fd = socket(AF_INET, SOCK_STREAM, 0);
 #if defined(_WIN32)
     if (fd == INVALID_SOCKET) {
-        platform_net_set_last_error(WSAGetLastError());
-        fprintf(stderr, "socket() failed, WSA error=%d\n", WSAGetLastError());
-        perror("socket");
+        int err = WSAGetLastError();
+        platform_net_set_last_error(err);
+        LOG_ERROR("socket() failed, WSA error=%d", err);
         return PLATFORM_INVALID_SOCKET;
     }
 #else
     if (fd < 0) {
-        perror("socket");
+        LOG_ERROR("socket() failed");
         return PLATFORM_INVALID_SOCKET;
     }
 #endif
@@ -40,15 +41,16 @@ platform_socket_t server_core_create_server_socket(int port) {
 #if defined(_WIN32)
     if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (const char *)&opt,
                    sizeof(opt)) < 0) {
-        platform_net_set_last_error(WSAGetLastError());
-        perror("setsockopt");
+        int err = WSAGetLastError();
+        platform_net_set_last_error(err);
+        LOG_ERROR("setsockopt(SO_REUSEADDR) failed, WSA error=%d", err);
         platform_socket_close(fd);
         return PLATFORM_INVALID_SOCKET;
     }
 #else
     if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
         platform_net_set_last_error(errno);
-        perror("setsockopt");
+        LOG_ERROR("setsockopt(SO_REUSEADDR) failed");
         platform_socket_close(fd);
         return PLATFORM_INVALID_SOCKET;
     }
@@ -60,21 +62,25 @@ platform_socket_t server_core_create_server_socket(int port) {
     srv.sin_port = htons((uint16_t)port);
     if (bind(fd, (struct sockaddr *)&srv, sizeof(srv)) < 0) {
 #if defined(_WIN32)
-        platform_net_set_last_error(WSAGetLastError());
+        int err = WSAGetLastError();
+        platform_net_set_last_error(err);
+        LOG_ERROR("bind() failed, WSA error=%d", err);
 #else
         platform_net_set_last_error(errno);
+        LOG_ERROR("bind() failed");
 #endif
-        perror("bind");
         platform_socket_close(fd);
         return PLATFORM_INVALID_SOCKET;
     }
     if (listen(fd, 128) < 0) {
 #if defined(_WIN32)
-        platform_net_set_last_error(WSAGetLastError());
+        int err = WSAGetLastError();
+        platform_net_set_last_error(err);
+        LOG_ERROR("listen() failed, WSA error=%d", err);
 #else
         platform_net_set_last_error(errno);
+        LOG_ERROR("listen() failed");
 #endif
-        perror("listen");
         platform_socket_close(fd);
         return PLATFORM_INVALID_SOCKET;
     }
@@ -169,7 +175,7 @@ int server_core_accept_loop(platform_socket_t listen_fd,
                 continue;
             }
             platform_net_set_last_error(err);
-            perror("select");
+            LOG_ERROR("select() failed, WSA error=%d", err);
             break;
 #else
             if (errno == EINTR) {
@@ -178,7 +184,7 @@ int server_core_accept_loop(platform_socket_t listen_fd,
                 continue;
             }
             platform_net_set_last_error(errno);
-            perror("select");
+            LOG_ERROR("select() failed");
             break;
 #endif
         }
@@ -207,7 +213,7 @@ int server_core_accept_loop(platform_socket_t listen_fd,
                 (err == WSAENOTSOCK || err == WSAEINVAL))
                 break;
             platform_net_set_last_error(err);
-            perror("accept");
+            LOG_ERROR("accept() failed, WSA error=%d", err);
             break;
         }
 #else
@@ -226,7 +232,7 @@ int server_core_accept_loop(platform_socket_t listen_fd,
             if (stop_flag && *stop_flag && (errno == EBADF || errno == EINVAL))
                 break;
             platform_net_set_last_error(errno);
-            perror("accept");
+            LOG_ERROR("accept() failed");
             break;
         }
 #endif

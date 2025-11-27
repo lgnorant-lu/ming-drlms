@@ -2,7 +2,7 @@
 # Tries pkg-config -> system library -> vcpkg -> bundled pre-generated sources
 
 if(NOT DEFINED DRLMS_FORCE_BUNDLED_PROTOBUF_C)
-    option(DRLMS_FORCE_BUNDLED_PROTOBUF_C "Always compile against the bundled protobuf-c runtime" ON)
+    option(DRLMS_FORCE_BUNDLED_PROTOBUF_C "Always compile against the bundled protobuf-c runtime" OFF)
 endif()
 
 set(PROTOBUF_C_FOUND FALSE)
@@ -37,26 +37,12 @@ if(PKG_CONFIG_FOUND)
                 set(PROTOBUF_C_DETECTION_METHOD "pkg-config (${_pkg_name})")
 
                 set(_protobuf_pregen_dir "${PROJECT_SOURCE_DIR}/src/generated/schema/v2")
-                if(EXISTS "${_protobuf_pregen_dir}/common.pb-c.c")
-                    message(STATUS "Found pre-generated protobuf files, using them with local implementation")
-                    set(PROTOBUF_C_USE_PREGENSETS TRUE)
-                    set(PROTOBUF_C_SOURCES
-                        "${_protobuf_pregen_dir}/common.pb-c.c"
-                        "${_protobuf_pregen_dir}/auth.pb-c.c"
-                        "${_protobuf_pregen_dir}/room.pb-c.c"
-                        "${_protobuf_pregen_dir}/federation.pb-c.c"
-                        "${_protobuf_pregen_dir}/e2ee.pb-c.c"
-                        "${PROJECT_SOURCE_DIR}/src/external/protobuf-c/protobuf-c.c")
-                    set(PROTOBUF_C_HEADERS
-                        "${_protobuf_pregen_dir}/common.pb-c.h"
-                        "${_protobuf_pregen_dir}/auth.pb-c.h"
-                        "${_protobuf_pregen_dir}/room.pb-c.h"
-                        "${_protobuf_pregen_dir}/federation.pb-c.h"
-                        "${_protobuf_pregen_dir}/e2ee.pb-c.h")
-                    list(APPEND PROTOBUF_C_INCLUDE_DIRS 
-                        ${_protobuf_pregen_dir}
-                        "${PROJECT_SOURCE_DIR}/src")
-                endif()
+                # Disable pre-generated sources when using system library to force regeneration
+                # if(EXISTS "${_protobuf_pregen_dir}/common.pb-c.c")
+                #    message(STATUS "Found pre-generated protobuf files, using them with local implementation")
+                #    set(PROTOBUF_C_USE_PREGENSETS TRUE)
+                #    ...
+                # endif()
             endif()
         endif()
     endforeach()
@@ -95,27 +81,11 @@ if(NOT PROTOBUF_C_FOUND)
         
         # 检查是否有预生成文件，如果有则使用它们并包含本地protobuf-c.c
         set(_protobuf_pregen_dir "${PROJECT_SOURCE_DIR}/src/generated/schema/v2")
-        if(EXISTS "${_protobuf_pregen_dir}/common.pb-c.c")
-            message(STATUS "Found pre-generated protobuf files, using them with local implementation")
-            set(PROTOBUF_C_USE_PREGENSETS TRUE)
-            set(PROTOBUF_C_SOURCES
-                "${_protobuf_pregen_dir}/common.pb-c.c"
-                "${_protobuf_pregen_dir}/auth.pb-c.c"
-                "${_protobuf_pregen_dir}/room.pb-c.c"
-                "${_protobuf_pregen_dir}/federation.pb-c.c"
-                "${_protobuf_pregen_dir}/e2ee.pb-c.c"
-                "${PROJECT_SOURCE_DIR}/src/external/protobuf-c/protobuf-c.c")
-            set(PROTOBUF_C_HEADERS
-                "${_protobuf_pregen_dir}/common.pb-c.h"
-                "${_protobuf_pregen_dir}/auth.pb-c.h"
-                "${_protobuf_pregen_dir}/room.pb-c.h"
-                "${_protobuf_pregen_dir}/federation.pb-c.h"
-                "${_protobuf_pregen_dir}/e2ee.pb-c.h")
-            # 在include路径中添加预生成目录
-            list(APPEND PROTOBUF_C_INCLUDE_DIRS 
-                ${_protobuf_pregen_dir}
-                "${PROJECT_SOURCE_DIR}/src")
-        endif()
+        # if(EXISTS "${_protobuf_pregen_dir}/common.pb-c.c")
+        #    message(STATUS "Found pre-generated protobuf files, using them with local implementation")
+        #    set(PROTOBUF_C_USE_PREGENSETS TRUE)
+        #    ...
+        # endif()
     endif()
 endif()
 
@@ -145,27 +115,11 @@ if(NOT PROTOBUF_C_FOUND AND WIN32)
                 
                 # 检查是否有预生成文件，如果有则使用它们并包含本地protobuf-c.c
                 set(_protobuf_pregen_dir "${PROJECT_SOURCE_DIR}/src/generated/schema/v2")
-                if(EXISTS "${_protobuf_pregen_dir}/common.pb-c.c")
-                    message(STATUS "Found pre-generated protobuf files, using them with local implementation")
-                    set(PROTOBUF_C_USE_PREGENSETS TRUE)
-                    set(PROTOBUF_C_SOURCES
-                        "${_protobuf_pregen_dir}/common.pb-c.c"
-                        "${_protobuf_pregen_dir}/auth.pb-c.c"
-                        "${_protobuf_pregen_dir}/room.pb-c.c"
-                        "${_protobuf_pregen_dir}/federation.pb-c.c"
-                        "${_protobuf_pregen_dir}/e2ee.pb-c.c"
-                        "${PROJECT_SOURCE_DIR}/src/external/protobuf-c/protobuf-c.c")
-                    set(PROTOBUF_C_HEADERS
-                        "${_protobuf_pregen_dir}/common.pb-c.h"
-                        "${_protobuf_pregen_dir}/auth.pb-c.h"
-                        "${_protobuf_pregen_dir}/room.pb-c.h"
-                        "${_protobuf_pregen_dir}/federation.pb-c.h"
-                        "${_protobuf_pregen_dir}/e2ee.pb-c.h")
-                    # 在include路径中添加预生成目录
-                    list(APPEND PROTOBUF_C_INCLUDE_DIRS 
-                        ${_protobuf_pregen_dir}
-                        "${PROJECT_SOURCE_DIR}/src")
-                endif()
+                # if(EXISTS "${_protobuf_pregen_dir}/common.pb-c.c")
+                #    message(STATUS "Found pre-generated protobuf files, using them with local implementation")
+                #    set(PROTOBUF_C_USE_PREGENSETS TRUE)
+                #    ...
+                # endif()
             endif()
         endif()
     endforeach()

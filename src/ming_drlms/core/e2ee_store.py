@@ -67,8 +67,8 @@ def _decode_key_pair(payload: Mapping[str, str] | None) -> SignalKeyPair | None:
     return SignalKeyPair(public_key=public_key, private_key=private_key)
 
 
-def _encode_sender_key_record(record: SenderKeyRecord) -> Mapping[str, object]:
-    return {
+def _encode_sender_key_record(record: "SenderKeyRecord") -> Mapping[str, object]:
+    payload: Dict[str, object] = {
         "room_name": record.room_name,
         "group_id": record.group_id,
         "sender": record.sender,
@@ -78,11 +78,14 @@ def _encode_sender_key_record(record: SenderKeyRecord) -> Mapping[str, object]:
         "sender_key_iteration": int(record.sender_key_iteration),
         "distribution": record.distribution.hex(),
     }
+    if getattr(record, "record_blob", None) is not None:
+        payload["record_blob"] = record.record_blob.hex()  # type: ignore[attr-defined]
+    return payload
 
 
 def _decode_sender_key_record(
     payload: Mapping[str, object] | None,
-) -> SenderKeyRecord | None:
+) -> "SenderKeyRecord" | None:
     if not payload:
         return None
     try:
@@ -114,6 +117,10 @@ def _decode_sender_key_record(
     payload_bytes = _decode_bytes(distribution_hex)
     if payload_bytes is None:
         return None
+    record_blob_hex = payload.get("record_blob")
+    record_blob: Optional[bytes] = None
+    if isinstance(record_blob_hex, str):
+        record_blob = _decode_bytes(record_blob_hex)
     return SenderKeyRecord(
         room_name=room_name,
         group_id=group_id,
@@ -123,6 +130,7 @@ def _decode_sender_key_record(
         sender_key_id=key_id,
         sender_key_iteration=iteration,
         distribution=payload_bytes,
+        record_blob=record_blob,
     )
 
 
@@ -136,6 +144,7 @@ class SenderKeyRecord:
     sender_key_id: int
     sender_key_iteration: int
     distribution: bytes
+    record_blob: bytes | None = None
 
     def index(self) -> str:
         return f"{self.room_name}|{self.group_id}|{self.sender}|{self.sender_device_id}"

@@ -27,6 +27,9 @@ from .pysignal import (
     encode_pre_key_record,
     encode_signed_pre_key_record,
 )
+from .. import log
+
+logger = log.get_logger("core.e2ee_runtime")
 
 _LIB_SIGNAL_MESSAGE_TYPE = 2
 _LIB_SIGNAL_PRE_KEY_TYPE = 3
@@ -83,16 +86,42 @@ class E2EEngine:
         self._group_cipher = (
             group_cipher if group_cipher is not None else GroupCipher(self._store)
         )
+        self._read_store: SignalStore = SignalStore(self._context)
+        self._group_builder_read: GroupSessionBuilder | None = GroupSessionBuilder(
+            self._read_store, self._context
+        )
+        self._group_cipher_read: GroupCipher = GroupCipher(self._read_store)
         self._group_sender_keys: Dict[str, SenderKeyRecord] = {}
         self._group_distribution_targets: Dict[str, set[str]] = {}
         self._load_cached_sender_keys()
         self._initialise_signal_store()
+        self._initialise_signal_store_for(self._read_store)
+        self._restore_sender_keys_into_store()
+        try:
+            logger.debug(
+                "E2EEngine initialised: user=%s device_id=%s sender_keys=%d",
+                self._username,
+                getattr(self._state, "device_id", None),
+                len(getattr(self._state, "sender_keys", {}) or {}),
+            )
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # 公共 API
     # ------------------------------------------------------------------
     def encrypt(self, peer: str, plaintext: bytes) -> room_pb2.SignalEncryptedPayload:
         session = self._ensure_session(peer)
+        try:
+            logger.debug(
+                "E2EE encrypt: user=%s peer=%s dev=%s len=%s",
+                self._username,
+                session.name,
+                session.device_id,
+                len(plaintext) if hasattr(plaintext, "__len__") else None,
+            )
+        except Exception:
+            pass
         result = self._store.encrypt(session.name, session.device_id, plaintext)
         payload = room_pb2.SignalEncryptedPayload()
         payload.type = proto_type_from_lib(result.message_type)
@@ -104,6 +133,15 @@ class E2EEngine:
             payload.pre_key_id = int(result.pre_key_id)  # type: ignore[attr-defined]
         if result.signed_pre_key_id is not None:
             payload.signed_pre_key_id = int(result.signed_pre_key_id)  # type: ignore[attr-defined]
+        try:
+            logger.debug(
+                "E2EE encrypt result: type=%s pre_key=%s signed_pre_key=%s",
+                result.message_type,
+                result.pre_key_id,
+                result.signed_pre_key_id,
+            )
+        except Exception:
+            pass
         # 将远端身份写入密钥仓库，便于后续校验
         identity = self._store.get_remote_identity(session.name, session.device_id)
         if identity:
@@ -122,6 +160,17 @@ class E2EEngine:
             sender=self._username,
             device_id=self._state.device_id,
         )
+        try:
+            logger.debug(
+                "E2EE encrypt_group start: room=%s gid=%s sender=%s dev=%s len=%s",
+                room_name,
+                group_id,
+                self._username,
+                self._state.device_id,
+                len(plaintext) if hasattr(plaintext, "__len__") else None,
+            )
+        except Exception:
+            pass
         result = self._group_cipher.encrypt(name, plaintext)
         payload = room_pb2.SignalEncryptedPayload()
         payload.type = room_pb2.SignalCiphertextType.SIGNAL_CIPHERTEXT_TYPE_MESSAGE  # type: ignore[attr-defined]
@@ -131,11 +180,33 @@ class E2EEngine:
         payload.sender_registration_id = self._state.registration_id  # type: ignore[attr-defined]
         payload.group_id = group_id  # type: ignore[attr-defined]
         payload.sender_key_iteration = result.iteration  # type: ignore[attr-defined]
+        try:
+            logger.debug(
+                "E2EE encrypt_group done: gid=%s iter=%s ct_len=%s",
+                group_id,
+                result.iteration,
+                len(result.ciphertext)
+                if hasattr(result.ciphertext, "__len__")
+                else None,
+            )
+        except Exception:
+            pass
         return payload
 
     def decrypt(self, event: RoomEvent) -> DecryptResult:
         peer = event.sender or ""
         device_id = event.sender_device_id or 1
+        try:
+            logger.debug(
+                "E2EE decrypt: room=%s peer=%s dev=%s payload_len=%s type=%s",
+                event.room_name,
+                peer,
+                device_id,
+                len(event.payload) if hasattr(event.payload, "__len__") else None,
+                event.payload_type,
+            )
+        except Exception:
+            pass
         cipher = Ciphertext(
             ciphertext=event.payload,
             message_type=lib_type_from_proto(event.payload_type),
@@ -147,6 +218,13 @@ class E2EEngine:
             peer,
             device_id,
             cipher,
+        )
+        logger.debug(
+            "E2EE decrypt: peer=%s dev=%s msg_type=%s pre_key_id=%s",
+            peer,
+            device_id,
+            result.info.message_type,
+            result.info.pre_key_id,
         )
         # 记录远端身份
         identity = self._store.get_remote_identity(peer, device_id)
@@ -160,6 +238,16 @@ class E2EEngine:
             and result.info.pre_key_id is not None
         ):
             self._key_store.remove_pre_key(self._username, int(result.info.pre_key_id))
+        try:
+            logger.debug(
+                "E2EE decrypt done: peer=%s dev=%s msg_type=%s pre_key_id=%s",
+                peer,
+                device_id,
+                result.info.message_type,
+                result.info.pre_key_id,
+            )
+        except Exception:
+            pass
         return result
 
     def decrypt_group(self, event: RoomEvent) -> GroupDecryptResult:
@@ -177,14 +265,32 @@ class E2EEngine:
             sender=sender,
             device_id=device_id,
         )
-        return self._group_cipher.decrypt(name, event.payload)
+        try:
+            logger.debug(
+                "E2EE decrypt_group: room=%s gid=%s sender=%s dev=%s payload_len=%s",
+                event.room_name,
+                group_id,
+                sender,
+                device_id,
+                len(event.payload) if hasattr(event.payload, "__len__") else None,
+            )
+        except Exception:
+            pass
+        return self._group_cipher_read.decrypt(name, event.payload)
 
     def close(self) -> None:
         self._store.close()
+        try:
+            self._read_store.close()
+        except Exception:
+            pass
         self._context.close()
         if self._group_builder is not None:
             self._group_builder.close()
             self._group_builder = None
+        if self._group_builder_read is not None:
+            self._group_builder_read.close()
+            self._group_builder_read = None
 
     # ------------------------------------------------------------------
     # 内部流程
@@ -227,10 +333,85 @@ class E2EEngine:
             )
             self._store.put_pre_key_record(key_id, encoded)
 
+    def _initialise_signal_store_for(self, store: SignalStore) -> None:
+        state = self._state
+        store.set_identity(
+            public_key=state.identity_key.public_key,
+            private_key=state.identity_key.private_key,
+            registration_id=state.registration_id,
+            device_id=state.device_id,
+        )
+        if state.signed_pre_key is not None:
+            encoded = encode_signed_pre_key_record(
+                self._context,
+                key_id=state.signed_pre_key.id,
+                timestamp=state.signed_pre_key.timestamp,
+                public_key=state.signed_pre_key.key.public_key,
+                private_key=state.signed_pre_key.key.private_key,
+                signature=state.signed_pre_key.signature,
+            )
+            store.put_signed_pre_key_record(
+                state.signed_pre_key.id,
+                encoded,
+            )
+        for key_id, pair in state.pre_keys.items():
+            encoded = encode_pre_key_record(
+                self._context,
+                key_id=key_id,
+                public_key=pair.public_key,
+                private_key=pair.private_key,
+            )
+            store.put_pre_key_record(key_id, encoded)
+
     def _load_cached_sender_keys(self) -> None:
         sender_keys = getattr(self._state, "sender_keys", {}) or {}
         for record in sender_keys.values():
             self._group_sender_keys[record.index()] = record
+
+    def _restore_sender_keys_into_store(self) -> None:
+        sender_keys = getattr(self._state, "sender_keys", {}) or {}
+        for record in sender_keys.values():
+            try:
+                name = SenderKeyName(
+                    group_id=record.group_id,
+                    sender=record.sender,
+                    device_id=int(record.sender_device_id),
+                )
+                if record.sender == self._username:
+                    blob = getattr(record, "record_blob", None)
+                    if blob:
+                        c_name, _refs = name.to_c_struct(self._store._ffi)
+                        try:
+                            self._store._lib.drlms_sender_key_record_import(
+                                self._store.handle,
+                                c_name,
+                                blob,
+                                len(blob),
+                            )
+                        except Exception:
+                            pass
+                    try:
+                        if self._group_builder_read is not None:
+                            self._group_builder_read.process_session(
+                                name, record.distribution
+                            )
+                    except Exception:
+                        pass
+                    else:
+                        try:
+                            self._key_store.remove_sender_key(self._username, record)
+                        except Exception:
+                            pass
+                else:
+                    try:
+                        if self._group_builder_read is not None:
+                            self._group_builder_read.process_session(
+                                name, record.distribution
+                            )
+                    except Exception:
+                        pass
+            except Exception:
+                pass
 
     def _ensure_session(self, peer: str) -> _PeerSession:
         key = (peer, 1)
@@ -281,9 +462,6 @@ class E2EEngine:
 
     def _ensure_sender_key(self, room_name: str, group_id: str) -> SenderKeyRecord:
         index = self._sender_key_index(room_name, group_id)
-        existing = self._group_sender_keys.get(index)
-        if existing is not None:
-            return existing
         if not self._group_builder:
             raise SignalBridgeError("group session builder unavailable")
         name = SenderKeyName(
@@ -292,6 +470,36 @@ class E2EEngine:
             device_id=self._state.device_id,
         )
         distribution = self._group_builder.create_session(name)
+        try:
+            logger.debug(
+                "E2EE ensure_sender_key: room=%s gid=%s sender=%s dev=%s key_id=%s iter=%s dist_len=%s",
+                room_name,
+                group_id,
+                self._username,
+                self._state.device_id,
+                distribution.key_id,
+                distribution.iteration,
+                len(distribution.bytes)
+                if hasattr(distribution.bytes, "__len__")
+                else None,
+            )
+        except Exception:
+            pass
+        blob_bytes: bytes | None = None
+        try:
+            c_name, _refs = name.to_c_struct(self._store._ffi)
+            out_ptr = self._store._ffi.new("uint8_t **")
+            out_len = self._store._ffi.new("size_t *")
+            rc = self._store._lib.drlms_sender_key_record_export(
+                self._store.handle, c_name, out_ptr, out_len
+            )
+            if rc == 0 and out_ptr[0] != self._store._ffi.NULL and int(out_len[0]) > 0:
+                # Copy out-of-line blob into Python-managed bytes. The C heap
+                # allocation is intentionally left to be reclaimed at process
+                # teardown to avoid cross-CRT free() issues on Windows.
+                blob_bytes = bytes(self._store._ffi.buffer(out_ptr[0], int(out_len[0])))
+        except Exception:
+            blob_bytes = None
         record = SenderKeyRecord(
             room_name=room_name,
             group_id=group_id,
@@ -301,10 +509,16 @@ class E2EEngine:
             sender_key_id=distribution.key_id,
             sender_key_iteration=distribution.iteration,
             distribution=distribution.bytes,
+            record_blob=blob_bytes,
         )
         self._key_store.store_sender_key(self._username, record)
         self._group_sender_keys[index] = record
         self._state.sender_keys[index] = record
+        try:
+            if self._group_builder_read is not None:
+                self._group_builder_read.process_session(name, record.distribution)
+        except Exception:
+            pass
         return record
 
     def process_sender_key_distribution(
@@ -317,7 +531,29 @@ class E2EEngine:
             sender=distribution.sender,
             device_id=distribution.sender_device_id,
         )
+        try:
+            logger.debug(
+                "E2EE process_sender_key_distribution: room=%s gid=%s sender=%s dev=%s key_id=%s iter=%s len=%s",
+                distribution.room_name,
+                distribution.group_id,
+                distribution.sender,
+                distribution.sender_device_id,
+                distribution.sender_key_id,
+                distribution.sender_key_iteration,
+                len(distribution.distribution_message)
+                if hasattr(distribution.distribution_message, "__len__")
+                else None,
+            )
+        except Exception:
+            pass
         self._group_builder.process_session(name, distribution.distribution_message)
+        try:
+            if self._group_builder_read is not None:
+                self._group_builder_read.process_session(
+                    name, distribution.distribution_message
+                )
+        except Exception:
+            pass
         record = SenderKeyRecord(
             room_name=distribution.room_name,
             group_id=distribution.group_id,
@@ -360,4 +596,16 @@ class E2EEngine:
             raise SignalBridgeError(
                 f"sender key push to {target_user} failed: {code} {message}"
             )
+        try:
+            logger.debug(
+                "E2EE distribute_sender_key: room=%s gid=%s target=%s key_id=%s iter=%s code=%s",
+                room_name,
+                group_id,
+                target_user,
+                record.sender_key_id,
+                record.sender_key_iteration,
+                code,
+            )
+        except Exception:
+            pass
         sent.add(target_user)

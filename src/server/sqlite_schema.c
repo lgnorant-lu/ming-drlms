@@ -8,6 +8,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <errno.h>
+#include "logger.h"
 
 #if defined(_WIN32)
 #include <io.h>
@@ -43,8 +44,7 @@ int sqlite_storage_init(SQLiteStorage *storage, const char *db_path) {
     // Open DB
     int rc = sqlite3_open(db_path, &storage->db);
     if (rc != SQLITE_OK) {
-        fprintf(stderr, "Cannot open database: %s\n",
-                sqlite3_errmsg(storage->db));
+        LOG_ERROR("Cannot open database: %s", sqlite3_errmsg(storage->db));
         return -1;
     }
 
@@ -52,8 +52,7 @@ int sqlite_storage_init(SQLiteStorage *storage, const char *db_path) {
     rc =
         sqlite3_exec(storage->db, "PRAGMA journal_mode=WAL;", NULL, NULL, NULL);
     if (rc != SQLITE_OK) {
-        fprintf(stderr, "Failed to enable WAL mode: %s\n",
-                sqlite3_errmsg(storage->db));
+        LOG_ERROR("Failed to enable WAL mode: %s", sqlite3_errmsg(storage->db));
         sqlite3_close(storage->db);
         return -1;
     }
@@ -227,7 +226,7 @@ int sqlite_storage_init(SQLiteStorage *storage, const char *db_path) {
     char *err_msg = NULL;
     rc = sqlite3_exec(storage->db, sql, NULL, NULL, &err_msg);
     if (rc != SQLITE_OK) {
-        fprintf(stderr, "SQL error: %s\n", err_msg ? err_msg : "(null)");
+        LOG_ERROR("SQL error: %s", err_msg ? err_msg : "(null)");
         if (err_msg)
             sqlite3_free(err_msg);
         sqlite_storage_cleanup(storage);
@@ -245,7 +244,7 @@ int sqlite_storage_init(SQLiteStorage *storage, const char *db_path) {
                            "auth_refresh_tokens(user_name);";
     rc = sqlite3_exec(storage->db, auth_sql, NULL, NULL, &err_msg);
     if (rc != SQLITE_OK) {
-        fprintf(stderr, "SQL error: %s\n", err_msg ? err_msg : "(null)");
+        LOG_ERROR("SQL error: %s", err_msg ? err_msg : "(null)");
         if (err_msg)
             sqlite3_free(err_msg);
         sqlite_storage_cleanup(storage);

@@ -1,6 +1,8 @@
 #include "federation_internal.h"
 #include "federation_transport.h"
 #include "rooms.h"
+#include "logger.h"
+// Forced recompile
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -50,14 +52,14 @@ typedef Mingdrlms__V2__RoomEvent RoomEvent;
 #define s2s_subscribe_response__free_unpacked                                  \
     mingdrlms__v2__s2_ssubscribe_response__free_unpacked
 
-int federation_forward_publish(const char *room_name,
-                               const char *instance_id_hex, uint64_t event_id,
-                               const char *timestamp, const char *sender_user,
-                               const char *display_token,
-                               const unsigned char *payload, size_t payload_len,
-                               const char *sha_hex, int ephemeral,
-                               Mingdrlms__V2__RoomEventKind event_kind,
-                               const char *filename, uint64_t file_size_bytes) {
+int federation_perform_forward_publish(
+    const char *room_name, const char *instance_id_hex, uint64_t event_id,
+    const char *timestamp, const char *sender_user, const char *display_token,
+    const unsigned char *payload, size_t payload_len, const char *sha_hex,
+    int ephemeral, int event_kind_int, const char *filename,
+    uint64_t file_size_bytes) {
+    Mingdrlms__V2__RoomEventKind event_kind =
+        (Mingdrlms__V2__RoomEventKind)event_kind_int;
     if (!g_federation_initialized || !g_federation_config.enabled) {
         return 0; // Federation disabled, not an error
     }
@@ -118,18 +120,17 @@ int federation_forward_publish(const char *room_name,
     }
 
     if (remote_count == 0) {
-        fprintf(stderr,
-                "[federation] No remote subscribers registered for room=%s\n",
-                room_name);
+        LOG_INFO("[federation] No remote subscribers registered for room=%s",
+                 room_name);
         return 0; // No remote subscribers
     }
 
-    fprintf(stderr,
-            "[federation] Forwarding publish to %zu remote server(s): room=%s, "
-            "event_id=%llu\n",
-            remote_count, room_name, (unsigned long long)event_id);
+    LOG_INFO("[federation] Forwarding publish to %zu remote server(s): "
+             "room=%s, event_id=%llu",
+             remote_count, room_name, (unsigned long long)event_id);
 
-    S2SPublishRequest req = S2S_PUBLISH_REQUEST__INIT;
+    S2SPublishRequest req;
+    mingdrlms__v2__s2_spublish_request__init(&req);
     req.bearer_token = (char *)g_federation_config.bearer_token;
     req.room_name = (char *)room_name;
     req.event_id = (int64_t)event_id;
@@ -142,8 +143,8 @@ int federation_forward_publish(const char *room_name,
     req.event_kind = event_kind;
     req.ephemeral = ephemeral ? 1 : 0;
 
-    Mingdrlms__V2__RoomFileMetadata file_meta =
-        MINGDRLMS__V2__ROOM_FILE_METADATA__INIT;
+    Mingdrlms__V2__RoomFileMetadata file_meta;
+    mingdrlms__v2__room_file_metadata__init(&file_meta);
     if (event_kind == MINGDRLMS__V2__ROOM_EVENT_KIND__ROOM_EVENT_KIND_FILE &&
         filename && *filename) {
         file_meta.filename = (char *)filename;
@@ -162,9 +163,8 @@ int federation_forward_publish(const char *room_name,
     int success_count = 0;
     for (size_t i = 0; i < remote_count; i++) {
         TrustedServer *srv = &targets[i].server;
-        fprintf(stderr,
-                "[federation] Forwarding publish to %s:%d (instance=%s)\n",
-                srv->host, srv->port, targets[i].remote_instance_id);
+        LOG_DEBUG("[federation] Forwarding publish to %s:%d (instance=%s)",
+                  srv->host, srv->port, targets[i].remote_instance_id);
 
         uint16_t resp_type = 0;
         unsigned char *resp_payload = NULL;
@@ -175,8 +175,7 @@ int federation_forward_publish(const char *room_name,
             unsigned char *new_buf =
                 (unsigned char *)realloc(req_buf, req_size);
             if (!new_buf) {
-                fprintf(stderr,
-                        "[federation] Failed to allocate publish buffer\n");
+                LOG_ERROR("[federation] Failed to allocate publish buffer");
                 continue;
             }
             req_buf = new_buf;
@@ -199,16 +198,14 @@ int federation_forward_publish(const char *room_name,
                 if (resp->code == 0) {
                     success_count++;
                 } else {
-                    fprintf(stderr,
-                            "[federation] Remote server %s returned error "
-                            "code=%d\n",
-                            srv->server_id, resp->code);
+                    LOG_WARN(
+                        "[federation] Remote server %s returned error code=%d",
+                        srv->server_id, resp->code);
                 }
                 s2s_publish_response__free_unpacked(resp, NULL);
             } else {
-                fprintf(
-                    stderr,
-                    "[federation] Failed to parse publish response from %s\n",
+                LOG_WARN(
+                    "[federation] Failed to parse publish response from %s",
                     srv->server_id);
             }
             free(resp_payload);
@@ -238,41 +235,37 @@ int federation_handle_s2s_publish(
 
     // Verify bearer token
     if (federation_verify_token(bearer_token) != 0) {
-        fprintf(stderr,
-                "[federation] S2S request rejected: invalid bearer token\n");
+        LOG_WARN("[federation] S2S request rejected: invalid bearer token");
         return -1;
     }
 
-    fprintf(stderr,
-            "[federation] Handling S2S publish: room=%s, instance=%s, "
-            "event_id=%llu\n",
-            room_name, instance_id_hex, (unsigned long long)event_id);
+    LOG_INFO("[federation] Handling S2S publish: room=%s, instance=%s, "
+             "event_id=%llu",
+             room_name, instance_id_hex, (unsigned long long)event_id);
 
     // Get room and instance
     Room *room = rooms_get_or_create(room_name, NULL);
     if (!room) {
-        fprintf(stderr, "[federation] Failed to get/create room: %s\n",
-                room_name);
+        LOG_ERROR("[federation] Failed to get/create room: %s", room_name);
         return -1;
     }
 
     RoomInstance *instance = rooms_get_instance_by_hex(room, instance_id_hex);
     if (!instance) {
-        fprintf(stderr, "[federation] Instance not found: %s\n",
-                instance_id_hex);
+        LOG_WARN("[federation] Instance not found: %s", instance_id_hex);
         return -1;
     }
 
     // Parse instance UUID
     InstanceUUID uuid;
     if (rooms_uuid_from_hex(instance_id_hex, &uuid) != 0) {
-        fprintf(stderr, "[federation] Invalid instance UUID: %s\n",
-                instance_id_hex);
+        LOG_WARN("[federation] Invalid instance UUID: %s", instance_id_hex);
         return -1;
     }
 
     // Build RoomEvent protobuf for MP2 clients
-    RoomEvent ev = ROOM_EVENT__INIT;
+    RoomEvent ev;
+    mingdrlms__v2__room_event__init(&ev);
     ev.room_name = (char *)room_name;
     ev.event_id = (int64_t)event_id;
     Mingdrlms__V2__SignalEncryptedPayload *payload_msg = NULL;
@@ -281,8 +274,7 @@ int federation_handle_s2s_publish(
         payload_msg =
             signal_encrypted_payload__unpack(NULL, payload_len, payload);
         if (!payload_msg) {
-            fprintf(stderr,
-                    "[federation] Failed to unpack SignalEncryptedPayload\n");
+            LOG_WARN("[federation] Failed to unpack SignalEncryptedPayload");
             return -1;
         }
         ev.payload = payload_msg;
@@ -300,8 +292,8 @@ int federation_handle_s2s_publish(
     ev.timestamp = (char *)(timestamp ? timestamp : "");
     ev.instance_id = (char *)(instance_id_hex ? instance_id_hex : "");
 
-    Mingdrlms__V2__RoomFileMetadata file_local =
-        MINGDRLMS__V2__ROOM_FILE_METADATA__INIT;
+    Mingdrlms__V2__RoomFileMetadata file_local;
+    mingdrlms__v2__room_file_metadata__init(&file_local);
     if (event_kind == MINGDRLMS__V2__ROOM_EVENT_KIND__ROOM_EVENT_KIND_FILE &&
         file_meta) {
         file_local.filename =
@@ -318,7 +310,7 @@ int federation_handle_s2s_publish(
     size_t ev_sz = room_event__get_packed_size(&ev);
     unsigned char *ev_buf = (unsigned char *)malloc(ev_sz);
     if (!ev_buf) {
-        fprintf(stderr, "[federation] Failed to allocate room event buffer\n");
+        LOG_ERROR("[federation] Failed to allocate room event buffer");
         if (payload_msg)
             signal_encrypted_payload__free_unpacked(payload_msg, NULL);
         return -1;
@@ -328,7 +320,7 @@ int federation_handle_s2s_publish(
     size_t frame_len = 12 + ev_sz;
     unsigned char *frame = (unsigned char *)malloc(frame_len);
     if (!frame) {
-        fprintf(stderr, "[federation] Failed to allocate MP2 frame buffer\n");
+        LOG_ERROR("[federation] Failed to allocate MP2 frame buffer");
         free(ev_buf);
         if (payload_msg)
             signal_encrypted_payload__free_unpacked(payload_msg, NULL);
@@ -353,43 +345,47 @@ int federation_handle_s2s_publish(
         signal_encrypted_payload__free_unpacked(payload_msg, NULL);
 
     if (emit_rc != 0) {
-        fprintf(stderr,
-                "[federation] Failed to emit MP2 event to local subscribers\n");
+        LOG_WARN("[federation] Failed to emit MP2 event to local subscribers");
         return -1;
     }
 
-    fprintf(stderr, "[federation] Successfully fanned out S2S publish to local "
-                    "subscribers\n");
+    LOG_INFO("[federation] Successfully fanned out S2S publish to local "
+             "subscribers");
     return 0;
 }
 
-int federation_notify_subscription(const char *room_name,
-                                   const char *instance_id_hex, int subscribe) {
-    fprintf(stderr,
-            "[federation_notify_subscription] ENTER: room=%s instance=%s "
-            "subscribe=%d\n",
-            room_name ? room_name : "NULL",
-            instance_id_hex ? instance_id_hex : "NULL", subscribe);
+int federation_perform_notify_subscription(const char *room_name,
+                                           const char *instance_id_hex,
+                                           int subscribe) {
+    LOG_DEBUG("[federation_notify_subscription] ENTER: room=%s instance=%s "
+              "subscribe=%d",
+              room_name ? room_name : "NULL",
+              instance_id_hex ? instance_id_hex : "NULL", subscribe);
 
     if (!g_federation_initialized || !g_federation_config.enabled) {
-        fprintf(stderr,
-                "[federation_notify_subscription] ABORT: not initialized or "
-                "disabled (init=%d, enabled=%d)\n",
-                g_federation_initialized, g_federation_config.enabled);
+        LOG_DEBUG("[federation_notify_subscription] ABORT: not initialized or "
+                  "disabled (init=%d, enabled=%d)",
+                  g_federation_initialized, g_federation_config.enabled);
         return 0;
     }
     if (!room_name || !instance_id_hex) {
-        fprintf(stderr,
-                "[federation_notify_subscription] ABORT: missing parameters\n");
+        LOG_WARN("[federation_notify_subscription] ABORT: missing parameters");
         return -1;
     }
 
-    fprintf(stderr,
-            "[federation_notify_subscription] Building S2SSubscribeRequest for "
-            "server_id=%s\n",
-            g_federation_config.server_id);
+    LOG_DEBUG("[federation_notify_subscription] Building S2SSubscribeRequest "
+              "for server_id=%s",
+              g_federation_config.server_id);
 
-    S2SSubscribeRequest req = S2S_SUBSCRIBE_REQUEST__INIT;
+    S2SSubscribeRequest req;
+    mingdrlms__v2__s2_ssubscribe_request__init(&req);
+    LOG_DEBUG("S2SSubscribeRequest descriptor: %p\n",
+              (void *)req.base.descriptor);
+    if (req.base.descriptor) {
+        LOG_DEBUG("S2SSubscribeRequest magic: 0x%x\n",
+                  req.base.descriptor->magic);
+    }
+
     req.bearer_token = (char *)g_federation_config.bearer_token;
     req.room_name = (char *)room_name;
     req.instance_id = (char *)instance_id_hex;
@@ -404,35 +400,29 @@ int federation_notify_subscription(const char *room_name,
     s2s_subscribe_request__pack(&req, req_buf);
 
     int success_count = 0;
-    fprintf(
-        stderr,
-        "[federation_notify_subscription] Notifying %zu trusted server(s)\n",
-        g_federation_config.trusted_servers_count);
+    LOG_INFO("[federation_notify_subscription] Notifying %zu trusted server(s)",
+             g_federation_config.trusted_servers_count);
 
     for (size_t i = 0; i < g_federation_config.trusted_servers_count; ++i) {
         const TrustedServer *srv = &g_federation_config.trusted_servers[i];
-        fprintf(stderr,
-                "[federation_notify_subscription] Server %zu: id=%s host=%s "
-                "port=%d\n",
-                i, srv->server_id, srv->host, srv->port);
+        LOG_INFO("[federation_notify_subscription] Server %zu: id=%s host=%s "
+                 "port=%d",
+                 i, srv->server_id, srv->host, srv->port);
 
         if (srv->server_id[0] != '\0' &&
             strcmp(srv->server_id, g_federation_config.server_id) == 0) {
-            fprintf(stderr,
-                    "[federation_notify_subscription] Skipping self "
-                    "(server_id=%s)\n",
-                    srv->server_id);
+            LOG_DEBUG(
+                "[federation_notify_subscription] Skipping self (server_id=%s)",
+                srv->server_id);
             continue; // skip self
         }
 
-        fprintf(stderr,
-                "[federation_notify_subscription] Sending S2S_SUB_REQUEST to "
-                "%s:%d\n",
-                srv->host, srv->port);
-        fprintf(
-            stderr,
+        LOG_INFO(
+            "[federation_notify_subscription] Sending S2S_SUB_REQUEST to %s:%d",
+            srv->host, srv->port);
+        LOG_DEBUG(
             "[federation_notify_subscription] enum SUB_REQUEST=%u "
-            "SUB_RESPONSE=%u\n",
+            "SUB_RESPONSE=%u",
             (unsigned)MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_S2S_SUB_REQUEST,
             (unsigned)MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_S2S_SUB_RESPONSE);
 
@@ -443,10 +433,8 @@ int federation_notify_subscription(const char *room_name,
             srv, MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_S2S_SUB_REQUEST, req_buf,
             (uint32_t)req_size, &resp_type, &resp_payload, &resp_len);
         if (rc != 0) {
-            fprintf(
-                stderr,
-                "[federation] Failed to send subscription notify to %s:%d\n",
-                srv->host, srv->port);
+            LOG_WARN("[federation] Failed to send subscription notify to %s:%d",
+                     srv->host, srv->port);
             continue;
         }
 
@@ -459,22 +447,19 @@ int federation_notify_subscription(const char *room_name,
                 if (resp->code == 0) {
                     success_count++;
                 } else {
-                    fprintf(stderr,
-                            "[federation] Subscription notify failed on %s:%d "
-                            "code=%d\n",
-                            srv->host, srv->port, resp->code);
+                    LOG_WARN("[federation] Subscription notify failed on %s:%d "
+                             "code=%d",
+                             srv->host, srv->port, resp->code);
                 }
                 s2s_subscribe_response__free_unpacked(resp, NULL);
             } else {
-                fprintf(stderr,
-                        "[federation] Failed to parse subscribe response from "
-                        "%s:%d\n",
-                        srv->host, srv->port);
+                LOG_WARN("[federation] Failed to parse subscribe response from "
+                         "%s:%d",
+                         srv->host, srv->port);
             }
         } else {
-            fprintf(stderr,
-                    "[federation] Unexpected response type %u from %s:%d\n",
-                    (unsigned)resp_type, srv->host, srv->port);
+            LOG_WARN("[federation] Unexpected response type %u from %s:%d",
+                     (unsigned)resp_type, srv->host, srv->port);
         }
         if (resp_payload) {
             free(resp_payload);
@@ -493,47 +478,41 @@ int federation_handle_s2s_subscribe(const char *bearer_token,
                                     const char *remote_server_id,
                                     int subscribe) {
     if (federation_verify_token(bearer_token) != 0) {
-        fprintf(stderr, "[federation] S2S subscribe rejected: invalid token\n");
+        LOG_WARN("[federation] S2S subscribe rejected: invalid token");
         return -1;
     }
     if (!room_name || !instance_id_hex) {
-        fprintf(stderr,
-                "[federation] S2S subscribe missing room or instance\n");
+        LOG_WARN("[federation] S2S subscribe missing room or instance");
         return -1;
     }
     if (!remote_server_id || remote_server_id[0] == '\0') {
-        fprintf(stderr,
-                "[federation] S2S subscribe missing remote server id\n");
+        LOG_WARN("[federation] S2S subscribe missing remote server id");
         return -1;
     }
 
     if (subscribe) {
-        fprintf(stderr,
-                "[federation] Register remote subscriber: server=%s room=%s "
-                "instance=%s\n",
-                remote_server_id, room_name, instance_id_hex);
+        LOG_INFO("[federation] Register remote subscriber: server=%s room=%s "
+                 "instance=%s",
+                 remote_server_id, room_name, instance_id_hex);
         return federation_register_remote_subscriber(room_name, instance_id_hex,
                                                      remote_server_id);
     }
 
-    fprintf(stderr,
-            "[federation] Unregister remote subscriber: server=%s room=%s "
-            "instance=%s\n",
-            remote_server_id, room_name, instance_id_hex);
+    LOG_INFO("[federation] Unregister remote subscriber: server=%s room=%s "
+             "instance=%s",
+             remote_server_id, room_name, instance_id_hex);
     return federation_unregister_remote_subscriber(room_name, instance_id_hex,
                                                    remote_server_id);
 }
 
 #else
 // Stubs when protobuf-c is unavailable
-int federation_forward_publish(const char *room_name,
-                               const char *instance_id_hex, uint64_t event_id,
-                               const char *timestamp, const char *sender_user,
-                               const char *display_token,
-                               const unsigned char *payload, size_t payload_len,
-                               const char *sha_hex, int ephemeral,
-                               Mingdrlms__V2__RoomEventKind event_kind,
-                               const char *filename, uint64_t file_size_bytes) {
+int federation_perform_forward_publish(
+    const char *room_name, const char *instance_id_hex, uint64_t event_id,
+    const char *timestamp, const char *sender_user, const char *display_token,
+    const unsigned char *payload, size_t payload_len, const char *sha_hex,
+    int ephemeral, int event_kind, const char *filename,
+    uint64_t file_size_bytes) {
     (void)room_name;
     (void)instance_id_hex;
     (void)event_id;
@@ -549,30 +528,16 @@ int federation_forward_publish(const char *room_name,
     (void)file_size_bytes;
     return -1;
 }
-int federation_handle_s2s_publish(
-    const char *bearer_token, const char *room_name,
-    const char *instance_id_hex, uint64_t event_id, const char *timestamp,
-    const char *sender_user, const char *display_token,
-    const unsigned char *payload, size_t payload_len, const char *sha_hex,
-    Mingdrlms__V2__RoomEventKind event_kind,
-    const Mingdrlms__V2__RoomFileMetadata *file_meta, int ephemeral) {
-    (void)bearer_token;
-    (void)room_name;
-    (void)instance_id_hex;
-    (void)event_id;
-    (void)timestamp;
-    (void)sender_user;
-    (void)display_token;
+int mp2_rooms_handle_publish(platform_socket_t fd, const unsigned char *payload,
+                             uint32_t payload_len) {
+    (void)fd;
     (void)payload;
     (void)payload_len;
-    (void)sha_hex;
-    (void)event_kind;
-    (void)file_meta;
-    (void)ephemeral;
     return -1;
 }
-int federation_notify_subscription(const char *room_name,
-                                   const char *instance_id_hex, int subscribe) {
+int federation_perform_notify_subscription(const char *room_name,
+                                           const char *instance_id_hex,
+                                           int subscribe) {
     (void)room_name;
     (void)instance_id_hex;
     (void)subscribe;

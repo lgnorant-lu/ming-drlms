@@ -6,9 +6,12 @@ import hashlib
 import os
 import socket
 import time
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Generator, Iterable, Optional, cast
+
+from .. import log
 
 from ming_drlms.proto.schema.v2 import (
     auth_pb2 as _auth_pb2,
@@ -27,6 +30,8 @@ msg_types = cast(Any, _msg_types)
 from .mp2_transport import MP2Frame, read_frame, write_frame  # noqa: E402
 from .token_store import TokenRecord, TokenStore  # noqa: E402
 from ..users import parse_users  # noqa: E402
+
+logger = log.get_logger("core.mproto_v2_client")
 
 
 class MP2Error(RuntimeError):
@@ -173,6 +178,41 @@ class MP2Client:
 
     def __exit__(self, exc_type, exc, tb) -> None:  # type: ignore[override]
         self.close()
+
+    def pong(self, payload: bytes) -> None:
+        """Send PONG response."""
+        self.connect()
+        sock = self._require_socket()
+        write_frame(sock, common_pb2.MSG_TYPE_PONG, payload)
+
+    def _read_response(self, expected_type: int) -> MP2Frame:
+        """Read frames until expected type or error is received. Handles PING."""
+        sock = self._require_socket()
+        while True:
+            frame = read_frame(sock)
+            # Debug tracing via logger
+            logger.debug(
+                "_read_response: got %s, want %s",
+                getattr(frame, "msg_type", None),
+                expected_type,
+            )
+
+            if frame.msg_type == expected_type:
+                return frame
+
+            if frame.msg_type == common_pb2.MSG_TYPE_ERROR_RESPONSE:
+                return frame
+
+            if frame.msg_type == common_pb2.MSG_TYPE_PING:
+                # Respond to ping
+                write_frame(sock, common_pb2.MSG_TYPE_PONG, frame.payload)
+                continue
+
+            # Ignore other messages (async events)
+            logger.debug(
+                "_read_response: ignoring %s", getattr(frame, "msg_type", None)
+            )
+            continue
 
     def login(
         self,
@@ -496,11 +536,12 @@ class MP2Client:
 
         return events
 
-    def send_ping(self) -> tuple[int, int] | None:
-        """Send PING to server and wait for PONG response.
+    def send_ping(self) -> None:
+        """Send PING to server (async).
 
-        Returns:
-            Tuple of (client_timestamp_ms, server_timestamp_ms) if successful, None otherwise.
+        Notes:
+            Do NOT read the socket here to avoid races with the subscription reader.
+            PONG is handled by the subscription loop.
         """
         self.connect()
         sock = self._require_socket()
@@ -515,21 +556,7 @@ class MP2Client:
             common_pb2.MSG_TYPE_PING,
             req.SerializeToString(),
         )
-
-        # Wait for PONG response with short timeout
-        old_timeout = sock.gettimeout()
-        sock.settimeout(5.0)  # 5 second timeout for PONG
-        try:
-            frame = read_frame(sock)
-            if frame.msg_type == common_pb2.MSG_TYPE_PONG:
-                resp = common_pb2.PongResponse()
-                resp.ParseFromString(frame.payload)
-                return (resp.client_timestamp_ms, resp.timestamp_ms)
-            return None
-        except (ConnectionError, socket.timeout):
-            return None
-        finally:
-            sock.settimeout(old_timeout)
+        return None
 
     def publish(
         self,
@@ -591,6 +618,7 @@ class MP2Client:
         sender_key_callback: Optional[
             Callable[[SignalSenderKeyDistribution], None]
         ] = None,
+        pong_callback: Optional[Callable[[int, int], None]] = None,
     ) -> Iterable[RoomEvent]:
         record = self.ensure_access_token(username)
         self.connect()
@@ -610,15 +638,15 @@ class MP2Client:
             while True:
                 frame = read_frame(sock)
                 if frame.msg_type == common_pb2.MSG_TYPE_ROOM_EVENT:
-                    import binascii
-                    import sys
-
-                    sys.stderr.write(
-                        f"DEBUG: room event frame payload len={len(frame.payload)}\n"
-                    )
-                    sys.stderr.write(
-                        f"DEBUG: room event frame payload hex={binascii.hexlify(frame.payload).decode()}\n"
-                    )
+                    # Debug trace of raw frame payload for diagnostics
+                    try:
+                        logger.debug(
+                            "room event payload len=%d hex=%s",
+                            len(frame.payload),
+                            frame.payload.hex(),
+                        )
+                    except Exception:
+                        pass
                     event = room_pb2.RoomEvent()
                     event.ParseFromString(frame.payload)
                     file_meta: RoomFileMeta | None = None
@@ -721,6 +749,22 @@ class MP2Client:
                         )
                         sender_key_callback(distribution)
                     continue
+                elif frame.msg_type == common_pb2.MSG_TYPE_PING:
+                    # Respond to server ping and continue
+                    write_frame(sock, common_pb2.MSG_TYPE_PONG, frame.payload)
+                    continue
+                elif frame.msg_type == common_pb2.MSG_TYPE_PONG:
+                    # Update heartbeat based on PONG observed by the reader
+                    try:
+                        resp = common_pb2.PongResponse()
+                        resp.ParseFromString(frame.payload)
+                        if pong_callback is not None:
+                            pong_callback(
+                                int(resp.client_timestamp_ms), int(resp.timestamp_ms)
+                            )
+                    except Exception:
+                        pass
+                    continue
                 elif frame.msg_type == common_pb2.MSG_TYPE_ERROR_RESPONSE:
                     err = common_pb2.ErrorResponse()
                     err.ParseFromString(frame.payload)
@@ -744,20 +788,20 @@ class MP2Client:
         req.access_token = record.access_token
         # Debug: log token presence for troubleshooting
         try:
-            import sys
-
-            sys.stderr.write(
-                f"DEBUG: get_room_members sending access_token length={len(record.access_token) if record and record.access_token is not None else 'None'}\n"
+            logger.debug(
+                "get_room_members sending access_token length=%s",
+                len(record.access_token)
+                if record and record.access_token is not None
+                else "None",
             )
         except Exception:
             pass
         payload = req.SerializeToString()
         try:
-            import binascii
-            import sys
-
-            sys.stderr.write(
-                f"DEBUG: serialized RoomMemberListRequest ({len(payload)} bytes): {binascii.hexlify(payload).decode()}\n"
+            logger.debug(
+                "serialized RoomMemberListRequest (%d bytes): %s",
+                len(payload),
+                payload.hex(),
             )
         except Exception:
             pass
@@ -960,6 +1004,18 @@ class MP2Client:
         ephemeral: bool = False,
     ) -> str:
         """Begin file upload. Returns upload_id."""
+        try:
+            logger.debug(
+                "file_publish_begin: user=%s room=%s filename=%s size=%s sha=%s ephemeral=%s",
+                username,
+                room_name,
+                filename,
+                size_bytes,
+                sha256_hex,
+                ephemeral,
+            )
+        except Exception:
+            pass
         record = self.ensure_access_token(username)
         self.connect()
         sock = self._require_socket()
@@ -971,6 +1027,7 @@ class MP2Client:
         req.size_bytes = size_bytes
         req.sha256_hex = sha256_hex
         req.ephemeral = ephemeral
+        req.upload_id = str(uuid.uuid4())
 
         write_frame(
             sock,
@@ -978,10 +1035,18 @@ class MP2Client:
             req.SerializeToString(),
         )
 
-        frame = read_frame(sock)
+        frame = self._read_response(common_pb2.MSG_TYPE_ROOM_FILE_PUB_BEGIN)
         if frame.msg_type == common_pb2.MSG_TYPE_ROOM_FILE_PUB_BEGIN:
             resp = room_pb2.RoomFilePublishBegin()
             resp.ParseFromString(frame.payload)
+            try:
+                logger.debug(
+                    "file_publish_begin ok: room=%s upload_id=%s",
+                    getattr(resp, "room_name", room_name),
+                    getattr(resp, "upload_id", None),
+                )
+            except Exception:
+                pass
             return resp.upload_id
         if frame.msg_type == common_pb2.MSG_TYPE_ERROR_RESPONSE:
             err = common_pb2.ErrorResponse()
@@ -1008,6 +1073,17 @@ class MP2Client:
         req.offset = offset
         req.last_chunk = last_chunk
 
+        try:
+            logger.debug(
+                "file_publish_chunk: upload_id=%s offset=%s len=%s last=%s",
+                upload_id,
+                offset,
+                len(data) if hasattr(data, "__len__") else None,
+                last_chunk,
+            )
+        except Exception:
+            pass
+
         write_frame(
             sock,
             common_pb2.MSG_TYPE_ROOM_FILE_PUB_CHUNK,
@@ -1031,10 +1107,24 @@ class MP2Client:
             req.SerializeToString(),
         )
 
-        frame = read_frame(sock)
+        try:
+            logger.debug("file_publish_commit: upload_id=%s", upload_id)
+        except Exception:
+            pass
+
+        frame = self._read_response(common_pb2.MSG_TYPE_ROOM_FILE_PUB_RESULT)
         if frame.msg_type == common_pb2.MSG_TYPE_ROOM_FILE_PUB_RESULT:
             resp = room_pb2.RoomFilePublishResult()
             resp.ParseFromString(frame.payload)
+            try:
+                logger.debug(
+                    "file_publish_commit ok: upload_id=%s room=%s event_id=%s",
+                    upload_id,
+                    getattr(resp, "room_name", None),
+                    getattr(resp, "event_id", None),
+                )
+            except Exception:
+                pass
             return resp.room_name, int(resp.event_id)
         if frame.msg_type == common_pb2.MSG_TYPE_ERROR_RESPONSE:
             err = common_pb2.ErrorResponse()
@@ -1051,6 +1141,12 @@ class MP2Client:
         event_id: int,
     ) -> Generator[bytes, None, None]:
         """Download file. Yields data chunks."""
+        try:
+            logger.debug(
+                "download_file start: room=%s event_id=%s", room_name, event_id
+            )
+        except Exception:
+            pass
         record = self.ensure_access_token(username)
         self.connect()
         sock = self._require_socket()
@@ -1065,20 +1161,53 @@ class MP2Client:
             common_pb2.MSG_TYPE_ROOM_FILE_DOWNLOAD_REQUEST,
             req.SerializeToString(),
         )
+        try:
+            logger.debug(
+                "download_file request sent: room=%s event_id=%s", room_name, event_id
+            )
+        except Exception:
+            pass
 
         while True:
             frame = read_frame(sock)
             if frame.msg_type == common_pb2.MSG_TYPE_ROOM_FILE_DOWNLOAD_CHUNK:
                 chunk = room_pb2.RoomFileDownloadChunk()
                 chunk.ParseFromString(frame.payload)
+                try:
+                    logger.debug(
+                        "download_file chunk: offset=%s len=%s last=%s",
+                        getattr(chunk, "offset", 0),
+                        len(chunk.data)
+                        if getattr(chunk, "data", None) is not None
+                        else 0,
+                        bool(getattr(chunk, "last_chunk", 0)),
+                    )
+                except Exception:
+                    pass
                 yield chunk.data
                 if chunk.last_chunk:
                     break
             elif frame.msg_type == common_pb2.MSG_TYPE_ROOM_FILE_DOWNLOAD_DONE:
+                try:
+                    logger.debug(
+                        "download_file done: room=%s event_id=%s", room_name, event_id
+                    )
+                except Exception:
+                    pass
                 break
             elif frame.msg_type == common_pb2.MSG_TYPE_ERROR_RESPONSE:
                 err = common_pb2.ErrorResponse()
                 err.ParseFromString(frame.payload)
+                try:
+                    logger.error(
+                        "download_file failed: %s: %s (room=%s event_id=%s)",
+                        getattr(err, "code", None),
+                        getattr(err, "message", None),
+                        room_name,
+                        event_id,
+                    )
+                except Exception:
+                    pass
                 raise MP2Error(f"file download failed: {err.code}: {err.message}")
             else:
                 raise MP2Error(

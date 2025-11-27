@@ -1,8 +1,10 @@
 #include "mp2_rooms_history.h"
 #include "mp2_rooms_common.h"
 #include "mp2_protocol.h"
+#include "logger.h"
 
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 #if !defined(_WIN32)
 #include <arpa/inet.h>
@@ -37,7 +39,7 @@ static uint64_t mp2_rooms_snapshot_last_event(Room *room) {
 
 typedef struct {
     Mingdrlms__V2__RoomEvent event;
-    Mingdrlms__V2__RoomFileMetadata file_meta;
+    Mingdrlms__V2__RoomFileMetadata *file_meta;
     SignalEncryptedPayload *payload_msg;
     char *room_name;
     char *display_token;
@@ -74,6 +76,8 @@ static void mp2_history_item_cleanup(Mp2HistoryItem *item) {
         return;
     if (item->payload_msg)
         signal_encrypted_payload__free_unpacked(item->payload_msg, NULL);
+    if (item->file_meta)
+        free(item->file_meta);
     free(item->room_name);
     free(item->display_token);
     free(item->timestamp);
@@ -107,7 +111,13 @@ static int mp2_history_collect_cb(const RoomHistoryEvent *event,
     Mp2HistoryItem item;
     memset(&item, 0, sizeof item);
     mingdrlms__v2__room_event__init(&item.event);
-    mingdrlms__v2__room_file_metadata__init(&item.file_meta);
+    LOG_DEBUG("RoomEvent descriptor: %p\n", (void *)item.event.base.descriptor);
+    if (item.event.base.descriptor) {
+        LOG_DEBUG("RoomEvent magic: 0x%x\n", item.event.base.descriptor->magic);
+    }
+
+    // mingdrlms__v2__room_file_metadata__init(&item.file_meta); // Removed, now
+    // using pointer
 
     item.event.room_name =
         (char *)(event->room_name[0] ? event->room_name : "");
@@ -157,18 +167,25 @@ static int mp2_history_collect_cb(const RoomHistoryEvent *event,
         item.filename = mp2_rooms_strdup(filename);
         if (!item.filename)
             goto fail;
-        item.file_meta.filename = item.filename;
-        item.file_meta.size_bytes = (uint64_t)event->file.size_bytes;
-        item.file_meta.ephemeral = event->ephemeral ? 1 : 0;
+
+        item.file_meta = malloc(sizeof(Mingdrlms__V2__RoomFileMetadata));
+        if (!item.file_meta)
+            goto fail;
+        mingdrlms__v2__room_file_metadata__init(item.file_meta);
+
+        item.file_meta->filename = item.filename;
+        item.file_meta->size_bytes = (uint64_t)event->file.size_bytes;
+        item.file_meta->ephemeral = event->ephemeral ? 1 : 0;
         if (!item.sha256_hex && event->sha256_hex[0] != '\0') {
             item.sha256_hex = mp2_rooms_strdup(event->sha256_hex);
             if (!item.sha256_hex)
                 goto fail;
         }
-        item.file_meta.sha256_hex =
+        item.file_meta->sha256_hex =
             item.sha256_hex ? item.sha256_hex : (char *)"";
-        item.file_meta.timestamp = item.timestamp ? item.timestamp : (char *)"";
-        item.event.file = &item.file_meta;
+        item.file_meta->timestamp =
+            item.timestamp ? item.timestamp : (char *)"";
+        item.event.file = item.file_meta;
     }
 
     Mp2HistoryItem *new_items = (Mp2HistoryItem *)realloc(
@@ -224,7 +241,8 @@ int mp2_rooms_stream_history(platform_socket_t fd, Room *room,
     if (iter_rc != 0 || ctx.error != 0) {
         mp2_protocol_dbgf("history iterate failed: rc=%d error=%d room=%s",
                           iter_rc, ctx.error, room_name);
-        RoomHistoryChunk empty_chunk = ROOM_HISTORY_CHUNK__INIT;
+        RoomHistoryChunk empty_chunk;
+        mingdrlms__v2__room_history_chunk__init(&empty_chunk);
         empty_chunk.room_name = (char *)(room_name ? room_name : "");
         empty_chunk.n_events = 0;
         empty_chunk.events = NULL;
@@ -234,7 +252,8 @@ int mp2_rooms_stream_history(platform_socket_t fd, Room *room,
             fd, MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ROOM_HISTORY_CHUNK,
             (const ProtobufCMessage *)&empty_chunk);
 
-        RoomHistoryDone empty_done = ROOM_HISTORY_DONE__INIT;
+        RoomHistoryDone empty_done;
+        mingdrlms__v2__room_history_done__init(&empty_done);
         empty_done.room_name = empty_chunk.room_name;
         empty_done.last_event_id = snapshot_last;
         (void)mp2_rooms_send_message(
@@ -255,7 +274,14 @@ int mp2_rooms_stream_history(platform_socket_t fd, Room *room,
         ctx.count = client_limit;
     }
 
-    RoomHistoryChunk chunk = ROOM_HISTORY_CHUNK__INIT;
+    RoomHistoryChunk chunk;
+    mingdrlms__v2__room_history_chunk__init(&chunk);
+    LOG_DEBUG("RoomHistoryChunk descriptor: %p\n",
+              (void *)chunk.base.descriptor);
+    if (chunk.base.descriptor) {
+        LOG_DEBUG("RoomHistoryChunk magic: 0x%x\n",
+                  chunk.base.descriptor->magic);
+    }
     chunk.room_name = (char *)(room_name ? room_name : "");
     chunk.n_events = ctx.count;
     chunk.has_more = ctx.has_more;
@@ -284,7 +310,12 @@ int mp2_rooms_stream_history(platform_socket_t fd, Room *room,
     if (event_ptrs)
         free(event_ptrs);
 
-    RoomHistoryDone done = ROOM_HISTORY_DONE__INIT;
+    RoomHistoryDone done;
+    mingdrlms__v2__room_history_done__init(&done);
+    LOG_DEBUG("RoomHistoryDone descriptor: %p\n", (void *)done.base.descriptor);
+    if (done.base.descriptor) {
+        LOG_DEBUG("RoomHistoryDone magic: 0x%x\n", done.base.descriptor->magic);
+    }
     done.room_name = chunk.room_name;
     done.last_event_id = ctx.last_event_id;
     (void)mp2_rooms_send_message(

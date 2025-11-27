@@ -25,6 +25,7 @@
 #include "rooms_utils.h"
 #include "sqlite_storage.h"
 #include "mp2_protocol.h"
+#include "logger.h"
 
 extern int rooms_is_sqlite_enabled(void);
 extern SQLiteStorage *rooms_get_sqlite_storage(void);
@@ -52,21 +53,24 @@ static void throttle_down(size_t bytes, long long rate_bps) {
     }
 }
 
-static int send_all(platform_socket_t fd, const void *buf, size_t len) {
-    // Skip sending text data to MP2 connections - they use binary protocol
+static int send_all_internal(platform_socket_t fd, const void *buf, size_t len,
+                             int allow_mp2) {
+    // Skip sending text data to MP2 connections unless explicitly allowed
     int is_mp2 = mp2_protocol_is_fd_mp2(fd);
-    fprintf(stderr, "[DEBUG] send_all: fd=%d, is_mp2=%d\n", (int)fd, is_mp2);
-    if (is_mp2) {
-        fprintf(stderr, "[DEBUG] send_all: skipping MP2 fd=%d\n", (int)fd);
+    // fprintf(stderr, "[DEBUG] send_all: fd=%d, is_mp2=%d, allow=%d\n",
+    // (int)fd, is_mp2, allow_mp2);
+    if (is_mp2 && !allow_mp2) {
+        // fprintf(stderr, "[DEBUG] send_all: skipping MP2 fd=%d\n", (int)fd);
         return 0; // Not an error, just skip
     }
 
-    fprintf(stderr, "[DEBUG] send_all: sending %zu bytes to fd=%d\n", len, (int)fd);
+    // fprintf(stderr, "[DEBUG] send_all: sending %zu bytes to fd=%d\n", len,
+    // (int)fd);
     const unsigned char *p = (const unsigned char *)buf;
     size_t remaining = len;
     while (remaining > 0) {
         int written = send(fd, (const char *)p, (int)remaining, 0);
-        fprintf(stderr, "[DEBUG] send_all: wrote %d bytes, remaining %zu\n", written, remaining - (written > 0 ? written : 0));
+        // fprintf(stderr, "[DEBUG] send_all: wrote %d bytes\n", written);
         if (written < 0) {
 #if defined(_WIN32)
             int err = WSAGetLastError();
@@ -98,6 +102,10 @@ static int send_all(platform_socket_t fd, const void *buf, size_t len) {
     return 0;
 }
 
+static int send_all(platform_socket_t fd, const void *buf, size_t len) {
+    return send_all_internal(fd, buf, len, 0);
+}
+
 static void dummy_sha256_hex(char *out_hex, size_t out_sz) {
     const char *z =
         "0000000000000000000000000000000000000000000000000000000000000000";
@@ -112,8 +120,8 @@ static void dummy_sha256_hex(char *out_hex, size_t out_sz) {
 static int rooms_validate_instance_uuid(const InstanceUUID *uuid,
                                         const char *context) {
     if (!uuid) {
-        fprintf(stderr, "rooms: missing instance UUID while emitting %s\n",
-                context ? context : "event");
+        LOG_WARN("rooms: missing instance UUID while emitting %s",
+                 context ? context : "event");
         return 0;
     }
     for (size_t i = 0; i < sizeof(uuid->bytes); ++i) {
@@ -121,8 +129,8 @@ static int rooms_validate_instance_uuid(const InstanceUUID *uuid,
             return 1;
         }
     }
-    fprintf(stderr, "rooms: invalid zero instance UUID while emitting %s\n",
-            context ? context : "event");
+    LOG_WARN("rooms: invalid zero instance UUID while emitting %s",
+             context ? context : "event");
     return 0;
 }
 
@@ -285,10 +293,9 @@ int rooms_fanout_text(RoomInstance *instance, const char *room_name,
     const char *sender_user = user;
 
     platform_mutex_lock(&instance->mu);
-    fprintf(stderr,
-            "[fanout_text] room=%s subs=%zu event_id=%llu sender=%s len=%zu\n",
-            room_name, instance->subs_len, (unsigned long long)event_id,
-            user ? user : "<none>", len);
+    LOG_DEBUG("[fanout_text] room=%s subs=%zu event_id=%llu sender=%s len=%zu",
+              room_name, instance->subs_len, (unsigned long long)event_id,
+              user ? user : "<none>", len);
     Subscriber *sender = NULL;
     if (user && *user) {
         sender = rooms_instance_find_sub_by_user_locked(instance, user, NULL);
@@ -309,10 +316,11 @@ int rooms_fanout_text(RoomInstance *instance, const char *room_name,
     for (size_t i = 0; i < instance->subs_len; ++i) {
         Subscriber *recipient = &instance->subs[i];
         platform_socket_t fd = recipient->fd;
-        fprintf(stderr, "[DEBUG] fanout_text: checking subscriber %zu, fd=%d, exclude_fd=%d\n",
-                i, (int)fd, (int)exclude_fd);
+        LOG_DEBUG("[DEBUG] fanout_text: checking subscriber %zu, fd=%d, "
+                  "exclude_fd=%d",
+                  i, (int)fd, (int)exclude_fd);
         if (exclude_fd != PLATFORM_INVALID_SOCKET && fd == exclude_fd) {
-            fprintf(stderr, "[DEBUG] fanout_text: excluding fd=%d\n", (int)fd);
+            LOG_DEBUG("[DEBUG] fanout_text: excluding fd=%d", (int)fd);
             continue;
         }
         char hdr[512];
@@ -381,8 +389,8 @@ int rooms_store_text(RoomInstance *instance, const char *room_name,
     char instance_hex[33];
     rooms_uuid_to_hex(uuid, instance_hex);
     if (instance->storage_policy == ROOM_STORAGE_EPHEMERAL) {
-        fprintf(stderr, "[store_text] EPHEMERAL room=%s len=%zu user=%s\n",
-                room_name, len, user);
+        LOG_DEBUG("[store_text] EPHEMERAL room=%s len=%zu user=%s", room_name,
+                  len, user);
         platform_mutex_lock(&room->mu);
         unsigned long long prev_room_last = room->last_event_id;
         unsigned long long eid = prev_room_last + 1ULL;
@@ -409,8 +417,8 @@ int rooms_store_text(RoomInstance *instance, const char *room_name,
         return 0;
     }
     if (rooms_is_sqlite_enabled()) {
-        fprintf(stderr, "[store_text] SQLITE room=%s len=%zu user=%s\n",
-                room_name, len, user);
+        LOG_DEBUG("[store_text] SQLITE room=%s len=%zu user=%s", room_name, len,
+                  user);
         uint64_t event_id = 0;
         int result = sqlite_store_text(rooms_get_sqlite_storage(), room_name,
                                        user, emit_display, instance_hex, ts,
@@ -430,11 +438,10 @@ int rooms_store_text(RoomInstance *instance, const char *room_name,
                 *out_event_id = event_id;
             return 0;
         }
-        fprintf(stderr,
-                "SQLite storage failed, falling back to file storage\n");
+        LOG_WARN("SQLite storage failed, falling back to file storage");
     }
-    fprintf(stderr, "[store_text] FILE room=%s len=%zu user=%s (fallback)\n",
-            room_name, len, user);
+    LOG_INFO("[store_text] FILE room=%s len=%zu user=%s (fallback)", room_name,
+             len, user);
     char dir[1024], files[1024], logp[1024];
     if (ensure_room_paths(room_name, dir, sizeof dir, files, sizeof files, logp,
                           sizeof logp) != 0)
@@ -593,6 +600,24 @@ int rooms_store_file(RoomInstance *instance, const char *room_name,
                     remove(tmp_path);
                     return -1;
                 }
+
+                /* Mirror FILE events into events.log so that file_download
+                 * can fall back to the log backend when SQLite lookups miss.
+                 * This uses the same JSON format as the pure file-storage
+                 * fallback below, with event_id provided by SQLite. */
+                FILE *f = fopen(logp, "a");
+                if (f) {
+                    fprintf(f,
+                            "{\"event_id\":%llu,\"ts\":\"%s\",\"user\":\"%s\","
+                            "\"display\":\"%s\","
+                            "\"instance\":\"%s\",\"kind\":\"FILE\","
+                            "\"filename\":\"%s\","
+                            "\"size\":%zu,\"sha\":\"%s\"}\n",
+                            (unsigned long long)event_id, ts, user,
+                            emit_display, instance_hex, filename, size,
+                            sha_hex);
+                    fclose(f);
+                }
             } else {
                 remove(tmp_path);
             }
@@ -600,8 +625,8 @@ int rooms_store_file(RoomInstance *instance, const char *room_name,
                 *out_event_id = event_id;
             return 0;
         }
-        fprintf(stderr, "SQLite storage failed for file event, falling back to "
-                        "file storage\n");
+        LOG_WARN("SQLite storage failed for file event, falling back to file "
+                 "storage");
     }
     char dir[1024], files[1024], logp[1024];
     if (ensure_room_paths(room_name, dir, sizeof dir, files, sizeof files, logp,
@@ -688,7 +713,7 @@ int rooms_emit_to_all(RoomInstance *instance, const char *payload,
             ++i;
             continue;
         }
-        if (send_all(sub->fd, payload, payload_len) != 0) {
+        if (send_all_internal(sub->fd, payload, payload_len, 1) != 0) {
             rooms_instance_remove_sub_locked(instance, i);
             pruned = 1;
             rc = -1;
@@ -793,11 +818,11 @@ int rooms_fanout_text_to_room(const char *room_name, const char *ts,
     // Broadcast to all instances in the room
     for (RoomInstance *inst = room->instances; inst; inst = inst->next) {
         // Use the instance's own UUID for broadcasting
-        int inst_rc = rooms_fanout_text(inst, room_name, &inst->instance_id, ts, user,
-                                       event_id, payload, len, sha_hex,
-                                       rate_bps, exclude_fd);
+        int inst_rc = rooms_fanout_text(inst, room_name, &inst->instance_id, ts,
+                                        user, event_id, payload, len, sha_hex,
+                                        rate_bps, exclude_fd);
         if (inst_rc != 0 && rc == 0) {
-            rc = inst_rc;  // Return first error encountered
+            rc = inst_rc; // Return first error encountered
         }
     }
 

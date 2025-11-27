@@ -36,6 +36,7 @@ pkgroot/
 # Local build outputs
 bin/
 build/
+build*/
 
 # Generated protobuf-c sources (when using Makefile fallback)
 src/generated/*.pb-c.c
@@ -46,6 +47,8 @@ src/generated/*.pb-c.h
 **/*.gcda
 **/*.gcov
 /coverage/
+coverage_tmp/
+htmlcov/
 
 # ==================================
 # Python Artifacts
@@ -82,6 +85,9 @@ vcpkg-cache/
 nohup.out
 /server_files/
 .tasks/
+.drlms/
+logs/
+rooms/
 
 # SQLite database files and temporary files
 *.db

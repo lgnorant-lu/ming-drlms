@@ -6,6 +6,9 @@ from typing import Optional
 
 from ming_drlms.core.mproto_v2_client import MP2Client
 from ming_drlms.core.token_store import TokenStore
+from .. import log
+
+logger = log.get_logger("cli.mproto_runtime")
 
 MP2_CLIENT_FACTORY = MP2Client
 
@@ -27,6 +30,17 @@ def create_mp2_client(
             store_path = token_store_path.expanduser()
         else:
             store_path = Path(os.fspath(token_store_path)).expanduser()
+    try:
+        logger.debug(
+            "create_mp2_client: host=%s port=%s timeout=%s token_store_path=%s resolved_store=%s",
+            host,
+            port,
+            timeout,
+            token_store_path,
+            store_path,
+        )
+    except Exception:
+        pass
     store = TokenStore(store_path) if store_path is not None else TokenStore()
     client = MP2_CLIENT_FACTORY(host, port, timeout=timeout, token_store=store)
     # Expose the store for CLI messaging

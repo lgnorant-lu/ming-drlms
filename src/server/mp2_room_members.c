@@ -16,6 +16,8 @@ M-Proto-v2 Room Member List API implementation
 #include "rooms.h"
 #include "rooms_internal.h"
 
+#include "logger.h"
+
 #ifdef HAVE_PROTOBUF_C
 #include "generated/schema/v2/common.pb-c.h"
 #include "generated/schema/v2/room.pb-c.h"
@@ -73,7 +75,7 @@ static void mp2_room_members_send_response(
             return;
         }
 
-        fprintf(stderr, "[DEBUG] Allocated %zu member objects\n", member_count);
+        LOG_DEBUG("[room_members] Allocated %zu member objects", member_count);
 
         // Initialize each member and build pointer array
         for (size_t i = 0; i < member_count; i++) {
@@ -82,16 +84,16 @@ static void mp2_room_members_send_response(
             member_objs[i].device_id = device_ids[i];
             member_objs[i].timestamp = (char *)timestamps[i];
             member_ptrs[i] = &member_objs[i];
-            fprintf(stderr, "[DEBUG] Member %zu: user=%s, device=%u, ts=%s\n",
-                    i, member_objs[i].user_id, member_objs[i].device_id,
-                    member_objs[i].timestamp);
+            LOG_DEBUG("[room_members] Member %zu: user=%s, device=%u, ts=%s", i,
+                      member_objs[i].user_id, member_objs[i].device_id,
+                      member_objs[i].timestamp);
         }
     }
 
     resp.members = member_ptrs;
     resp.n_members = member_count;
 
-    fprintf(stderr, "[DEBUG] Packing response\n");
+    LOG_DEBUG("[room_members] Packing response");
     size_t resp_sz =
         mingdrlms__v2__room_member_list_response__get_packed_size(&resp);
     unsigned char *resp_buf = (unsigned char *)malloc(resp_sz);
@@ -105,7 +107,7 @@ static void mp2_room_members_send_response(
     }
 
     mingdrlms__v2__room_member_list_response__pack(&resp, resp_buf);
-    fprintf(stderr, "[DEBUG] Packed response size=%zu\n", resp_sz);
+    LOG_DEBUG("[room_members] Packed response size=%zu", resp_sz);
 
     mp2_protocol_send_frame(
         fd, MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ROOM_MEMBER_LIST_RESPONSE,
@@ -189,12 +191,10 @@ static int mp2_room_members_snapshot_push(RoomMemberSnapshot **snapshots,
 void mp2_room_members_handle_list_request(platform_socket_t fd,
                                           const mp2_frame_t *frame) {
 #ifdef HAVE_PROTOBUF_C
-    fprintf(stderr, "ROOM_MEMBER_LIST_REQUEST payload_len=%u",
-            frame->payload_len);
+    LOG_DEBUG("ROOM_MEMBER_LIST_REQUEST payload_len=%u", frame->payload_len);
     for (unsigned int i = 0; i < frame->payload_len && i < 16; ++i) {
-        fprintf(stderr, " %02x", frame->payload[i]);
+        LOG_DEBUG(" payload[%u]=%02x", i, frame->payload[i]);
     }
-    fprintf(stderr, "\n");
     Mingdrlms__V2__RoomMemberListRequest *req =
         (Mingdrlms__V2__RoomMemberListRequest *)
             mingdrlms__v2__room_member_list_request__unpack(
@@ -292,11 +292,11 @@ void mp2_room_members_handle_list_request(platform_socket_t fd,
         snapshots = NULL;
     }
 
-    fprintf(stderr, "[DEBUG] Sending response for room %s with %zu members\n",
-            req->room_name, snapshot_len);
+    LOG_DEBUG("[room_members] Sending response for room %s with %zu members",
+              req->room_name, snapshot_len);
     mp2_room_members_send_response(fd, 200, "Success", req->room_name, user_ids,
                                    device_ids, timestamps, snapshot_len);
-    fprintf(stderr, "[DEBUG] Response sent\n");
+    LOG_DEBUG("[room_members] Response sent");
 
 cleanup:
     if (user_ids) {

@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "logger.h"
 
 #if defined(_WIN32)
 #define fseeko _fseeki64
@@ -89,6 +90,8 @@ static int upsert_room_last_event(SQLiteStorage *storage, const char *room_name,
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(storage->db, sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK) {
+        LOG_ERROR("upsert_room_last_event: prepare failed rc=%d msg=%s", rc,
+                  sqlite3_errmsg(storage->db));
         return -1;
     }
     const char *owner = owner_hint ? owner_hint : "";
@@ -97,7 +100,12 @@ static int upsert_room_last_event(SQLiteStorage *storage, const char *room_name,
     sqlite3_bind_int64(stmt, 3, last_event_id);
     rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
-    return (rc == SQLITE_DONE) ? 0 : -1;
+    if (rc != SQLITE_DONE) {
+        LOG_ERROR("upsert_room_last_event: step failed rc=%d msg=%s", rc,
+                  sqlite3_errmsg(storage->db));
+        return -1;
+    }
+    return 0;
 }
 
 int sqlite_store_text(SQLiteStorage *storage, const char *room_name,
@@ -114,12 +122,6 @@ int sqlite_store_text(SQLiteStorage *storage, const char *room_name,
 
     platform_mutex_lock(&storage->mu);
 
-    sqlite3_int64 event_id = next_room_event_id_locked(storage, room_name);
-    if (event_id < 0) {
-        platform_mutex_unlock(&storage->mu);
-        return -1;
-    }
-
     const char *sql =
         "INSERT INTO events (room_name, event_type, user_name, display_token, "
         "instance_id, timestamp, content_hash, content_length, content) "
@@ -127,6 +129,8 @@ int sqlite_store_text(SQLiteStorage *storage, const char *room_name,
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(storage->db, sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK) {
+        LOG_ERROR("sqlite_store_text: prepare failed rc=%d msg=%s", rc,
+                  sqlite3_errmsg(storage->db));
         platform_mutex_unlock(&storage->mu);
         return -1;
     }
@@ -142,12 +146,48 @@ int sqlite_store_text(SQLiteStorage *storage, const char *room_name,
 
     rc = sqlite3_step(stmt);
     if (rc != SQLITE_DONE) {
-        fprintf(stderr, "Execute failed: %s\n", sqlite3_errmsg(storage->db));
+        LOG_ERROR("sqlite_store_text: step failed rc=%d msg=%s", rc,
+                  sqlite3_errmsg(storage->db));
         sqlite3_finalize(stmt);
         platform_mutex_unlock(&storage->mu);
         return -1;
     }
     sqlite3_finalize(stmt);
+
+    /* Map this physical row to the logical room_event_id numbering used by
+     * sqlite_get_history / rooms_fetch_file_event_sqlite (ROW_NUMBER over id).
+     * We do this by counting rows for this room with id <= last_insert_rowid.
+     */
+    sqlite3_int64 rowid = sqlite3_last_insert_rowid(storage->db);
+    sqlite3_int64 event_id = -1;
+    const char *sql_ev =
+        "SELECT COUNT(*) FROM events WHERE room_name = ? AND id <= ?;";
+    sqlite3_stmt *stmt_ev = NULL;
+    rc = sqlite3_prepare_v2(storage->db, sql_ev, -1, &stmt_ev, NULL);
+    if (rc != SQLITE_OK) {
+        LOG_ERROR(
+            "sqlite_store_text: prepare(ev) failed rc=%d msg=%s for room=%s",
+            rc, sqlite3_errmsg(storage->db), room_name);
+        platform_mutex_unlock(&storage->mu);
+        return -1;
+    }
+    sqlite3_bind_text(stmt_ev, 1, room_name, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(stmt_ev, 2, rowid);
+    rc = sqlite3_step(stmt_ev);
+    if (rc == SQLITE_ROW) {
+        event_id = sqlite3_column_int64(stmt_ev, 0);
+    } else {
+        LOG_ERROR("sqlite_store_text: step(ev) failed rc=%d msg=%s for room=%s",
+                  rc, sqlite3_errmsg(storage->db), room_name);
+    }
+    sqlite3_finalize(stmt_ev);
+    if (event_id <= 0) {
+        LOG_ERROR(
+            "sqlite_store_text: computed invalid event_id=%lld for room=%s",
+            (long long)event_id, room_name);
+        platform_mutex_unlock(&storage->mu);
+        return -1;
+    }
 
     if (upsert_room_last_event(storage, room_name, event_id, user) != 0) {
         platform_mutex_unlock(&storage->mu);
@@ -190,9 +230,8 @@ int sqlite_store_file(SQLiteStorage *storage, const char *room_name,
 
     size_t file_size = (size_t)file_size_off;
     if (size > 0 && size != file_size) {
-        fprintf(stderr,
-                "sqlite_store_file: size mismatch, reported=%zu actual=%zu\n",
-                size, file_size);
+        LOG_WARN("sqlite_store_file: size mismatch, reported=%zu actual=%zu",
+                 size, file_size);
     }
 
     unsigned char *file_content = NULL;
@@ -214,13 +253,6 @@ int sqlite_store_file(SQLiteStorage *storage, const char *room_name,
     fclose(tmp_file);
 
     platform_mutex_lock(&storage->mu);
-    sqlite3_int64 event_id = next_room_event_id_locked(storage, room_name);
-    if (event_id < 0) {
-        if (file_content)
-            free(file_content);
-        platform_mutex_unlock(&storage->mu);
-        return -1;
-    }
 
     const char *sql =
         "INSERT INTO events (room_name, event_type, user_name, display_token, "
@@ -232,6 +264,8 @@ int sqlite_store_file(SQLiteStorage *storage, const char *room_name,
     if (rc != SQLITE_OK) {
         if (file_content)
             free(file_content);
+        LOG_ERROR("sqlite_store_file: prepare failed rc=%d msg=%s", rc,
+                  sqlite3_errmsg(storage->db));
         platform_mutex_unlock(&storage->mu);
         return -1;
     }
@@ -256,7 +290,8 @@ int sqlite_store_file(SQLiteStorage *storage, const char *room_name,
 
     rc = sqlite3_step(stmt);
     if (rc != SQLITE_DONE) {
-        fprintf(stderr, "Execute failed: %s\n", sqlite3_errmsg(storage->db));
+        LOG_ERROR("sqlite_store_file: step failed rc=%d msg=%s", rc,
+                  sqlite3_errmsg(storage->db));
         sqlite3_finalize(stmt);
         if (file_content)
             free(file_content);
@@ -266,6 +301,32 @@ int sqlite_store_file(SQLiteStorage *storage, const char *room_name,
     sqlite3_finalize(stmt);
     if (file_content)
         free(file_content);
+
+    /* As with TEXT events, compute the logical room_event_id for this FILE
+     * row based on its inserted id, so that callers and history queries agree
+     * on the numbering.
+     */
+    sqlite3_int64 rowid = sqlite3_last_insert_rowid(storage->db);
+    sqlite3_int64 event_id = -1;
+    const char *sql_ev =
+        "SELECT COUNT(*) FROM events WHERE room_name = ? AND id <= ?;";
+    sqlite3_stmt *stmt_ev = NULL;
+    rc = sqlite3_prepare_v2(storage->db, sql_ev, -1, &stmt_ev, NULL);
+    if (rc != SQLITE_OK) {
+        platform_mutex_unlock(&storage->mu);
+        return -1;
+    }
+    sqlite3_bind_text(stmt_ev, 1, room_name, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(stmt_ev, 2, rowid);
+    rc = sqlite3_step(stmt_ev);
+    if (rc == SQLITE_ROW) {
+        event_id = sqlite3_column_int64(stmt_ev, 0);
+    }
+    sqlite3_finalize(stmt_ev);
+    if (event_id <= 0) {
+        platform_mutex_unlock(&storage->mu);
+        return -1;
+    }
 
     if (upsert_room_last_event(storage, room_name, event_id, user) != 0) {
         platform_mutex_unlock(&storage->mu);

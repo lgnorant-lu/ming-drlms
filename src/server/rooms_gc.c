@@ -6,6 +6,7 @@
 #include "rooms_instance.h"
 #include "rooms_utils.h"
 #include "sqlite_storage.h"
+#include "logger.h"
 // Accessors from rooms.c (not exposed via rooms.h)
 extern int rooms_is_sqlite_enabled(void);
 extern SQLiteStorage *rooms_get_sqlite_storage(void);
@@ -123,7 +124,7 @@ int rooms_gc_start(long idle_ttl, long interval, void (*collect_cb)(void)) {
     g_gc_running = 1;
     if (platform_thread_create(&g_gc_thread, rooms_gc_thread_main, NULL) != 0) {
         g_gc_running = 0;
-        fprintf(stderr, "rooms_gc: failed to start GC thread\n");
+        LOG_ERROR("rooms_gc: failed to start GC thread");
         return -1;
     }
     // Detach so it can exit on its own when g_gc_running becomes 0

@@ -25,6 +25,7 @@
 #include <unistd.h>
 #endif
 
+#include "logger.h"
 // --- Core state (moved from rooms.c) ---
 
 // Local default for ephemeral history limit (matches legacy behavior)
@@ -143,18 +144,15 @@ static void rooms_owner_disconnect_cb(Room *room, const char *room_name,
     time_t created = 0;
     rooms_get_info(room, room_owner, sizeof room_owner, &policy, &subs,
                    &last_eid, &created, NULL, NULL, NULL);
-    fprintf(stderr,
-            "[owner_disconnect] checking room=%s owner=%s policy=%d subs=%zu\n",
-            room_name, room_owner, policy, subs);
+    LOG_DEBUG("[owner_disconnect] checking room=%s owner=%s policy=%d subs=%zu",
+              room_name, room_owner, policy, subs);
     if (strcmp(room_owner, c->owner) != 0)
         return;
     int owns_session = 0;
     platform_mutex_lock(&room->mu);
-    fprintf(stderr,
-            "[owner_disconnect] room=%s room.owner='%s' room.owner_fd=%d "
-            "disconnect_fd=%d\n",
-            room_name, room->owner, (int)room->owner_fd, (int)c->owner_fd);
-    fflush(stderr);
+    LOG_DEBUG("[owner_disconnect] room=%s room.owner='%s' room.owner_fd=%d "
+              "disconnect_fd=%d",
+              room_name, room->owner, (int)room->owner_fd, (int)c->owner_fd);
     if (room->owner[0] != '\0' && strcmp(room->owner, c->owner) == 0) {
         int owner_has_other_active_sub = 0;
         for (RoomInstance *inst = room->instances;
@@ -177,8 +175,8 @@ static void rooms_owner_disconnect_cb(Room *room, const char *room_name,
         }
     }
     platform_mutex_unlock(&room->mu);
-    fprintf(stderr, "[owner_disconnect] room=%s owns_session=%d policy=%d\n",
-            room_name, owns_session, policy);
+    LOG_DEBUG("[owner_disconnect] room=%s owns_session=%d policy=%d", room_name,
+              owns_session, policy);
     if (!owns_session)
         return;
     if (policy == 0)
@@ -192,12 +190,12 @@ static void rooms_owner_disconnect_cb(Room *room, const char *room_name,
         for (RoomInstance *inst = room->instances; inst && !found;
              inst = inst->next) {
             platform_mutex_lock(&inst->mu);
-            fprintf(stderr, "[delegate] instance has %zu subscribers\n",
-                    inst->subs_len);
+            LOG_DEBUG("[delegate] instance has %zu subscribers",
+                      inst->subs_len);
             for (size_t i = 0; i < inst->subs_len; ++i) {
                 total_subs_checked++;
-                fprintf(stderr, "[delegate]   sub[%zu]: user='%s' fd=%d\n", i,
-                        inst->subs[i].user, (int)inst->subs[i].fd);
+                LOG_DEBUG("[delegate]   sub[%zu]: user='%s' fd=%d", i,
+                          inst->subs[i].user, (int)inst->subs[i].fd);
                 if (inst->subs[i].user[0] != '\0' &&
                     strcmp(inst->subs[i].user, c->owner) != 0) {
                     snprintf(new_owner, sizeof new_owner, "%s",
@@ -210,11 +208,10 @@ static void rooms_owner_disconnect_cb(Room *room, const char *room_name,
             platform_mutex_unlock(&inst->mu);
         }
         platform_mutex_unlock(&room->mu);
-        fprintf(stderr,
-                "[delegate] room=%s old_owner=%s total_subs=%d found=%d "
-                "new_owner=%s\n",
-                room_name, c->owner, total_subs_checked, found,
-                new_owner[0] ? new_owner : "<none>");
+        LOG_DEBUG("[delegate] room=%s old_owner=%s total_subs=%d found=%d "
+                  "new_owner=%s",
+                  room_name, c->owner, total_subs_checked, found,
+                  new_owner[0] ? new_owner : "<none>");
         if (new_owner[0] != '\0') {
             rooms_set_owner(room, room_name, new_owner, new_owner_fd);
             char ts[64];
@@ -270,9 +267,7 @@ void rooms_handle_owner_disconnect(const char *owner,
                                    long long rate_bps) {
     if (!owner || !*owner)
         return;
-    fprintf(stderr, "[owner_disconnect] owner=%s fd=%d\n", owner,
-            (int)owner_fd);
-    fflush(stderr);
+    LOG_DEBUG("[owner_disconnect] owner=%s fd=%d", owner, (int)owner_fd);
     RoomsOwnerDisconnectCtx ctx = {owner, owner_fd, rate_bps};
     rooms_for_each(rooms_owner_disconnect_cb, &ctx);
 }
@@ -372,17 +367,15 @@ Room *rooms_get_or_create(const char *name, int *out_created) {
                              (int)sizeof(room->owner) - 1, info.owner);
                 } else if (owner_age >= OWNER_EXPIRY) {
                     // Owner expired, clear it
-                    fprintf(stderr,
-                            "[room_restore] room='%s' owner='%s' expired (%ld "
-                            "days), clearing\n",
-                            name, info.owner, owner_age / 86400);
+                    LOG_INFO("[room_restore] room='%s' owner='%s' expired (%ld "
+                             "days), clearing",
+                             name, info.owner, owner_age / 86400);
                     room->owner[0] = '\0';
                 } else {
                     // No valid timestamp, restore but log warning
-                    fprintf(stderr,
-                            "[room_restore] room='%s' owner='%s' has no valid "
-                            "timestamp, restoring anyway\n",
-                            name, info.owner);
+                    LOG_WARN("[room_restore] room='%s' owner='%s' has no valid "
+                             "timestamp, restoring anyway",
+                             name, info.owner);
                     snprintf(room->owner, sizeof room->owner, "%.*s",
                              (int)sizeof(room->owner) - 1, info.owner);
                 }
@@ -778,9 +771,8 @@ room_create_instance_locked(Room *room, const InstanceUUID *preferred_uuid) {
     if (instance->storage_policy == ROOM_STORAGE_EPHEMERAL) {
         char inst_hex[33];
         rooms_uuid_to_hex(&instance->instance_id, inst_hex);
-        fprintf(stderr,
-                "rooms: created ephemeral instance %s/%s (history_limit=%zu)\n",
-                room->name, inst_hex, instance->max_event_history);
+        LOG_INFO("rooms: created ephemeral instance %s/%s (history_limit=%zu)",
+                 room->name, inst_hex, instance->max_event_history);
     }
     return instance;
 }
@@ -945,21 +937,19 @@ void rooms_apply_policy_on_owner_offline_if_needed(Room *room,
     policy_snapshot = room->policy;
     for (RoomInstance *inst = room->instances; inst; inst = inst->next) {
         platform_mutex_lock(&inst->mu);
-        fprintf(stderr,
-                "[DEBUG] policy_check: checking instance with %zu subs\n",
-                inst->subs_len);
+        LOG_DEBUG("[policy_check] checking instance with %zu subs",
+                  inst->subs_len);
         if (num_instances <
             (int)(sizeof instances_to_notify / sizeof instances_to_notify[0]))
             instances_to_notify[num_instances++] = inst;
         for (size_t i = 0; i < inst->subs_len; ++i) {
             Subscriber *sub = &inst->subs[i];
-            fprintf(stderr,
-                    "[DEBUG] policy_check: sub[%zu]: user='%s', fd=%d, "
-                    "owner_now='%s'\n",
-                    i, sub->user, (int)sub->fd, owner_now);
+            LOG_DEBUG(
+                "[policy_check] sub[%zu]: user='%s', fd=%d, owner_now='%s'", i,
+                sub->user, (int)sub->fd, owner_now);
             if (owner_now[0] != '\0' && sub->user[0] != '\0' &&
                 strcmp(sub->user, owner_now) == 0) {
-                fprintf(stderr, "[DEBUG] policy_check: owner found present!\n");
+                LOG_DEBUG("[policy_check] owner found present!");
                 owner_still_present = 1;
             }
             if (policy_snapshot == 1 /* delegate */ &&
@@ -976,11 +966,10 @@ void rooms_apply_policy_on_owner_offline_if_needed(Room *room,
     }
     platform_mutex_unlock(&room->mu);
 
-    fprintf(stderr,
-            "[DEBUG] policy_check: START room=%s, total_instances=%zu\n",
-            room->name, room->total_instances);
-    fprintf(stderr, "[policy_check] room=%s owner='%s' present=%d policy=%d\n",
-            room->name, owner_now, owner_still_present, policy_snapshot);
+    LOG_DEBUG("[policy_check] START room=%s, total_instances=%zu", room->name,
+              room->total_instances);
+    LOG_DEBUG("[policy_check] room=%s owner='%s' present=%d policy=%d",
+              room->name, owner_now, owner_still_present, policy_snapshot);
 
     if (owner_still_present || owner_now[0] == '\0')
         return;
@@ -989,8 +978,8 @@ void rooms_apply_policy_on_owner_offline_if_needed(Room *room,
         if (candidate_new_owner[0] != '\0') {
             rooms_set_owner(room, room->name, candidate_new_owner,
                             candidate_fd);
-            fprintf(stderr, "[delegate] room=%s new_owner=%s fd=%d\n",
-                    room->name, candidate_new_owner, (int)candidate_fd);
+            LOG_INFO("[delegate] room=%s new_owner=%s fd=%d", room->name,
+                     candidate_new_owner, (int)candidate_fd);
             char ts[64];
             rfc3339_time_local(ts, sizeof ts);
             char msg[128];
@@ -1008,10 +997,8 @@ void rooms_apply_policy_on_owner_offline_if_needed(Room *room,
         return;
     }
     if (policy_snapshot == 2 /* teardown */) {
-        fprintf(
-            stderr,
-            "[teardown] room=%s owner='%s' offline -> closing subscribers\n",
-            room->name, owner_now);
+        LOG_INFO("[teardown] room=%s owner='%s' offline -> closing subscribers",
+                 room->name, owner_now);
         char ts[64];
         rfc3339_time_local(ts, sizeof ts);
         const char *msg = "ROOM|CLOSED";

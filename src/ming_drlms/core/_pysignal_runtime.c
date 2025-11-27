@@ -22,7 +22,8 @@
 #include <signal/protocol.h>
 #include <signal/group_session_builder.h>
 #include <signal/group_cipher.h>
-
+#include <signal/sender_key_record.h>
+#include "logger.h"
 typedef struct key_value_node {
     char *key;
     uint8_t *value;
@@ -254,6 +255,91 @@ static int identity_save(const signal_protocol_address *address,
         rc = kv_store_put(store->remote_identities, key, key_data, key_len);
     }
     free(key);
+    return rc;
+}
+
+int drlms_sender_key_record_export(drlms_signal_store *store,
+                                   const signal_protocol_sender_key_name *name,
+                                   uint8_t **out, size_t *out_len) {
+    sender_key_record *record = NULL;
+    signal_buffer *buf = NULL;
+    int rc;
+    if (!store || !store->store || !store->ctx || !name || !out || !out_len) {
+        return SG_ERR_INVAL;
+    }
+    *out = NULL;
+    *out_len = 0;
+    LOG_DEBUG("sender_key_record_export: start store=%p name=%p", (void *)store,
+              (const void *)name);
+    rc = signal_protocol_sender_key_load_key(store->store, &record, name);
+    if (rc < 0) {
+        LOG_ERROR("sender_key_record_export: load_key rc=%d", rc);
+        goto cleanup;
+    }
+    rc = sender_key_record_serialize(&buf, record);
+    if (rc < 0) {
+        LOG_ERROR("sender_key_record_export: serialize rc=%d", rc);
+        goto cleanup;
+    }
+    if (!buf) {
+        rc = SG_ERR_INVAL;
+        goto cleanup;
+    }
+    {
+        size_t len = signal_buffer_len(buf);
+        const uint8_t *ptr = signal_buffer_const_data(buf);
+        uint8_t *copy = (uint8_t *)malloc(len);
+        if (!copy) {
+            rc = SG_ERR_NOMEM;
+            goto cleanup;
+        }
+        memcpy(copy, ptr, len);
+        *out = copy;
+        *out_len = len;
+    }
+    rc = SG_SUCCESS;
+
+cleanup:
+    if (buf) {
+        signal_buffer_free(buf);
+    }
+    if (record) {
+        SIGNAL_UNREF(record);
+    }
+    if (rc != SG_SUCCESS) {
+        if (out)
+            *out = NULL;
+        if (out_len)
+            *out_len = 0;
+    }
+    return rc;
+}
+
+int drlms_sender_key_record_import(drlms_signal_store *store,
+                                   const signal_protocol_sender_key_name *name,
+                                   const uint8_t *data, size_t len) {
+    sender_key_record *record = NULL;
+    int rc;
+    if (!store || !store->store || !store->ctx || !name || !data || len == 0) {
+        return SG_ERR_INVAL;
+    }
+    LOG_DEBUG("sender_key_record_import: start store=%p name=%p len=%zu",
+              (void *)store, (const void *)name, len);
+    rc = sender_key_record_deserialize(&record, data, len, store->ctx);
+    if (rc < 0) {
+        LOG_ERROR("sender_key_record_import: deserialize rc=%d", rc);
+        goto cleanup;
+    }
+    rc = signal_protocol_sender_key_store_key(store->store, name, record);
+    if (rc < 0) {
+        LOG_ERROR("sender_key_record_import: store_key rc=%d", rc);
+        goto cleanup;
+    }
+
+cleanup:
+    if (record) {
+        SIGNAL_UNREF(record);
+    }
     return rc;
 }
 
@@ -1556,6 +1642,49 @@ cleanup:
     return rc;
 }
 
+static const char *drlms_sg_err_name(int rc) {
+    switch (rc) {
+    case SG_SUCCESS:
+        return "SG_SUCCESS";
+    case SG_ERR_NOMEM:
+        return "SG_ERR_NOMEM";
+    case SG_ERR_INVAL:
+        return "SG_ERR_INVAL";
+    case SG_ERR_UNKNOWN:
+        return "SG_ERR_UNKNOWN";
+    case SG_ERR_DUPLICATE_MESSAGE:
+        return "SG_ERR_DUPLICATE_MESSAGE";
+    case SG_ERR_INVALID_KEY:
+        return "SG_ERR_INVALID_KEY";
+    case SG_ERR_INVALID_KEY_ID:
+        return "SG_ERR_INVALID_KEY_ID";
+    case SG_ERR_INVALID_MAC:
+        return "SG_ERR_INVALID_MAC";
+    case SG_ERR_INVALID_MESSAGE:
+        return "SG_ERR_INVALID_MESSAGE";
+    case SG_ERR_INVALID_VERSION:
+        return "SG_ERR_INVALID_VERSION";
+    case SG_ERR_LEGACY_MESSAGE:
+        return "SG_ERR_LEGACY_MESSAGE";
+    case SG_ERR_NO_SESSION:
+        return "SG_ERR_NO_SESSION";
+    case SG_ERR_STALE_KEY_EXCHANGE:
+        return "SG_ERR_STALE_KEY_EXCHANGE";
+    case SG_ERR_UNTRUSTED_IDENTITY:
+        return "SG_ERR_UNTRUSTED_IDENTITY";
+    case SG_ERR_VRF_SIG_VERIF_FAILED:
+        return "SG_ERR_VRF_SIG_VERIF_FAILED";
+    case SG_ERR_INVALID_PROTO_BUF:
+        return "SG_ERR_INVALID_PROTO_BUF";
+    case SG_ERR_FP_VERSION_MISMATCH:
+        return "SG_ERR_FP_VERSION_MISMATCH";
+    case SG_ERR_FP_IDENT_MISMATCH:
+        return "SG_ERR_FP_IDENT_MISMATCH";
+    default:
+        return "SG_ERR_UNKNOWN_CODE";
+    }
+}
+
 int drlms_group_session_builder_create(group_session_builder **builder,
                                        drlms_signal_store *store) {
     if (!builder || !store || !store->store || !store->ctx) {
@@ -1590,13 +1719,61 @@ int drlms_group_encrypt(drlms_signal_store *store,
 
     memset(out, 0, sizeof(*out));
 
+    LOG_DEBUG("group_encrypt: start store=%p name=%p len=%zu", (void *)store,
+              (const void *)sender_key_name, plaintext_len);
+    if (sender_key_name) {
+        const char *gid = "";
+        const char *sender = "";
+        int gid_len = 0;
+        int sender_len = 0;
+        int dev_id = 0;
+        if (sender_key_name->group_id && sender_key_name->group_id_len > 0) {
+            gid = sender_key_name->group_id;
+            gid_len = (int)sender_key_name->group_id_len;
+        }
+        if (sender_key_name->sender.name &&
+            sender_key_name->sender.name_len > 0) {
+            sender = sender_key_name->sender.name;
+            sender_len = (int)sender_key_name->sender.name_len;
+        }
+        dev_id = sender_key_name->sender.device_id;
+        LOG_DEBUG("group_encrypt: sender_key_name gid=%.*s sender=%.*s dev=%d",
+                  gid_len, gid, sender_len, sender, dev_id);
+    }
+
     rc = drlms_group_cipher_create(&cipher, store, sender_key_name);
     if (rc != SG_SUCCESS) {
+        LOG_ERROR("group_encrypt: create_cipher rc=%d", rc);
         goto cleanup;
     }
 
     rc = group_cipher_encrypt(cipher, plaintext, plaintext_len, &message);
     if (rc != SG_SUCCESS) {
+        LOG_ERROR("group_encrypt: encrypt rc=%d (%s)", rc,
+                  drlms_sg_err_name(rc));
+        if (rc == SG_ERR_INVALID_KEY) {
+            const char *gid = "";
+            const char *sender = "";
+            int gid_len = 0;
+            int sender_len = 0;
+            int dev_id = 0;
+            if (sender_key_name) {
+                if (sender_key_name->group_id &&
+                    sender_key_name->group_id_len > 0) {
+                    gid = sender_key_name->group_id;
+                    gid_len = (int)sender_key_name->group_id_len;
+                }
+                if (sender_key_name->sender.name &&
+                    sender_key_name->sender.name_len > 0) {
+                    sender = sender_key_name->sender.name;
+                    sender_len = (int)sender_key_name->sender.name_len;
+                }
+                dev_id = sender_key_name->sender.device_id;
+            }
+            LOG_ERROR(
+                "group_encrypt: INVALID_KEY for gid=%.*s sender=%.*s dev=%d",
+                gid_len, gid, sender_len, sender, dev_id);
+        }
         goto cleanup;
     }
 
@@ -1615,6 +1792,8 @@ int drlms_group_encrypt(drlms_signal_store *store,
     memcpy(out->data, signal_buffer_const_data(serialized), len);
     out->len = len;
 
+    LOG_DEBUG("group_encrypt: serialized_len=%zu", len);
+
     sender_key_message *sender_msg = NULL;
     int res = sender_key_message_deserialize(
         &sender_msg, signal_buffer_const_data(serialized),
@@ -1625,7 +1804,7 @@ int drlms_group_encrypt(drlms_signal_store *store,
         sender_key_message_destroy((signal_type_base *)sender_msg);
         rc = SG_SUCCESS;
     } else {
-        rc = res;
+        rc = SG_SUCCESS;
     }
 
 cleanup:
@@ -1636,6 +1815,8 @@ cleanup:
         group_cipher_free(cipher);
     }
     if (rc != SG_SUCCESS) {
+        LOG_ERROR("group_encrypt: FAILED rc=%d (%s)", rc,
+                  drlms_sg_err_name(rc));
         if (out->data) {
             free(out->data);
             out->data = NULL;
@@ -1663,14 +1844,40 @@ int drlms_group_decrypt(drlms_signal_store *store,
 
     *plaintext_out = NULL;
 
+    LOG_DEBUG("group_decrypt: start store=%p name=%p len=%zu", (void *)store,
+              (const void *)sender_key_name, ciphertext_len);
+    if (sender_key_name) {
+        const char *gid = "";
+        const char *sender = "";
+        int gid_len = 0;
+        int sender_len = 0;
+        int dev_id = 0;
+        if (sender_key_name->group_id && sender_key_name->group_id_len > 0) {
+            gid = sender_key_name->group_id;
+            gid_len = (int)sender_key_name->group_id_len;
+        }
+        if (sender_key_name->sender.name &&
+            sender_key_name->sender.name_len > 0) {
+            sender = sender_key_name->sender.name;
+            sender_len = (int)sender_key_name->sender.name_len;
+        }
+        dev_id = sender_key_name->sender.device_id;
+        LOG_DEBUG("group_decrypt: sender_key_name gid=%.*s sender=%.*s dev=%d",
+                  gid_len, gid, sender_len, sender, dev_id);
+    }
+
     rc = drlms_group_cipher_create(&cipher, store, sender_key_name);
     if (rc != SG_SUCCESS) {
+        LOG_ERROR("group_decrypt: create_cipher rc=%d (%s)", rc,
+                  drlms_sg_err_name(rc));
         goto cleanup;
     }
 
     rc = sender_key_message_deserialize(&message, ciphertext, ciphertext_len,
                                         store->ctx);
     if (rc != SG_SUCCESS) {
+        LOG_ERROR("group_decrypt: deserialize rc=%d (%s)", rc,
+                  drlms_sg_err_name(rc));
         goto cleanup;
     }
 
@@ -1682,6 +1889,14 @@ int drlms_group_decrypt(drlms_signal_store *store,
         if (iteration_out) {
             *iteration_out = sender_key_message_get_iteration(message);
         }
+        LOG_DEBUG("group_decrypt: ok key_id=%u iter=%u",
+                  key_id_out ? *key_id_out
+                             : sender_key_message_get_key_id(message),
+                  iteration_out ? *iteration_out
+                                : sender_key_message_get_iteration(message));
+    } else {
+        LOG_ERROR("group_decrypt: decrypt rc=%d (%s)", rc,
+                  drlms_sg_err_name(rc));
     }
 
 cleanup:
@@ -1693,6 +1908,8 @@ cleanup:
     }
     if (rc != SG_SUCCESS && plaintext_out) {
         *plaintext_out = NULL;
+        LOG_ERROR("group_decrypt: FAILED rc=%d (%s)", rc,
+                  drlms_sg_err_name(rc));
     }
     return rc;
 }

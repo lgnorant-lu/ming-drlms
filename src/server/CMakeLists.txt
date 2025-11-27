@@ -1,5 +1,6 @@
 set(SERVER_SOURCES
     log_collector_main.c
+    c_logging.c
     server_core.c
     time_utils.c
     fs_safety.c
@@ -44,7 +45,8 @@ include(${CMAKE_SOURCE_DIR}/cmake/SignalFetch.cmake)
 include(${CMAKE_SOURCE_DIR}/cmake/EnsureProtocVersion.cmake)
 
 if(PROTOBUF_C_USE_BUNDLED_RUNTIME AND NOT PROTOBUF_C_USE_PREGENSETS)
-    list(APPEND SERVER_SOURCES ${PROJECT_SOURCE_DIR}/src/external/protobuf-c/protobuf-c.c)
+    # Force disable bundled runtime to avoid conflict with system protoc-c
+    message(STATUS "Disabling bundled protobuf-c runtime to prevent ABI mismatch")
 endif()
 
 # --- Protobuf-C code generation (Phase 1) ---
@@ -68,16 +70,36 @@ set(PROTO_FILES
     ${PROTO_DIR}/e2ee.proto
 )
 
+message(STATUS "PROTO_FILES=${PROTO_FILES}")
+
 set(GENERATED_SRC)
 set(GENERATED_HDR)
 set(GENERATED_PY)
 
+# Force use pre-generated sets to prevent version mismatch with bundled runtime
+# set(PROTOBUF_C_USE_PREGENSETS TRUE)
+
 if(PROTOBUF_C_USE_PREGENSETS)
-    set(GENERATED_SRC ${PROTOBUF_C_SOURCES})
-    set(GENERATED_HDR ${PROTOBUF_C_HEADERS})
-    list(APPEND SERVER_SOURCES ${GENERATED_SRC})
+    # Manually populate GENERATED_SRC because PROTOBUF_C_SOURCES might be incomplete
+    set(GENERATED_SRC)
+    set(GENERATED_HDR)
+    
+    # Determine where the pre-generated files are (src/generated/schema/v2)
+    set(PRE_GEN_DIR ${PROJECT_SOURCE_DIR}/src/generated/schema/v2)
+    
+    foreach(PF ${PROTO_FILES})
+        get_filename_component(PBN ${PF} NAME_WE)
+        list(APPEND GENERATED_SRC ${PRE_GEN_DIR}/${PBN}.pb-c.c)
+        list(APPEND GENERATED_HDR ${PRE_GEN_DIR}/${PBN}.pb-c.h)
+    endforeach()
+    
     list(APPEND SERVER_SOURCES mp2_rooms_sub_pub.c)
     source_group("generated" FILES ${GENERATED_SRC} ${GENERATED_HDR})
+    
+    # Ensure include paths are correct for pre-generated files
+    list(APPEND PROTOBUF_C_INCLUDE_DIRS 
+        ${PROJECT_SOURCE_DIR}/src/generated
+        ${PROJECT_SOURCE_DIR}/src/generated/schema/v2)
 else()
         if(PROTOC_C_EXECUTABLE)
             foreach(PF ${PROTO_FILES})
@@ -91,7 +113,7 @@ else()
                     OUTPUT ${OUT_C} ${OUT_H} ${OUT_PY}
                     COMMAND ${CMAKE_COMMAND} -E echo "[proto_gen] ${PF} -> ${OUT_C}"
                     COMMAND ${CMAKE_COMMAND} -E make_directory ${OUT_DIR}
-                    COMMAND ${PROTOC_EXECUTABLE} --proto_path=${PROJECT_SOURCE_DIR} --c_out=${GENERATED_DIR} --python_out=${GENERATED_DIR} ${PF}
+                    COMMAND ${PROTOC_EXECUTABLE} --proto_path=${PROJECT_SOURCE_DIR} --proto_path=${PROJECT_SOURCE_DIR}/schema/v2 --c_out=${GENERATED_DIR} --python_out=${GENERATED_DIR} ${PF}
                     DEPENDS ${PF}
                     VERBATIM
                     COMMENT "Generating protobuf-c and python sources for ${PBN}"
@@ -100,7 +122,6 @@ else()
                 list(APPEND GENERATED_HDR ${OUT_H})
                 list(APPEND GENERATED_PY ${OUT_PY})
             endforeach()
-        list(APPEND SERVER_SOURCES ${GENERATED_SRC})
         list(APPEND SERVER_SOURCES mp2_rooms_sub_pub.c)
         source_group("generated" FILES ${GENERATED_SRC} ${GENERATED_HDR})
     else()
@@ -112,7 +133,6 @@ else()
                 list(APPEND GENERATED_SRC ${PRE_GEN_DIR}/${PBN}.pb-c.c)
                 list(APPEND GENERATED_HDR ${PRE_GEN_DIR}/${PBN}.pb-c.h)
             endforeach()
-            list(APPEND SERVER_SOURCES ${GENERATED_SRC})
             list(APPEND SERVER_SOURCES mp2_rooms_sub_pub.c)
             source_group("generated" FILES ${GENERATED_SRC} ${GENERATED_HDR})
             
@@ -128,7 +148,31 @@ else()
     endif()
 endif()
 
+message(STATUS "Final GENERATED_SRC: ${GENERATED_SRC}")
+
+# Create a static library for the generated protobuf sources and runtime
+add_library(protobuf_generated_lib STATIC
+    ${GENERATED_SRC}
+    ${PROJECT_SOURCE_DIR}/src/external/protobuf-c/protobuf-c.c
+)
+
+# Set compile options for the library (same as executable to match runtime library)
+if(MSVC)
+    target_compile_options(protobuf_generated_lib PRIVATE /W0 /MD)
+else()
+    target_compile_options(protobuf_generated_lib PRIVATE -w)
+endif()
+
+target_include_directories(protobuf_generated_lib PRIVATE
+    ${PROJECT_SOURCE_DIR}/src/external/protobuf-c/include
+    ${PROJECT_SOURCE_DIR}/src/external/protobuf-c
+    ${GENERATED_DIR}
+    ${PROJECT_SOURCE_DIR}/src/generated
+    ${PROTOBUF_C_INCLUDE_DIRS}
+)
+
 add_executable(log_collector_server ${SERVER_SOURCES})
+target_link_libraries(log_collector_server PRIVATE protobuf_generated_lib)
 
 # 抑制protobuf-c编译警告，避免警告被当作错误
 if(MSVC)
@@ -214,8 +258,8 @@ endif()
 # Enhanced protobuf-c linking with fallback support
 if(PROTOBUF_C_FOUND)
     if(PROTOBUF_C_LIBRARIES)
-        list(APPEND SERVER_LIBS ${PROTOBUF_C_LIBRARIES})
-        message(STATUS "Linking protobuf-c libraries: ${PROTOBUF_C_LIBRARIES}")
+        # list(APPEND SERVER_LIBS ${PROTOBUF_C_LIBRARIES})
+        # message(STATUS "Linking protobuf-c libraries: ${PROTOBUF_C_LIBRARIES}")
     endif()
 endif()
 
@@ -239,6 +283,96 @@ elseif(UNIX)
 endif()
 
 target_link_libraries(log_collector_server PRIVATE ${SERVER_LIBS})
+
+# --- Windows Long-Term Fix: Build drlms_signal_bridge.dll ---
+if(WIN32)
+    message(STATUS "Configuring drlms_signal_bridge DLL for Python client...")
+    add_library(drlms_signal_bridge SHARED
+        ${PROJECT_SOURCE_DIR}/src/ming_drlms/core/_pysignal_runtime.c
+    )
+    
+    # Use the same include directories as server, mainly for Signal/OpenSSL headers
+    target_include_directories(drlms_signal_bridge PRIVATE
+        ${PROJECT_SOURCE_DIR}/src
+        ${PROJECT_SOURCE_DIR}/src/server
+        ${PROJECT_SOURCE_DIR}/src/platform/include
+    )
+    # Link against Signal Protocol and OpenSSL
+    target_link_libraries(drlms_signal_bridge PRIVATE
+        Signal::protocol
+        OpenSSL::Crypto
+    )
+    # Build and embed the C logging backend into this DLL so LOG_DEBUG works
+    target_sources(drlms_signal_bridge PRIVATE
+        ${PROJECT_SOURCE_DIR}/src/server/c_logging.c
+    )
+    
+    # Ensure DLL is output to the same directory as the server executable for easy finding
+    set_target_properties(drlms_signal_bridge PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/Release
+    )
+    
+    # Export all non-static symbols from the DLL on Windows so CFFI can resolve drlms_* APIs
+    set_target_properties(drlms_signal_bridge PROPERTIES
+        WINDOWS_EXPORT_ALL_SYMBOLS ON
+    )
+    
+    # On multi-config generators (like MSVC), the actual DLL will be placed in
+    # a configuration subdirectory (e.g. ${CMAKE_BINARY_DIR}/Release/Release).
+    # Python code expects to find drlms_signal_bridge.dll in build_win/Release,
+    # so we add a POST_BUILD step to copy it there.
+    add_custom_command(TARGET drlms_signal_bridge POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:drlms_signal_bridge>"
+            "${CMAKE_BINARY_DIR}/Release/drlms_signal_bridge.dll"
+        COMMENT "Copying drlms_signal_bridge.dll to top-level Release directory"
+    )
+    
+    message(STATUS "drlms_signal_bridge target added.")
+
+    # --- Windows Long-Term Fix: Auto-copy ONLY essential dependencies ---
+    
+    # 1. Copy signal-protocol-c.dll from the correct location (_deps/signal-install/bin)
+    # Note: Don't use EXISTS check here - it runs at configure time before the DLL is built
+    set(_sig_dll_source "${CMAKE_BINARY_DIR}/_deps/signal-install/bin/signal-protocol-c.dll")
+    add_custom_command(TARGET log_collector_server POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${_sig_dll_source}"
+            "$<TARGET_FILE_DIR:log_collector_server>/signal-protocol-c.dll"
+        COMMENT "Copying signal-protocol-c.dll from ${_sig_dll_source}"
+    )
+
+    # 2. Copy ONLY essential OpenSSL 3.x DLLs (libcrypto-3-x64.dll and libssl-3-x64.dll)
+    # Avoid copying legacy 1.1 versions, test/provider DLLs to prevent DLL Hell
+    set(_ssl_root "")
+    
+    # Find OpenSSL root from OPENSSL_INCLUDE_DIR
+    if(OPENSSL_INCLUDE_DIR)
+        get_filename_component(_ssl_root "${OPENSSL_INCLUDE_DIR}" DIRECTORY)
+    endif()
+    
+    if(_ssl_root AND EXISTS "${_ssl_root}/bin")
+        # Only copy the two essential DLLs, explicitly by name
+        set(_essential_ssl_dlls 
+            "${_ssl_root}/bin/libcrypto-3-x64.dll"
+            "${_ssl_root}/bin/libssl-3-x64.dll"
+        )
+        
+        foreach(_dll ${_essential_ssl_dlls})
+            if(EXISTS "${_dll}")
+                get_filename_component(_dll_name "${_dll}" NAME)
+                add_custom_command(TARGET log_collector_server POST_BUILD
+                    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        "${_dll}"
+                        "$<TARGET_FILE_DIR:log_collector_server>/${_dll_name}"
+                    COMMENT "Copying OpenSSL: ${_dll_name}"
+                )
+            endif()
+        endforeach()
+    else()
+        message(WARNING "OpenSSL installation not found. Ensure C:/Program Files/OpenSSL-Win64/bin is in your PATH.")
+    endif()
+endif()
 
 # Add build info logging
 if(PROTOC_C_EXECUTABLE AND NOT PROTOBUF_C_USE_PREGENSETS AND GENERATED_SRC)

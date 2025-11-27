@@ -12,6 +12,7 @@
 #include "rooms.h"
 #include "rooms_internal.h"
 
+#include "logger.h"
 #ifdef HAVE_PROTOBUF_C
 #include "generated/schema/v2/common.pb-c.h"
 #include "generated/schema/v2/room.pb-c.h"
@@ -28,7 +29,13 @@ typedef struct {
 void mp2_rooms_send_error(platform_socket_t fd, int code, const char *message,
                           uint16_t msg_type) {
 #ifdef HAVE_PROTOBUF_C
-    Mingdrlms__V2__ErrorResponse err = MINGDRLMS__V2__ERROR_RESPONSE__INIT;
+    Mingdrlms__V2__ErrorResponse err;
+    mingdrlms__v2__error_response__init(&err);
+    LOG_DEBUG("mp2_rooms_send_error: &err=%p descriptor=%p", (void *)&err,
+              (void *)err.base.descriptor);
+    if (err.base.descriptor) {
+        LOG_DEBUG("descriptor magic=0x%x", err.base.descriptor->magic);
+    }
     err.code = code;
     err.message = (char *)(message ? message : "");
     size_t err_sz = mingdrlms__v2__error_response__get_packed_size(&err);
@@ -157,10 +164,9 @@ int mp2_rooms_prepare_publish_ctx(platform_socket_t client_fd,
         return -1;
 
     Room *room = rooms_get_or_create(room_name, NULL);
-    fprintf(stderr,
-            "[DEBUG] mp2_rooms_prepare_publish_ctx: rooms_get_or_create "
-            "returned %p for room %s\n",
-            room, room_name ? room_name : "NULL");
+    LOG_DEBUG("mp2_rooms_prepare_publish_ctx: rooms_get_or_create returned %p "
+              "for room %s",
+              room, room_name ? room_name : "NULL");
     if (!room)
         return -1;
 
@@ -169,44 +175,38 @@ int mp2_rooms_prepare_publish_ctx(platform_socket_t client_fd,
     RoomInstance *instance = NULL;
 
     platform_mutex_lock(&room->mu);
-    fprintf(stderr,
-            "[DEBUG] mp2_rooms_prepare_publish_ctx: checking room %s, "
-            "total_instances=%zu, instances=%p\n",
-            room_name ? room_name : "NULL", room->total_instances,
-            room->instances);
+    LOG_DEBUG("mp2_rooms_prepare_publish_ctx: checking room %s, "
+              "total_instances=%zu, instances=%p",
+              room_name ? room_name : "NULL", room->total_instances,
+              room->instances);
     if (room->instances) {
-        fprintf(stderr,
-                "[DEBUG] mp2_rooms_prepare_publish_ctx: first instance=%p, "
-                "subs_len=%zu\n",
-                room->instances, room->instances->subs_len);
+        LOG_DEBUG(
+            "mp2_rooms_prepare_publish_ctx: first instance=%p, subs_len=%zu",
+            room->instances, room->instances->subs_len);
     }
     instance = rooms_inst_find_by_fd_locked(room, client_fd, &inst_uuid);
     if (!instance) {
         platform_mutex_unlock(&room->mu);
         // Need to release lock for rooms_assign_instance as it acquires its own
         // locks
-        fprintf(stderr,
-                "[DEBUG] mp2_rooms_prepare_publish_ctx: fd %d not found, "
-                "calling rooms_assign_instance\n",
-                (int)client_fd);
+        LOG_DEBUG("mp2_rooms_prepare_publish_ctx: fd %d not found, calling "
+                  "rooms_assign_instance",
+                  (int)client_fd);
         int is_new_instance = 0;
         RoomAssignResult assign_rc = rooms_assign_instance(
             room, NULL, &inst_uuid, &instance, &is_new_instance);
-        fprintf(stderr,
-                "[DEBUG] mp2_rooms_prepare_publish_ctx: rooms_assign_instance "
-                "result=%d, is_new=%d\n",
-                assign_rc, is_new_instance);
+        LOG_DEBUG("mp2_rooms_prepare_publish_ctx: rooms_assign_instance "
+                  "result=%d, is_new=%d",
+                  assign_rc, is_new_instance);
         if (assign_rc != ROOM_ASSIGN_OK || !instance)
             return -2;
-        fprintf(stderr,
-                "[DEBUG] mp2_rooms_prepare_publish_ctx: adding subscriber "
-                "fd=%d user=%s to instance %p\n",
-                (int)client_fd, username ? username : "NULL", instance);
+        LOG_DEBUG("mp2_rooms_prepare_publish_ctx: adding subscriber fd=%d "
+                  "user=%s to instance %p",
+                  (int)client_fd, username ? username : "NULL", instance);
         int add_rc = rooms_add_subscriber(room, instance, client_fd, username);
-        fprintf(stderr,
-                "[DEBUG] mp2_rooms_prepare_publish_ctx: rooms_add_subscriber "
-                "result=%d, instance subs=%zu\n",
-                add_rc, instance->subs_len);
+        LOG_DEBUG("mp2_rooms_prepare_publish_ctx: rooms_add_subscriber "
+                  "result=%d, instance subs=%zu",
+                  add_rc, instance->subs_len);
         if (add_rc != 0) {
             return -3;
         }

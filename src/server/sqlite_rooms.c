@@ -3,6 +3,7 @@
 #include <sqlite3.h>
 #include <stdio.h>
 #include <string.h>
+#include "logger.h"
 
 static int upsert_room_last_event(SQLiteStorage *storage, const char *room_name,
                                   sqlite3_int64 last_event_id,
@@ -64,8 +65,8 @@ int sqlite_update_room_last_event_id(SQLiteStorage *storage,
     platform_mutex_lock(&storage->mu);
     if (upsert_room_last_event(storage, room_name, (sqlite3_int64)last_id,
                                "") != 0) {
-        fprintf(stderr, "Update room last_event_id failed: %s\n",
-                sqlite3_errmsg(storage->db));
+        LOG_ERROR("Update room last_event_id failed: %s",
+                  sqlite3_errmsg(storage->db));
         platform_mutex_unlock(&storage->mu);
         return -1;
     }

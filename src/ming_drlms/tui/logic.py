@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import os
 from typing import Optional, Callable
 
 from ..core.threaded_client import RobustThreadedRoomClient, ConnectionState
 from ..cli.services.room_service import RoomService
 from ..core.mproto_v2_client import RoomEvent
+from .. import log
+
+logger = log.get_logger("tui.logic")
 
 
 class ChatController:
@@ -48,8 +52,11 @@ class ChatController:
         except Exception:
             pass
 
-        # Check for E2EE keys
-        e2ee_path = Path.home() / ".drlms" / "identity.db"
+        # Check for E2EE keys (JSON keystore)
+        config_dir = Path(
+            os.environ.get("MING_DRLMS_CONFIG_DIR") or (Path.home() / ".drlms")
+        )
+        e2ee_path = config_dir / "e2ee_keys.json"
         use_e2ee = False
         if e2ee_path.exists():
             try:
@@ -57,10 +64,21 @@ class ChatController:
 
                 store = LocalKeyStore(e2ee_path)
                 # Check if we have keys for this user
-                if store.load_identity_key_pair(self.username):
+                state = store.load_state(self.username)
+                if state and state.identity_key:
                     use_e2ee = True
             except Exception:
                 pass
+        try:
+            logger.debug(
+                "ChatController.connect: room=%s config_dir=%s e2ee_path=%s use_e2ee=%s",
+                room_name,
+                str(config_dir),
+                str(e2ee_path),
+                use_e2ee,
+            )
+        except Exception:
+            pass
 
         self.client = RobustThreadedRoomClient(
             host=self.host,
@@ -154,17 +172,20 @@ class ChatController:
     def get_fingerprint(self) -> str | None:
         """Get the E2EE identity key fingerprint."""
         try:
-            e2ee_path = Path.home() / ".drlms" / "identity.db"
+            config_dir = Path(
+                os.environ.get("MING_DRLMS_CONFIG_DIR") or (Path.home() / ".drlms")
+            )
+            e2ee_path = config_dir / "e2ee_keys.json"
             if not e2ee_path.exists():
                 return None
 
             from ..core.e2ee_store import LocalKeyStore
 
             store = LocalKeyStore(e2ee_path)
-            key_pair = store.load_identity_key_pair(self.username)
-            if key_pair:
+            state = store.load_state(self.username)
+            if state and state.identity_key:
                 # Return hex representation of public key
-                return key_pair.public_key.serialize().hex()
+                return state.identity_key.public_key.hex()
         except Exception:
             pass
         return None

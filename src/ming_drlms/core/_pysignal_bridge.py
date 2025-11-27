@@ -11,6 +11,9 @@ from typing import Optional, Tuple
 from cffi import FFI, VerificationError
 
 from ._pysignal_errors import SignalBridgeError
+from .. import log
+
+logger = log.get_logger("core.bridge")
 
 _DLL_DIR_HANDLES: list[object] = []
 
@@ -65,6 +68,7 @@ _CDEF = """
 
         size_t signal_buffer_len(const signal_buffer *buffer);
         const uint8_t *signal_buffer_const_data(const signal_buffer *buffer);
+        signal_buffer *ciphertext_message_get_serialized(ciphertext_message *message);
 
         int drlms_signal_context_configure(signal_context *ctx);
 
@@ -213,6 +217,7 @@ _CDEF = """
 
         void signal_buffer_free(signal_buffer *buffer);
         void free(void *ptr);
+        void signal_type_unref(signal_type_base *type);
 
         int group_session_builder_create(group_session_builder **builder,
             signal_protocol_store_context *store, signal_context *global_context);
@@ -285,6 +290,17 @@ _CDEF = """
             uint32_t *key_id_out,
             uint32_t *iteration_out);
 
+        int drlms_sender_key_record_export(
+            drlms_signal_store *store,
+            const signal_protocol_sender_key_name *name,
+            uint8_t **out,
+            size_t *out_len);
+        int drlms_sender_key_record_import(
+            drlms_signal_store *store,
+            const signal_protocol_sender_key_name *name,
+            const uint8_t *data,
+            size_t len);
+
         ec_public_key *ratchet_identity_key_pair_get_public(
             const ratchet_identity_key_pair *key_pair);
         ec_private_key *ratchet_identity_key_pair_get_private(
@@ -319,10 +335,17 @@ _C_SOURCE = _C_SOURCE_PATH.read_text(encoding="utf-8")
 def load_bridge() -> Tuple[FFI, object]:
     include_dir, lib_path = _locate_signal_artifacts()
     if include_dir is None or lib_path is None:
+        extra_hint = ""
+        if os.name == "nt":
+            extra_hint = (
+                "\n[提示] 检测到 Windows 环境。如果你是在 WSL (Linux) 中执行的编译，"
+                "请务必在 WSL 终端中运行此程序，或者在 Windows 下重新编译以生成 DLL。"
+            )
+
         raise SignalBridgeError(
             "Unable to locate libsignal-protocol-c headers or libraries. "
             "请先执行 CMake 构建（例如 scripts/run_coverage.sh）或设置 "
-            "DRLMS_SIGNAL_PREFIX 指向 signal 安装目录。"
+            "DRLMS_SIGNAL_PREFIX 指向 signal 安装目录。" + extra_hint
         )
 
     _ensure_win_distutils()
@@ -352,6 +375,15 @@ def load_bridge() -> Tuple[FFI, object]:
                     build_root,
                 ]
             )
+        if repo_root is not None:
+            win_build = repo_root / "build_win"
+            bin_candidates.extend(
+                [
+                    win_build,
+                    win_build / "Release",
+                    win_build / "Release" / "Release",
+                ]
+            )
             if repo_root is not None:
                 bin_candidates.extend(
                     [
@@ -378,33 +410,26 @@ def load_bridge() -> Tuple[FFI, object]:
                 current_path = os.environ.get("PATH", "")
                 if dll_dir not in current_path:
                     os.environ["PATH"] = dll_dir + os.pathsep + current_path
-                    print(
-                        f"[DEBUG] Added DLL directory to PATH: {dll_dir} (exists: {Path(dll_dir).exists()})",
-                        file=sys.stderr,
+                    logger.debug(
+                        f"Added DLL directory to PATH: {dll_dir} (exists: {Path(dll_dir).exists()})"
                     )
-                print(
-                    f"[DEBUG] Checking for signal-protocol-c.dll at: {dll_path} (exists: {dll_path.exists()})",
-                    file=sys.stderr,
+                logger.debug(
+                    f"Checking for signal-protocol-c.dll at: {dll_path} (exists: {dll_path.exists()})"
                 )
                 if dll_path.exists() and not dll_found:
-                    print(
-                        f"[DEBUG] Found signal-protocol-c.dll at: {dll_path}",
-                        file=sys.stderr,
-                    )
+                    logger.debug(f"Found signal-protocol-c.dll at: {dll_path}")
                     dll_found = True
                 if add_dll_supported and dll_dir not in added_dll_dirs:
                     try:
                         handle = os.add_dll_directory(dll_dir)
                         _DLL_DIR_HANDLES.append(handle)
                         added_dll_dirs.add(dll_dir)
-                        print(
-                            f"[DEBUG] Added DLL directory via add_dll_directory: {dll_dir}",
-                            file=sys.stderr,
+                        logger.debug(
+                            f"Added DLL directory via add_dll_directory: {dll_dir}"
                         )
                     except OSError as exc:
-                        print(
-                            f"[DEBUG] Failed to register DLL directory {dll_dir}: {exc}",
-                            file=sys.stderr,
+                        logger.warning(
+                            f"Failed to register DLL directory {dll_dir}: {exc}"
                         )
                 # Collect OpenSSL bin directories
                 if (
@@ -426,10 +451,9 @@ def load_bridge() -> Tuple[FFI, object]:
             if openssl_dir not in filtered_parts:
                 filtered_parts.insert(0, openssl_dir)
         os.environ["PATH"] = os.pathsep.join(filtered_parts)
-        print(
-            f"[DEBUG] Reordered PATH to prioritize vcpkg OpenSSL: {os.environ['PATH'][:500]}...",
-            file=sys.stderr,
-        )  # Preload dependent DLLs on Windows to avoid "DLL not found" during CFFI module import
+        logger.debug(
+            f"Reordered PATH to prioritize vcpkg OpenSSL: {os.environ['PATH'][:500]}..."
+        )
         try:
             from ctypes import WinDLL  # type: ignore
 
@@ -450,12 +474,11 @@ def load_bridge() -> Tuple[FFI, object]:
                     if _p.exists():
                         try:
                             WinDLL(str(_p))
-                            print(f"[DEBUG] Preloaded {_n} from {_p}", file=sys.stderr)
+                            logger.debug(f"Preloaded {_n} from {_p}")
                         except OSError as _e:
-                            print(
-                                f"[DEBUG] Failed to preload {_n}: {_e}", file=sys.stderr
-                            )
+                            logger.warning(f"Failed to preload {_n}: {_e}")
             # Then preload signal-protocol-c.dll itself
+            signal_dll_loaded = False
             for _d in bin_candidates:
                 if not _d.exists():
                     continue
@@ -463,32 +486,130 @@ def load_bridge() -> Tuple[FFI, object]:
                 if _sig.exists():
                     try:
                         WinDLL(str(_sig))
-                        print(
-                            f"[DEBUG] Preloaded signal-protocol-c.dll from {_sig}",
-                            file=sys.stderr,
-                        )
+                        logger.debug(f"Preloaded signal-protocol-c.dll from {_sig}")
+                        signal_dll_loaded = True
                         break
                     except OSError as _e:
-                        print(
-                            f"[DEBUG] Failed to preload signal-protocol-c.dll: {_e}",
-                            file=sys.stderr,
-                        )
-        except Exception as _ee:
-            print(f"[DEBUG] Preload phase skipped/failed: {_ee}", file=sys.stderr)
+                        logger.warning(f"Failed to preload signal-protocol-c.dll: {_e}")
 
-        print(
-            f"[DEBUG] Final PATH after modifications: {os.environ['PATH']}",
-            file=sys.stderr,
-        )
+            # Finally preload drlms_signal_bridge.dll (contains drlms_* helper functions)
+            bridge_dll_loaded = False
+            for _d in bin_candidates:
+                if not _d.exists():
+                    continue
+                _bridge = _d / "drlms_signal_bridge.dll"
+                if _bridge.exists():
+                    try:
+                        WinDLL(str(_bridge))
+                        logger.debug(
+                            f"Preloaded drlms_signal_bridge.dll from {_bridge}"
+                        )
+                        bridge_dll_loaded = True
+                        break
+                    except OSError as _e:
+                        logger.warning(
+                            f"Failed to preload drlms_signal_bridge.dll: {_e}"
+                        )
+
+            if not signal_dll_loaded or not bridge_dll_loaded:
+                missing = []
+                if not signal_dll_loaded:
+                    missing.append("signal-protocol-c.dll")
+                if not bridge_dll_loaded:
+                    missing.append("drlms_signal_bridge.dll")
+                logger.warning(
+                    f"Missing DLLs: {', '.join(missing)}. E2EE may not work."
+                )
+        except Exception as _ee:
+            logger.error(f"Preload phase skipped/failed: {_ee}")
+
+        logger.debug(f"Final PATH after modifications: {os.environ['PATH']}")
 
     ffi = FFI()
     ffi.cdef(_CDEF)
 
+    # Windows: Pure DLL loading (no compilation). Load both DLLs explicitly and
+    # return a proxy that routes calls by function name.
+    if os.name == "nt":
+
+        def _find_dll_in_paths(name: str) -> Optional[Path]:
+            # Prefer explicit candidates we computed above
+            for _d in bin_candidates:
+                if not _d.exists():
+                    continue
+                _p = _d / name
+                if _p.exists():
+                    return _p
+            return None
+
+        # Locate DLLs
+        sig_path = _find_dll_in_paths("signal-protocol-c.dll")
+        bridge_path = _find_dll_in_paths("drlms_signal_bridge.dll")
+        if sig_path is None:
+            raise SignalBridgeError(
+                "Windows: 未找到 signal-protocol-c.dll，请确认已构建并位于 build_win/Release。"
+            )
+        if bridge_path is None:
+            raise SignalBridgeError(
+                "Windows: 未找到 drlms_signal_bridge.dll，请确认已构建并位于 build_win/Release。"
+            )
+
+        logger.debug(f"Windows: ffi.dlopen signal from {sig_path}")
+        logger.debug(f"Windows: ffi.dlopen bridge from {bridge_path}")
+        lib_signal = ffi.dlopen(str(sig_path))
+        lib_bridge = ffi.dlopen(str(bridge_path))
+
+        # Optional: load CRT for free(), fallback to ucrtbase if needed
+        lib_crt = None
+        for crt_name in ("msvcrt", "ucrtbase"):
+            try:
+                lib_crt = ffi.dlopen(crt_name)
+                logger.debug(f"Windows: loaded CRT {crt_name}")
+                break
+            except Exception:
+                pass
+
+        class _MuxLib:
+            __slots__ = ("_sig", "_bridge", "_crt")
+
+            def __init__(self, sig, bridge, crt):
+                self._sig = sig
+                self._bridge = bridge
+                self._crt = crt
+
+            def __getattr__(self, name: str):
+                # Route drlms_* to bridge DLL
+                if name.startswith("drlms_"):
+                    return getattr(self._bridge, name)
+                # Route common C runtime free to CRT if available
+                if name == "free" and self._crt is not None:
+                    return getattr(self._crt, name)
+                # Default: libsignal-protocol-c
+                return getattr(self._sig, name)
+
+        return ffi, _MuxLib(lib_signal, lib_bridge, lib_crt)
+
+    # Linux/macOS: Use verify() to compile the CFFI module
     openssl_include, openssl_lib = _detect_openssl_prefix(lib_path)
 
     include_dirs = [str(include_dir)]
     if openssl_include is not None:
         include_dirs.append(str(openssl_include))
+
+    # Ensure shared logging header (logger.h in src/server) is visible when
+    # compiling the bridge C source on Linux/macOS. We also try to compile the
+    # full c_logging.c implementation into the CFFI module so that clog_log and
+    # related functions are available with real behavior, matching the server
+    # binary.
+    repo_root = _find_repo_root()
+    cffi_extra_sources: list[str] = []
+    if repo_root is not None:
+        server_dir = repo_root / "src" / "server"
+        if server_dir.exists():
+            include_dirs.append(str(server_dir))
+            c_logging = server_dir / "c_logging.c"
+            if c_logging.exists():
+                cffi_extra_sources.append(str(c_logging))
 
     link_args = _build_link_args(lib_path, openssl_lib)
 
@@ -575,10 +696,19 @@ def load_bridge() -> Tuple[FFI, object]:
                     break
 
     try:
+        verify_kwargs = {
+            "include_dirs": include_dirs,
+            **link_args,
+        }
+        if cffi_extra_sources:
+            # When building on Linux/macOS, also compile the shared C logging
+            # backend so that LOG_* macros used by _pysignal_runtime.c have a
+            # real implementation instead of a stub.
+            verify_kwargs["sources"] = cffi_extra_sources
+
         module = ffi.verify(
             _C_SOURCE,
-            include_dirs=include_dirs,
-            **link_args,
+            **verify_kwargs,
         )
     except VerificationError as exc:  # pragma: no cover - 构建期依赖缺失
         raise SignalBridgeError(
@@ -664,12 +794,9 @@ def _build_link_args(lib_path: Path, openssl_lib: Optional[Path] = None) -> dict
     link_args: dict = {}
 
     if openssl_lib is not None:
-        print(
-            f"[DEBUG] OpenSSL libs provided to CFFI build: {openssl_lib}",
-            file=sys.stderr,
-        )
+        logger.debug("OpenSSL libs provided to CFFI build: %s", openssl_lib)
     else:
-        print("[DEBUG] No OpenSSL library detected for CFFI build", file=sys.stderr)
+        logger.debug("No OpenSSL library detected for CFFI build")
 
     if os.name == "nt":
         lib_dirs = link_args.setdefault("library_dirs", [])
@@ -704,9 +831,10 @@ def _build_link_args(lib_path: Path, openssl_lib: Optional[Path] = None) -> dict
             if bin_dir.exists() and str(bin_dir) not in lib_dirs:
                 lib_dirs.append(str(bin_dir))
 
-            print(
-                f"[DEBUG] Added OpenSSL directories to CFFI link paths: {openssl_lib.parent}, {bin_dir}",
-                file=sys.stderr,
+            logger.debug(
+                "Added OpenSSL directories to CFFI link paths: %s, %s",
+                openssl_lib.parent,
+                bin_dir,
             )
 
             libs = link_args.setdefault("libraries", [])
@@ -757,9 +885,10 @@ def _detect_openssl_prefix(
         candidates.append((include_dir, lib_dir))
         if os.name == "nt":
             evp_path = include_dir / "openssl" / "evp.h"
-            print(
-                f"[DEBUG] CI build vcpkg_installed candidate: {evp_path} (exists: {evp_path.exists()})",
-                file=sys.stderr,
+            logger.debug(
+                "CI build vcpkg_installed candidate: %s (exists: %s)",
+                evp_path,
+                evp_path.exists(),
             )
 
     env_root = os.environ.get("OPENSSL_ROOT_DIR")
@@ -768,9 +897,9 @@ def _detect_openssl_prefix(
         candidates.append((base / "include", base / "lib"))
         # Debug: print detected paths
         if os.name == "nt":
-            print(
-                f"[DEBUG] OPENSSL_ROOT_DIR candidate: {base / 'include' / 'openssl' / 'evp.h'}",
-                file=sys.stderr,
+            logger.debug(
+                "OPENSSL_ROOT_DIR candidate: %s",
+                base / "include" / "openssl" / "evp.h",
             )
 
     vcpkg_root = os.environ.get("VCPKG_ROOT")
@@ -788,9 +917,11 @@ def _detect_openssl_prefix(
             # Debug: print detected paths
             if os.name == "nt":
                 evp_path = prefix / "include" / "openssl" / "evp.h"
-                print(
-                    f"[DEBUG] VCPKG {triplet} candidate: {evp_path} (exists: {evp_path.exists()})",
-                    file=sys.stderr,
+                logger.debug(
+                    "VCPKG %s candidate: %s (exists: %s)",
+                    triplet,
+                    evp_path,
+                    evp_path.exists(),
                 )
 
     # Add system OpenSSL paths (lowest priority - only fallback)
@@ -804,9 +935,10 @@ def _detect_openssl_prefix(
             lib_dir = base / "lib"
             candidates.append((include_dir, lib_dir))
             evp_path = include_dir / "openssl" / "evp.h"
-            print(
-                f"[DEBUG] System OpenSSL candidate: {evp_path} (exists: {evp_path.exists()})",
-                file=sys.stderr,
+            logger.debug(
+                "System OpenSSL candidate: %s (exists: %s)",
+                evp_path,
+                evp_path.exists(),
             )
 
     drive = Path(signal_lib_path).anchor
@@ -835,17 +967,17 @@ def _detect_openssl_prefix(
         crypto_dll = (
             lib_dir.parent / "bin" / "libcrypto-3-x64.dll"
         )  # Check for DLL in bin directory
-        print(
-            f"[DEBUG] Checking candidate: header={header} (exists: {header.exists()}), "
-            f"lib={crypto_lib} (exists: {crypto_lib.exists()}), "
-            f"dll={crypto_dll} (exists: {crypto_dll.exists()})",
-            file=sys.stderr,
+        logger.debug(
+            "Checking candidate: header=%s (exists: %s), lib=%s (exists: %s), dll=%s (exists: %s)",
+            header,
+            header.exists(),
+            crypto_lib,
+            crypto_lib.exists(),
+            crypto_dll,
+            crypto_dll.exists(),
         )
         if header.exists() and (crypto_lib.exists() or crypto_dll.exists()):
-            print(
-                f"[DEBUG] Selected OpenSSL: include={include_dir}, lib={lib_dir}",
-                file=sys.stderr,
-            )
+            logger.debug("Selected OpenSSL: include=%s, lib=%s", include_dir, lib_dir)
             return include_dir, lib_dir
 
     return None, None

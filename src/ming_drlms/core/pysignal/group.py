@@ -14,6 +14,7 @@ from .._pysignal_utils import (
     serialize_public_key,
 )
 from .._pysignal_errors import SignalBridgeError
+from ... import log
 from .context import SignalContext
 from .store import SignalStore
 
@@ -92,7 +93,6 @@ class SenderKeyDistribution:
             )
             sig_key = lib.sender_key_distribution_message_get_signature_key(message)
             signing_key = serialize_public_key(ffi, lib, sig_key)
-
             # Do not strip 0x05 prefix - libsignal protobuf usually expects full key
             # if len(signing_key) == 33 and signing_key[0] == 5:
             #    signing_key = signing_key[1:]
@@ -100,6 +100,30 @@ class SenderKeyDistribution:
             raw = _encode_sender_key_distribution_message(
                 key_id, iteration, chain_key, signing_key
             )
+
+            # Safer diagnostic: only inspect manually encoded bytes and optionally
+            # validate via drlms_test_unpack, without touching internal C message.
+            try:
+                logger = log.get_logger("core.pysignal.group")
+                prefix = ""
+                length = -1
+                test_rc = -1
+                if isinstance(raw, (bytes, bytearray)):
+                    length = len(raw)
+                    prefix = raw[:8].hex()
+                    try:
+                        test_rc = int(lib.drlms_test_unpack(raw, len(raw)))
+                    except Exception:
+                        test_rc = -1
+                logger.debug(
+                    "sender key dist manual: len=%d prefix=%s test_unpack=%d",
+                    length,
+                    prefix,
+                    test_rc,
+                )
+            except Exception:
+                pass
+
             return cls(
                 key_id=key_id,
                 iteration=iteration,
@@ -153,12 +177,35 @@ class GroupSessionBuilder:
         if message == self._ffi.NULL:
             raise SignalBridgeError("group session builder returned null message")
         dist = SenderKeyDistribution.from_message(self._lib, self._ffi, message)
+        try:
+            logger = log.get_logger("core.pysignal.group")
+            logger.debug(
+                "group session created: gid=%s sender=%s dev=%s key_id=%s iter=%s",
+                name.group_id,
+                name.sender,
+                name.device_id,
+                dist.key_id,
+                dist.iteration,
+            )
+        except Exception:
+            pass
 
         return dist
 
     def process_session(self, name: SenderKeyName, distribution: bytes) -> None:
         if not distribution:
             raise SignalBridgeError("empty sender key distribution")
+        try:
+            logger = log.get_logger("core.pysignal.group")
+            logger.debug(
+                "process sender key distribution: gid=%s sender=%s dev=%s len=%d",
+                name.group_id,
+                name.sender,
+                name.device_id,
+                len(distribution),
+            )
+        except Exception:
+            pass
         c_name, refs = self._build_name(name)
         msg_ptr = self._ffi.new("sender_key_distribution_message **")
         rc = self._lib.drlms_sender_key_distribution_message_deserialize_manual(
@@ -204,6 +251,17 @@ class GroupCipher:
             raise SignalBridgeError("group encryption requires non-empty payload")
         c_name, refs = name.to_c_struct(self._ffi)
         out = self._ffi.new("drlms_group_ciphertext *")
+        try:
+            logger = log.get_logger("core.pysignal.group")
+            logger.debug(
+                "group encrypt start: gid=%s sender=%s dev=%s len=%d",
+                name.group_id,
+                name.sender,
+                name.device_id,
+                len(plaintext),
+            )
+        except Exception:
+            pass
         rc = self._lib.drlms_group_encrypt(
             self._store.handle,
             c_name,
@@ -211,12 +269,90 @@ class GroupCipher:
             len(plaintext),
             out,
         )
+        if rc != 0:
+            try:
+                logger = log.get_logger("core.pysignal.group")
+                logger.error(
+                    "group encrypt failed: rc=%d gid=%s sender=%s dev=%s",
+                    rc,
+                    name.group_id,
+                    name.sender,
+                    name.device_id,
+                )
+            except Exception:
+                pass
+            # Fallback path: directly create cipher and encrypt to capture serialized bytes
+            try:
+                cipher_ptr = self._ffi.new("group_cipher **")
+                rc2 = self._lib.drlms_group_cipher_create(
+                    cipher_ptr, self._store.handle, c_name
+                )
+                check_rc(rc2, "drlms_group_cipher_create")
+                cipher = cipher_ptr[0]
+                msg_ptr = self._ffi.new("ciphertext_message **")
+                rc3 = self._lib.group_cipher_encrypt(
+                    cipher, plaintext, len(plaintext), msg_ptr
+                )
+                check_rc(rc3, "group_cipher_encrypt")
+                message = msg_ptr[0]
+                serialized = self._lib.ciphertext_message_get_serialized(message)
+                data_fb = c_bytes_copy(
+                    self._ffi,
+                    self._lib.signal_buffer_const_data(serialized),
+                    self._lib.signal_buffer_len(serialized),
+                )
+                try:
+                    logger = log.get_logger("core.pysignal.group")
+                    prefix_hex_fb = ""
+                    if isinstance(data_fb, (bytes, bytearray)):
+                        prefix_hex_fb = data_fb[:8].hex()
+                    logger.debug(
+                        "group encrypt fallback: serialized len=%d prefix=%s",
+                        len(data_fb) if hasattr(data_fb, "__len__") else 0,
+                        prefix_hex_fb,
+                    )
+                except Exception:
+                    pass
+                # Normalize potential leading tag byte
+                try:
+                    if (
+                        isinstance(data_fb, (bytes, bytearray))
+                        and len(data_fb) >= 2
+                        and data_fb[0] != 0x08
+                        and data_fb[1] == 0x08
+                    ):
+                        data_fb = data_fb[1:]
+                except Exception:
+                    pass
+                # Cleanup allocated message/cipher
+                try:
+                    self._lib.signal_type_unref(
+                        self._ffi.cast("signal_type_base *", message)
+                    )
+                except Exception:
+                    pass
+                try:
+                    self._lib.group_cipher_free(cipher)
+                except Exception:
+                    pass
+                # Only log serialized prefix for diagnostics; do not change behavior here
+                # (we keep raising the original error below)
+            except Exception:
+                pass
         check_rc(rc, "drlms_group_encrypt")
+        data = c_bytes_copy(self._ffi, out.data, out.len)  # type: ignore[attr-defined]
         try:
-            data = c_bytes_copy(self._ffi, out.data, out.len)  # type: ignore[attr-defined]
-        finally:
-            if out.data not in (self._ffi.NULL, None):  # type: ignore[attr-defined]
-                self._lib.free(out.data)  # type: ignore[attr-defined]
+            logger = log.get_logger("core.pysignal.group")
+            prefix_hex = ""
+            if isinstance(data, (bytes, bytearray)):
+                prefix_hex = data[:8].hex()
+            logger.debug(
+                "group encrypt ok: serialized len=%d prefix=%s",
+                len(data) if hasattr(data, "__len__") else 0,
+                prefix_hex,
+            )
+        except Exception:
+            pass
         result = GroupCiphertext(
             ciphertext=data,
             sender_key_id=int(out.key_id),  # type: ignore[attr-defined]

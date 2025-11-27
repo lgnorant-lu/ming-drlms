@@ -12,6 +12,30 @@
 #include <string.h>
 #include <time.h>
 
+#include "logger.h"
+
+#ifdef _WIN32
+#include <windows.h>
+#ifndef CLOCK_REALTIME
+#define CLOCK_REALTIME 0
+#endif
+// Minimal implementation of clock_gettime for Windows
+static int clock_gettime(int clk_id, struct timespec *ts) {
+    if (ts) {
+        FILETIME ft;
+        GetSystemTimeAsFileTime(&ft);
+        // Convert FILETIME (100ns intervals since 1601-01-01) to unix epoch
+        // (1970-01-01)
+        unsigned __int64 t =
+            ((unsigned __int64)ft.dwHighDateTime << 32) | ft.dwLowDateTime;
+        t -= 116444736000000000ULL;
+        ts->tv_sec = (time_t)(t / 10000000);
+        ts->tv_nsec = (long)((t % 10000000) * 100);
+    }
+    return 0;
+}
+#endif
+
 #ifdef HAVE_PROTOBUF_C
 #include "generated/schema/v2/common.pb-c.h"
 #include "generated/schema/v2/federation.pb-c.h"
@@ -235,7 +259,7 @@ int mp2_dispatcher_handle_frame(platform_socket_t fd, const mp2_frame_t *frame,
         // Keep as UNKNOWN for unrecognized message types
         break;
     }
-    fprintf(stderr, "Received %s\n", msg_type_name);
+    LOG_DEBUG("Received %s", msg_type_name);
 
     mp2_auth_config_t auth_cfg = {
         .users = users,
@@ -276,7 +300,7 @@ int mp2_dispatcher_handle_frame(platform_socket_t fd, const mp2_frame_t *frame,
         return mp2_rooms_handle_transfer_owner(fd, frame->payload,
                                                frame->payload_len);
     case MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ROOM_CLEAR_OWNER_REQUEST:
-        fprintf(stderr, "Received MSG_TYPE_ROOM_CLEAR_OWNER_REQUEST\n");
+        LOG_DEBUG("Received MSG_TYPE_ROOM_CLEAR_OWNER_REQUEST");
         return mp2_rooms_handle_clear_owner(fd, frame->payload,
                                             frame->payload_len);
     case MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ROOM_HISTORY_REQUEST:

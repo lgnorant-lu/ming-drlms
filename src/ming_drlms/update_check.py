@@ -9,6 +9,7 @@ from pathlib import Path
 import requests
 from packaging import version as pkg_version
 from rich import print as rprint
+from . import log
 
 
 def _cache_dir() -> Path:
@@ -80,6 +81,16 @@ def maybe_notify_new_version(
                 f"[bold red]{current}[/bold red] -> [bold green]{latest}[/bold green]\n"
                 f"[cyan]Run '[/cyan][bold]pip install --upgrade ming-drlms[/bold][cyan]' to update.[/cyan]"
             )
+            # Log via standard logger as well
+            logger = log.get_logger("update_check")
+            try:
+                logger.info(
+                    "New version available: %s -> %s; advise user to upgrade",
+                    current,
+                    latest,
+                )
+            except Exception:
+                pass
             try:
                 # ensure goes to stderr
                 rprint(msg, file=sys.stderr)

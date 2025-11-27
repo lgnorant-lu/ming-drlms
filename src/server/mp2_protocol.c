@@ -10,6 +10,7 @@
 #include <time.h>
 
 #include "platform/thread.h"
+#include "logger.h"
 
 #if !defined(_WIN32)
 #include <unistd.h>
@@ -112,8 +113,8 @@ int mp2_protocol_is_enabled(void) {
     // Debug: print protocol selection for CI troubleshooting
     static int once = 0;
     if (!once) {
-        fprintf(stderr, "[DEBUG] MP2 protocol: env='%s', enabled=%d, pid=%d\n",
-                env ? env : "NULL", enabled, (int)getpid());
+        LOG_DEBUG("MP2 protocol: env='%s', enabled=%d, pid=%d",
+                  env ? env : "NULL", enabled, (int)getpid());
         once = 1;
     }
     return enabled;
@@ -130,9 +131,11 @@ void mp2_protocol_dbgf(const char *fmt, ...) {
     }
     va_list ap;
     va_start(ap, fmt);
-    fprintf(stderr, "[mp2][dbg] ");
-    vfprintf(stderr, fmt, ap);
-    fprintf(stderr, "\n");
+    char line[512];
+    if (fmt) {
+        vsnprintf(line, sizeof line, fmt, ap);
+        LOG_DEBUG("[mp2][dbg] %s", line);
+    }
     va_end(ap);
 }
 
@@ -302,9 +305,8 @@ int mp2_protocol_send_frame(platform_socket_t fd, uint16_t msg_type,
     /* Skip if this fd is not registered as MP2 (prevents binary leaking into
      * text sockets) */
     if (!mp2_protocol_is_fd_mp2(fd)) {
-        fprintf(stderr,
-                "[mp2][dbg] send_frame: fd=%d msg_type=%u not registered\n",
-                (int)fd, msg_type);
+        LOG_DEBUG("[mp2][dbg] send_frame: fd=%d msg_type=%u not registered",
+                  (int)fd, msg_type);
         return 0;
     }
     unsigned char header[12];

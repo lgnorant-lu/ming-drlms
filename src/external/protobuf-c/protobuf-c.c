@@ -47,6 +47,7 @@
 
 #include <stdlib.h> /* for malloc, free */
 #include <string.h> /* for strcmp, strlen, memcpy, memmove, memset */
+#include <stdio.h>  /* for fprintf, stderr */
 
 #include "protobuf-c.h"
 
@@ -121,7 +122,16 @@ const char protobuf_c_empty_string[] = "";
     assert((desc)->magic == PROTOBUF_C__ENUM_DESCRIPTOR_MAGIC)
 
 #define ASSERT_IS_MESSAGE_DESCRIPTOR(desc)                                     \
-    assert((desc)->magic == PROTOBUF_C__MESSAGE_DESCRIPTOR_MAGIC)
+    do {                                                                       \
+        if ((desc)->magic != PROTOBUF_C__MESSAGE_DESCRIPTOR_MAGIC) {           \
+            fprintf(                                                           \
+                stderr,                                                        \
+                "MAGIC MISMATCH: desc=%p magic=0x%x expected=0x%x name=%s\n",  \
+                (void *)(desc), (desc)->magic,                                 \
+                PROTOBUF_C__MESSAGE_DESCRIPTOR_MAGIC, (desc)->name);           \
+        }                                                                      \
+        assert((desc)->magic == PROTOBUF_C__MESSAGE_DESCRIPTOR_MAGIC);         \
+    } while (0)
 
 #define ASSERT_IS_MESSAGE(message)                                             \
     ASSERT_IS_MESSAGE_DESCRIPTOR((message)->descriptor)

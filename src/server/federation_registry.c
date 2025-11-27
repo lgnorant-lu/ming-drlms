@@ -3,6 +3,7 @@
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include "logger.h"
 
 int federation_register_remote_subscriber(const char *room_name,
                                           const char *instance_id_hex,
@@ -49,10 +50,9 @@ int federation_register_remote_subscriber(const char *room_name,
 
     platform_mutex_unlock(&g_federation_mu);
 
-    fprintf(stderr,
-            "[federation] Registered remote subscriber: room=%s, instance=%s, "
-            "server=%s\n",
-            room_name, instance_id_hex, remote_server_id);
+    LOG_INFO("[federation] Registered remote subscriber: room=%s, instance=%s, "
+             "server=%s",
+             room_name, instance_id_hex, remote_server_id);
 
     return 0;
 }

@@ -23,6 +23,7 @@
 #include <windows.h>
 #endif
 
+#include "logger.h"
 #ifdef HAVE_PROTOBUF_C
 
 #include "generated/schema/v2/auth.pb-c.h"
@@ -413,7 +414,8 @@ int mp2_auth_handle_challenge(platform_socket_t fd) {
     st->nonce_set = 1;
     st->nonce_issued_at = time(NULL);
 
-    AuthChallengeResponse resp = AUTH_CHALLENGE_RESPONSE__INIT;
+    AuthChallengeResponse resp;
+    mingdrlms__v2__auth_challenge_response__init(&resp);
     resp.nonce = st->nonce;
     size_t packed = auth_challenge_response__get_packed_size(&resp);
     unsigned char *buf = (unsigned char *)malloc(packed);
@@ -470,21 +472,18 @@ int mp2_auth_handle_auth_request(platform_socket_t fd,
             }
 #endif
             if (verbose && *verbose) {
-                fprintf(stderr,
-                        "[auth][dbg] user=%s nonce=%s match=%d exph[0..7]=%.*s "
-                        "resp[0..7]=%.*s\n",
-                        req->username ? req->username : "(null)", st->nonce, ok,
-                        8, exph, 8, req->response ? req->response : "");
+                LOG_DEBUG("[auth][dbg] user=%s nonce=%s match=%d "
+                          "exph[0..7]=%.*s resp[0..7]=%.*s",
+                          req->username ? req->username : "(null)", st->nonce,
+                          ok, 8, exph, 8, req->response ? req->response : "");
             }
         } else if (verbose && *verbose) {
-            fprintf(stderr,
-                    "[auth][dbg] user=%s not found in users cache "
-                    "(g_users_count may be 0)\n",
-                    req->username ? req->username : "(null)");
+            LOG_DEBUG("[auth][dbg] user=%s not found in users cache "
+                      "(g_users_count may be 0)",
+                      req->username ? req->username : "(null)");
         }
     } else if (verbose && *verbose) {
-        fprintf(stderr, "[auth][dbg] nonce not set for fd, st=%p\n",
-                (void *)st);
+        LOG_DEBUG("[auth][dbg] nonce not set for fd, st=%p", (void *)st);
     }
 
     /* Test-mode bypass: allow auth in coverage/CI when explicitly enabled.
@@ -497,7 +496,8 @@ int mp2_auth_handle_auth_request(platform_socket_t fd,
         }
     }
 
-    AuthResponse resp = AUTH_RESPONSE__INIT;
+    AuthResponse resp;
+    mingdrlms__v2__auth_response__init(&resp);
     char jwt[1024];
     char refresh_token[65];
     const char *secret = mp2_auth_get_secret_or_default();
@@ -558,35 +558,75 @@ int mp2_auth_handle_refresh_request(platform_socket_t fd,
 
     RefreshTokenRequest *req =
         refresh_token_request__unpack(NULL, payload_len, payload);
-    RefreshTokenResponse resp = REFRESH_TOKEN_RESPONSE__INIT;
+    RefreshTokenResponse resp;
+    mingdrlms__v2__refresh_token_response__init(&resp);
+    char *jwt2 = (char *)calloc(1, 1024);
+    if (!jwt2)
+        return -1;
+
+    LOG_DEBUG("Handle refresh: unpack done, req=%p", (void *)req);
 
     if (req && req->refresh_token && cfg->data_dir) {
         char user[65] = {0};
         sqlite3_int64 exp = 0;
         char db_path[PATH_MAX];
         snprintf(db_path, sizeof db_path, "%s/%s", cfg->data_dir, "drlms.db");
+        LOG_DEBUG("Handle refresh: searching token in %s", db_path);
         if (sqlite_find_refresh_token_path(db_path, req->refresh_token, user,
                                            sizeof user, &exp) == 0) {
+            LOG_DEBUG("Handle refresh: token found for user=%s exp=%lld", user,
+                      (long long)exp);
             if ((sqlite3_int64)time(NULL) < exp) {
                 const char *secret = mp2_auth_get_secret_or_default();
-                char jwt2[1024];
                 unsigned long long exp2 =
                     (unsigned long long)time(NULL) + 15ULL * 60ULL;
-                if (jwt_hs256_make(user, exp2, secret, jwt2, sizeof jwt2) ==
-                    0) {
+                if (jwt_hs256_make(user, exp2, secret, jwt2, 1024) == 0) {
                     resp.access_token = jwt2;
                     resp.access_token_expires_in = 15 * 60;
+                    // resp.refresh_token = ""; // Removed: field does not exist
+                    LOG_DEBUG("Handle refresh: new jwt generated");
                 }
             }
+        } else {
+            LOG_DEBUG("Handle refresh: token not found");
         }
     }
 
+    LOG_DEBUG("Handle refresh: packing response size");
+    if (resp.base.descriptor) {
+        LOG_DEBUG("Descriptor addr: %p", (void *)resp.base.descriptor);
+        LOG_DEBUG("Descriptor magic: 0x%x", resp.base.descriptor->magic);
+        LOG_DEBUG("Descriptor name: %s", resp.base.descriptor->name);
+        LOG_DEBUG("Descriptor n_fields: %u", resp.base.descriptor->n_fields);
+        LOG_DEBUG("resp.access_token: %p", (void *)resp.access_token);
+        LOG_DEBUG("jwt2 addr: %p", (void *)jwt2);
+        if (jwt2) {
+            LOG_DEBUG("jwt2 content: '%.10s...' len=%zu", jwt2, strlen(jwt2));
+        }
+        const ProtobufCFieldDescriptor *fields = resp.base.descriptor->fields;
+        LOG_DEBUG("Fields addr: %p", (void *)fields);
+        if (fields) {
+            for (unsigned i = 0; i < resp.base.descriptor->n_fields; i++) {
+                LOG_DEBUG("Field[%u] name: %s", i, fields[i].name);
+                LOG_DEBUG("Field[%u] id: %u", i, fields[i].id);
+                LOG_DEBUG("Field[%u] type: %d", i, fields[i].type);
+                LOG_DEBUG("Field[%u] label: %d", i, fields[i].label);
+                LOG_DEBUG("Field[%u] offset: %u", i, fields[i].offset);
+                LOG_DEBUG("Field[%u] quantifier_offset: %u", i,
+                          fields[i].quantifier_offset);
+            }
+        }
+    } else {
+        LOG_DEBUG("Descriptor is NULL!");
+    }
     size_t packed = refresh_token_response__get_packed_size(&resp);
+    LOG_DEBUG("Handle refresh: packed size=%zu", packed);
     unsigned char *buf = (unsigned char *)malloc(packed);
     if (!buf) {
         if (req) {
             refresh_token_request__free_unpacked(req, NULL);
         }
+        free(jwt2);
         return -1;
     }
     refresh_token_response__pack(&resp, buf);
@@ -605,6 +645,7 @@ int mp2_auth_handle_refresh_request(platform_socket_t fd,
     if (req) {
         refresh_token_request__free_unpacked(req, NULL);
     }
+    free(jwt2);
     return rc;
 }
 

@@ -7,6 +7,7 @@
 #include "mp2_rooms_history.h"
 #include "rooms.h"
 
+#include "logger.h"
 #include <openssl/sha.h>
 #include <ctype.h>
 #include <errno.h>
@@ -828,8 +829,8 @@ int mp2_rooms_handle_clear_owner(platform_socket_t fd,
     rooms_get_info(room, owner_buf, sizeof owner_buf, NULL, NULL, NULL, NULL,
                    NULL, NULL, NULL);
 
-    fprintf(stderr, "[DEBUG] clear_owner: room=%s owner='%s' requester='%s'\n",
-            req->room_name, owner_buf, username);
+    LOG_DEBUG("[clear_owner] room=%s owner='%s' requester='%s", req->room_name,
+              owner_buf, username);
 
     // Permission check: only current owner or empty owner can clear
     if (owner_buf[0] != '\0' && strcmp(owner_buf, username) != 0) {
@@ -847,9 +848,9 @@ int mp2_rooms_handle_clear_owner(platform_socket_t fd,
     // Clear owner (set to empty string)
     rooms_set_owner(room, req->room_name, "", PLATFORM_INVALID_SOCKET);
 
-    fprintf(stderr, "[room_clear_owner] room=%s previous_owner=%s by=%s\n",
-            req->room_name, previous_owner[0] ? previous_owner : "(none)",
-            username);
+    LOG_INFO("[room_clear_owner] room=%s previous_owner=%s by=%s",
+             req->room_name, previous_owner[0] ? previous_owner : "(none)",
+             username);
 
     RoomClearOwnerResponse resp = ROOM_CLEAR_OWNER_RESPONSE__INIT;
     resp.room_name = req->room_name;

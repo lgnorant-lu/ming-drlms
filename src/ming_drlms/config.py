@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Optional, Any, Dict
 import os
 import yaml
+import tomli_w
 
 
 @dataclass
@@ -156,9 +157,20 @@ def _merge(base: CLIConfig, override: Dict[str, Any]) -> CLIConfig:
 def load_config(path: Optional[Path]) -> CLIConfig:
     cfg = CLIConfig()
     if path is None:
-        default = Path.cwd() / "drlms.yaml"
-        if default.exists():
-            path = default
+        # Precedence: env MING_DRLMS_CONFIG_DIR -> ~/.drlms/drlms.yaml -> CWD/drlms.yaml
+        env_base = os.environ.get("MING_DRLMS_CONFIG_DIR")
+        if env_base:
+            env_candidate = Path(env_base).expanduser() / "drlms.yaml"
+            if env_candidate.exists():
+                path = env_candidate
+        if path is None:
+            home_candidate = Path.home() / ".drlms" / "drlms.yaml"
+            if home_candidate.exists():
+                path = home_candidate
+        if path is None:
+            default = Path.cwd() / "drlms.yaml"
+            if default.exists():
+                path = default
     if path and Path(path).exists():
         with open(path, "r", encoding="utf-8") as f:
             y = yaml.safe_load(f) or {}
@@ -200,3 +212,44 @@ def write_template(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         yaml.safe_dump(tpl, f, sort_keys=False)
+
+
+def write_tui_template_toml(path: Path) -> None:
+    """Write an initial TUI/config.toml template with logging and TUI defaults."""
+    tpl: Dict[str, Any] = {
+        "general": {
+            "logging": {
+                "level": "INFO",  # DEBUG/INFO/WARNING/ERROR/CRITICAL
+                "console_enabled": True,
+                "rotate_mode": "size",  # size or time
+                "keep_logs": 5,
+                "max_size_mb": 10,
+                "json_enabled": False,
+                # empty => default ~/.drlms/logs
+                "log_dir": "",
+            }
+        },
+        "tui": {
+            "theme": "forest",
+            "language": "en",
+            # Empty string means use current working directory
+            "file_picker_root": "",
+            "custom_colors": {},
+        },
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "wb") as f:
+        tomli_w.dump(tpl, f)
+
+
+def apply_local_config(
+    local_path: Path, user_path: Path, *, overwrite: bool = False
+) -> None:
+    """Copy repo local config.toml to user config.toml with optional overwrite."""
+    local_path = local_path.expanduser().resolve()
+    user_path = user_path.expanduser()
+    user_path.parent.mkdir(parents=True, exist_ok=True)
+    if user_path.exists() and not overwrite:
+        raise FileExistsError(f"Target exists: {user_path}")
+    data = local_path.read_bytes()
+    user_path.write_bytes(data)

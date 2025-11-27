@@ -4,6 +4,7 @@ Handles loading/saving user preferences and theme configuration.
 """
 
 import sys
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict
@@ -15,8 +16,12 @@ else:
 
 import tomli_w
 
-# Default configuration path
-CONFIG_DIR = Path.home() / ".drlms"
+# Default configuration path (respect MING_DRLMS_CONFIG_DIR if set)
+_CFG_BASE = os.environ.get("MING_DRLMS_CONFIG_DIR")
+if _CFG_BASE:
+    CONFIG_DIR = Path(_CFG_BASE).expanduser()
+else:
+    CONFIG_DIR = Path.home() / ".drlms"
 CONFIG_FILE = CONFIG_DIR / "config.toml"
 
 

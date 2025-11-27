@@ -31,10 +31,12 @@ from .commands import CommandHandler
 from .file_selector import FileSelectionModal
 from .config import ConfigManager
 
+from .. import log
+
+logger = log.get_logger("tui.screens")
+
 
 class LoginScreen(Screen):
-    """Forest-themed login screen."""
-
     CSS = """
     LoginScreen {
         align: center middle;
@@ -601,17 +603,42 @@ class ChatScreen(Screen):
     def _check_e2ee(self) -> None:
         """Check E2EE availability and update status indicator."""
         try:
-            e2ee_path = Path.home() / ".drlms" / "identity.db"
-            if e2ee_path.exists():
+            config_dir = Path(
+                os.environ.get("MING_DRLMS_CONFIG_DIR") or (Path.home() / ".drlms")
+            )
+            e2ee_path = config_dir / "e2ee_keys.json"
+            exists = e2ee_path.exists()
+            has_keys = False
+            if exists:
                 from ..core.e2ee_store import LocalKeyStore
 
                 store = LocalKeyStore(e2ee_path)
-                if store.load_identity_key_pair(self.username):
+                # Prefer load_state, but keep compatibility with older helper if present
+                state = None
+                try:
+                    if hasattr(store, "load_state"):
+                        state = store.load_state(self.username)
+                    elif hasattr(store, "load_identity_key_pair"):
+                        state = store.load_identity_key_pair(self.username)
+                except Exception:
+                    state = None
+                if state is not None:
+                    has_keys = True
                     # E2EE enabled
                     e2ee_widget = self.query_one("#e2ee-status", Static)
                     e2ee_widget.update("🔒")
                     e2ee_widget.add_class("encrypted")
-                    return
+            try:
+                logger.debug(
+                    "ChatScreen._check_e2ee: user=%s config_dir=%s e2ee_path=%s exists=%s has_keys=%s",
+                    self.username,
+                    str(config_dir),
+                    str(e2ee_path),
+                    exists,
+                    has_keys,
+                )
+            except Exception:
+                pass
         except Exception:
             pass
 
@@ -638,6 +665,26 @@ class ChatScreen(Screen):
     def _handle_room_event(self, event) -> None:
         """Handle incoming room event (called from worker thread)."""
         # Must schedule UI update on main thread
+        try:
+            from ..core.mproto_v2_client import RoomEvent
+
+            if isinstance(event, RoomEvent):
+                payload_len = (
+                    len(event.payload)
+                    if getattr(event, "payload", None) is not None
+                    else None
+                )
+                logger.debug(
+                    "ChatScreen._handle_room_event: room=%s kind=%s event_id=%s sender=%s payload_len=%s",
+                    getattr(event, "room_name", self.current_room),
+                    getattr(event, "kind", None),
+                    getattr(event, "event_id", None),
+                    getattr(event, "sender", None),
+                    payload_len,
+                )
+        except Exception:
+            pass
+
         self.app.call_from_thread(self._process_event, event)
 
     def _process_event(self, event) -> None:
@@ -656,46 +703,50 @@ class ChatScreen(Screen):
         # Handle based on event kind
         if event.kind == RoomEventKind.ROOM_EVENT_KIND_TEXT:
             if event.payload:
+                sender_name = event.sender or event.display_token or "Unknown"
                 msg_text = Text()
                 msg_text.append(f"[{time_str}] ", style=f"dim {colors['text-muted']}")
-                msg_text.append(f"{event.sender}", style=f"bold {colors['primary']}")
+                msg_text.append(f"{sender_name}", style=f"bold {colors['primary']}")
 
-                # Decode payload if bytes
-                payload_str = (
-                    event.payload.ciphertext
-                    if hasattr(event.payload, "ciphertext")
-                    else event.payload
-                )
-                if hasattr(event, "payload") and hasattr(event.payload, "ciphertext"):
-                    # It's a SignalEncryptedPayload
-                    # In TUI, it should have been decrypted by RobustThreadedRoomClient if E2EE is on.
-                    # But RobustThreadedRoomClient yields the RAW event?
-                    # No, RobustThreadedRoomClient decrypts and replaces payload.
-                    # Let's assume event.payload is the decrypted bytes or string.
-                    pass
-
-                # RobustThreadedRoomClient.subscribe yields RoomEvent.
-                # If decrypted, payload is bytes.
-                if isinstance(payload_str, bytes):
-                    try:
-                        payload_str = payload_str.decode("utf-8")
-                    except Exception:
-                        payload_str = str(payload_str)
-                elif hasattr(payload_str, "ciphertext"):  # It's still a proto object?
+                # Determine payload to display
+                payload_obj = event.payload
+                if hasattr(payload_obj, "ciphertext"):
+                    # Encrypted payload: don't render raw bytes
                     payload_str = "[Encrypted Message]"
+                else:
+                    payload_str = payload_obj
+                    if isinstance(payload_str, bytes):
+                        try:
+                            payload_str = payload_str.decode("utf-8")
+                        except Exception:
+                            # Non-text binary: show concise placeholder
+                            payload_str = f"[binary {len(payload_obj)} bytes]"
 
                 msg_text.append(f": {payload_str}", style=colors["text"])
                 msg_list.add_message(msg_text)
 
         elif event.kind == RoomEventKind.ROOM_EVENT_KIND_FILE:
+            try:
+                file_meta = getattr(event, "file", None)
+                logger.debug(
+                    "ChatScreen._process_event file: room=%s event_id=%s filename=%s size=%s sha=%s",
+                    getattr(event, "room_name", self.current_room),
+                    getattr(event, "event_id", None),
+                    getattr(file_meta, "filename", None) if file_meta else None,
+                    getattr(file_meta, "size_bytes", None) if file_meta else None,
+                    getattr(file_meta, "sha256_hex", None) if file_meta else None,
+                )
+            except Exception:
+                pass
             # Show sender info for file too
+            sender_name = event.sender or event.display_token or "Unknown"
             msg_text = Text()
             msg_text.append(f"[{time_str}] ", style=f"dim {colors['text-muted']}")
-            msg_text.append(f"{event.sender}", style=f"bold {colors['primary']}")
+            msg_text.append(f"{sender_name}", style=f"bold {colors['primary']}")
             msg_text.append(" sent a file:", style=colors["text"])
             msg_list.add_message(msg_text)
 
-            if event.HasField("file"):
+            if event.file:
                 msg_list.add_file_message(event)
             else:
                 msg_list.add_message("[Invalid File Event]", "system")
@@ -773,9 +824,19 @@ class ChatScreen(Screen):
     @on(FileMessage.Pressed)
     def on_file_message_pressed(self, event: FileMessage.Pressed) -> None:
         """Handle click on file message."""
-        file_msg = event.control
-        if isinstance(file_msg, FileMessage):
-            self._handle_download(file_msg.event)
+        # Debug logging
+        try:
+            logger.debug("FileMessage pressed: %s", event)
+        except Exception:
+            pass
+
+        # Use event data directly from the message
+        if hasattr(event, "event") and event.event:
+            self._handle_download(event.event)
+        elif event.control and isinstance(event.control, FileMessage):
+            self._handle_download(event.control.event)
+        else:
+            self.show_system_message("Error: Could not determine file to download")
 
     def _handle_download(self, event) -> None:
         """Initiate file download."""
@@ -790,7 +851,7 @@ class ChatScreen(Screen):
         out_path = downloads_dir / filename
 
         self.app.run_worker(
-            self._download_worker(event.event_id, out_path),
+            lambda: self._download_worker(event.event_id, out_path),
             exclusive=False,
             thread=True,
         )
@@ -929,8 +990,17 @@ class ChatScreen(Screen):
 
         self._sending = True
         try:
+            # DEBUG: Log send attempt
+            logger.debug(f"Attempting to send: {text[:20]}...")
+
             self.controller.send_message(text)
+
+            logger.info("Send success")
+
         except Exception as e:
+            # Log the full traceback
+            logger.error(f"Send FAILED: {e}", exc_info=True)
+
             self.query_one(MessageList).add_message(f"Failed to send: {e}", "system")
         finally:
             self._sending = False

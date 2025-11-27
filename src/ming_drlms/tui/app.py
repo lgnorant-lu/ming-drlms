@@ -5,10 +5,15 @@ A functional chat client integrating with DRLMS RoomService and ThreadedRoomClie
 
 from textual.app import App
 from textual import on
+import os
 
 from .screens import LoginScreen, ChatScreen
 from .theme import ThemeManager
 from .config import ConfigManager
+from .logging_handler import TextualLogHandler
+from .log_screen import LogScreen
+from .settings_screen import SettingsScreen
+import logging
 
 
 class DRLMSApp(App):
@@ -25,12 +30,26 @@ class DRLMSApp(App):
     BINDINGS = [
         ("ctrl+c", "quit", "Quit"),
         ("ctrl+q", "quit", "Quit"),
+        ("ctrl+l", "open_log", "Logs"),
+        ("ctrl+comma", "open_settings", "Settings"),
     ]
 
     def __init__(self, **kwargs):
         # Initialize ConfigManager and ThemeManager BEFORE super().__init__
         self.config_manager = ConfigManager()
         self.theme_manager = ThemeManager(self.config_manager)
+
+        # Register Textual logging handler early
+        self._tui_handler = TextualLogHandler()
+        try:
+            from .. import log as _log
+
+            _log.register_tui_handler(self._tui_handler)
+            # ensure handler has the same formatter as file/console
+            fmt = logging.Formatter(_log.DEFAULT_FORMAT, _log.DATE_FORMAT)
+            self._tui_handler.setFormatter(fmt)
+        except Exception:
+            pass
 
         super().__init__(**kwargs)
 
@@ -45,6 +64,18 @@ class DRLMSApp(App):
     def on_mount(self) -> None:
         """Show login screen on startup."""
         self.push_screen(LoginScreen())
+
+    def action_open_log(self) -> None:
+        try:
+            self.push_screen(LogScreen(self._tui_handler))
+        except Exception:
+            pass
+
+    def action_open_settings(self) -> None:
+        try:
+            self.push_screen(SettingsScreen())
+        except Exception:
+            pass
 
     @on(LoginScreen.LoginAttempt)
     async def handle_login_attempt(self, message: LoginScreen.LoginAttempt) -> None:
@@ -154,8 +185,74 @@ class DRLMSApp(App):
 
 def main() -> None:
     """Entry point for TUI."""
-    app = DRLMSApp()
-    app.run()
+    import sys
+    from .. import log
+    from .config import ConfigManager
+    from ..config import write_tui_template_toml
+    from pathlib import Path
+
+    # Ensure default TUI configs exist (both local repo and user home)
+    try:
+        # local (repo) copy
+        repo_root = Path(__file__).resolve().parents[3]
+        local_cfg_dir = repo_root / ".drlms"
+        local_cfg = local_cfg_dir / "config.toml"
+        if not local_cfg.exists():
+            write_tui_template_toml(local_cfg)
+        # user/home copy
+        _cm = ConfigManager()
+        home_cfg = _cm.config_path
+        if not home_cfg.exists():
+            write_tui_template_toml(home_cfg)
+    except Exception:
+        pass
+
+    # Load persisted logging preferences and apply via env overrides
+    try:
+        cfg = ConfigManager()
+        cfg.load()
+        logging_cfg = (
+            cfg.config.general.get("logging", {})
+            if hasattr(cfg.config, "general")
+            else {}
+        )
+        if isinstance(logging_cfg, dict):
+            level = logging_cfg.get("level")
+            if level:
+                os.environ["DRLMS_LOG_LEVEL"] = str(level)
+            console = logging_cfg.get("console_enabled")
+            if console is not None:
+                os.environ["DRLMS_LOG_CONSOLE"] = "1" if bool(console) else "0"
+            rotate = logging_cfg.get("rotate_mode")
+            if rotate:
+                os.environ["DRLMS_LOG_ROTATE"] = str(rotate)
+            json_enabled = logging_cfg.get("json_enabled")
+            if json_enabled is not None:
+                os.environ["DRLMS_LOG_JSON"] = "1" if bool(json_enabled) else "0"
+            keep_logs = logging_cfg.get("keep_logs")
+            if isinstance(keep_logs, int):
+                os.environ["DRLMS_LOG_KEEP"] = str(keep_logs)
+            max_size_mb = logging_cfg.get("max_size_mb")
+            if isinstance(max_size_mb, int):
+                os.environ["DRLMS_LOG_MAX_MB"] = str(max_size_mb)
+            log_dir = logging_cfg.get("log_dir")
+            if log_dir:
+                os.environ["DRLMS_LOG_DIR"] = str(log_dir)
+    except Exception:
+        pass
+
+    # Setup logging first thing (honors env overrides above)
+    # Guard: CLI entry already initialized logging; avoid duplicate init lines
+    if log.get_log_dir() is None:
+        log.setup_logging()
+    logger = log.get_logger("tui.app")
+
+    try:
+        app = DRLMSApp()
+        app.run()
+    except Exception:
+        logger.critical("TUI Crashed", exc_info=True)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

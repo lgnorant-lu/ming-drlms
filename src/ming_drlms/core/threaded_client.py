@@ -21,6 +21,9 @@ from .token_store import TokenStore
 from .e2ee_runtime import E2EEngine, proto_type_from_lib
 from .e2ee_store import LocalKeyStore
 from ..proto.schema.v2 import room_pb2
+from .. import log
+
+logger = log.get_logger("core.threaded_client")
 
 
 class ConnectionState(enum.Enum):
@@ -126,6 +129,9 @@ class RobustThreadedRoomClient:
         self._client: Optional[MP2Client] = None
         self._client_lock = threading.Lock()
 
+        # E2EE engine reference reused across publish/subscription
+        self._engine: Optional[E2EEngine] = None
+
         # Connection state
         self._state = ConnectionState.DISCONNECTED
         self._state_lock = threading.Lock()
@@ -209,6 +215,9 @@ class RobustThreadedRoomClient:
 
         self._set_state(ConnectionState.DISCONNECTED)
 
+    def _on_pong(self, client_ts: int, server_ts: int) -> None:
+        self._last_pong_time = time.time()
+
     def is_running(self) -> bool:
         """Check if the subscription thread is currently active."""
         return self._subscribe_thread is not None and self._subscribe_thread.is_alive()
@@ -229,96 +238,99 @@ class RobustThreadedRoomClient:
             RuntimeError: If the client is not connected.
             MP2Error: If the publish operation fails.
         """
-        from .mproto_v2_client import write_frame, common_pb2, room_pb2
+        from .mproto_v2_client import MP2Client
 
-        with self._client_lock:
-            if self._client is None:
-                raise RuntimeError("Client not connected")
+        try:
+            logger.debug(
+                "threaded_client.publish: room=%s user=%s ephemeral=%s e2ee_store=%s",
+                self.room,
+                self.username,
+                bool(ephemeral),
+                str(self.e2ee_store_path),
+            )
+        except Exception:
+            pass
 
-            # Get access token and socket
-            record = self._client.ensure_access_token(self.username)
-            sock = self._client._require_socket()
+        # Use a dedicated client connection for publishing to avoid concurrent
+        # reads on the subscription socket.
+        temp_token_store = TokenStore(
+            Path(self.token_store_path) if self.token_store_path else None
+        )  # type: ignore[arg-type]
+        temp_client = MP2Client(self.host, self.port, token_store=temp_token_store)
 
-            # Build and send publish request
-            req = room_pb2.RoomPublishRequest()
-            req.room_name = self.room
-            req.access_token = record.access_token
+        encrypted_proto = None
+        ciphertext = payload
+        engine_used: Optional[E2EEngine] = None
+        engine_created_here = False
+        try:
+            # Ensure token on the dedicated connection
+            temp_client.ensure_access_token(self.username)
 
-            # E2EE Encryption
-            encrypted_proto = None
-            ciphertext = payload
-
-            # We need to check if E2EE is enabled and initialized.
-            # Since E2EEngine is thread-local to the subscription loop (or at least managed there),
-            # we have a problem: publish is called from main thread, subscription loop is in background.
-            # However, E2EEngine uses a database which can be opened from multiple threads if careful,
-            # but the session state is in the engine.
-            # Ideally, we should use the SAME engine or a new one.
-            # For simplicity and robustness, we can create a transient engine for publishing if needed,
-            # OR we can rely on the fact that we are just encrypting.
-            # But we need the session state.
-
-            # Actually, RobustThreadedRoomClient design separates the receive loop.
-            # If we want to publish encrypted messages, we need an E2EEngine instance.
-            # Let's instantiate a short-lived one for publishing if e2ee_store_path is set.
-            # This is similar to how RoomService.publish works.
-
+            # E2EE Encryption on the dedicated connection
             if self.e2ee_store_path:
                 try:
-                    key_store = LocalKeyStore(Path(self.e2ee_store_path).expanduser())
-                    # We need a client for the engine. We can use the existing one if we are careful with locking.
-                    # We already hold _client_lock.
-                    engine = E2EEngine(
-                        username=self.username,
-                        key_store=key_store,
-                        mp2_client=self._client,
-                    )
+                    key_store = LocalKeyStore(Path(self.e2ee_store_path).expanduser())  # type: ignore[arg-type]
+                    # Prefer the persistent engine from the subscription loop to reuse
+                    # the in-memory Signal store and group sender-key state.
+                    if self._engine is not None:
+                        engine_used = self._engine
+                    else:
+                        engine_used = E2EEngine(
+                            username=self.username,
+                            key_store=key_store,
+                            mp2_client=temp_client,
+                        )
+                        engine_created_here = True
+                        # Persist engine for decrypt on subscription loop (self-echo)
+                        # Decryption does not require mp2_client I/O, so it's safe if temp_client closes later.
+                        self._engine = engine_used
 
-                    # Ensure we have sessions with members
-                    # Note: This might be slow for large rooms, but necessary for E2EE.
-                    # Optimization: Cache members or rely on existing sessions.
-                    # For now, follow RoomService pattern.
-                    members = self._client.get_room_members(self.username, self.room)
-                    for member in members:
-                        if member.user_id != self.username:
-                            engine.distribute_sender_key(
-                                self.room, self.room, member.user_id
-                            )
+                    # Optionally announce sender key to current members only when we created
+                    # a temporary engine here. The subscription loop handles member-join cases.
+                    if engine_created_here:
+                        members = temp_client.get_room_members(self.username, self.room)
+                        for member in members:
+                            if member.user_id != self.username:
+                                engine_used.distribute_sender_key(
+                                    self.room, self.room, member.user_id
+                                )
 
-                    encrypted_proto = engine.encrypt_group(
+                    encrypted_proto = engine_used.encrypt_group(
                         self.room, self.room, payload
                     )
                     ciphertext = bytes(encrypted_proto.ciphertext)
-                    engine.close()
+                    try:
+                        head_hex = ciphertext[:8].hex()
+                        logger.debug(
+                            "threaded_client.publish: encrypted head=%s len=%s type=%s",
+                            head_hex,
+                            len(ciphertext),
+                            getattr(encrypted_proto, "type", None),
+                        )
+                    except Exception:
+                        pass
                 except Exception as e:
-                    # If encryption fails, we should probably fail the publish
-                    # or fall back to cleartext (bad for security).
-                    # Let's raise.
                     raise RuntimeError(f"E2EE Encryption failed: {e}")
 
-            payload_msg = room_pb2.SignalEncryptedPayload()
-            if encrypted_proto:
-                payload_msg.CopyFrom(encrypted_proto)
-                if not payload_msg.ciphertext:
-                    payload_msg.ciphertext = ciphertext
-                if not payload_msg.sender:
-                    payload_msg.sender = self.username
-            else:
-                payload_msg.type = (
-                    room_pb2.SignalCiphertextType.SIGNAL_CIPHERTEXT_TYPE_MESSAGE
-                )
-                payload_msg.ciphertext = ciphertext
-                payload_msg.sender = self.username
-
-            req.payload.CopyFrom(payload_msg)
-            req.ephemeral = bool(ephemeral)
-
-            # Send request without waiting for response
-            write_frame(
-                sock,
-                common_pb2.MSG_TYPE_ROOM_PUB_REQUEST,
-                req.SerializeToString(),
+            # Publish via dedicated connection (avoids racing the subscribe reader)
+            temp_client.publish(
+                username=self.username,
+                room_name=self.room,
+                payload=ciphertext,
+                ephemeral=bool(ephemeral),
+                encrypted_payload=encrypted_proto,
             )
+        finally:
+            try:
+                # Close only if we created a temporary engine in this method
+                if engine_used is not None and engine_created_here:
+                    engine_used.close()
+            except Exception:
+                pass
+            try:
+                temp_client.close()
+            except Exception:
+                pass
 
     def _set_state(self, new_state: ConnectionState) -> None:
         """Update connection state and invoke callback."""
@@ -407,6 +419,8 @@ class RobustThreadedRoomClient:
                             key_store=key_store,
                             mp2_client=self._client,
                         )
+                        # Expose the engine for reuse by publish()
+                        self._engine = engine
                     except Exception as e:
                         if self._on_error:
                             self._on_error(RuntimeError(f"Failed to init E2EE: {e}"))
@@ -420,7 +434,30 @@ class RobustThreadedRoomClient:
                     self.room,
                     since_id=self.since_id,
                     sender_key_callback=sender_key_callback,
+                    pong_callback=self._on_pong,
                 )
+
+                # Proactively distribute our sender key to existing members so they
+                # can decrypt subsequent group messages, not only on member-join.
+                if engine is not None:
+                    try:
+                        members = self._client.get_room_members(
+                            self.username, self.room
+                        )
+                        for member in members:
+                            try:
+                                uid = getattr(member, "user_id", None)
+                                if uid and uid != self.username:
+                                    engine.distribute_sender_key(
+                                        self.room, self.room, uid
+                                    )
+                            except Exception:
+                                # Continue best-effort on individual failures
+                                pass
+                    except Exception:
+                        # Non-fatal: if listing members fails, distribution will still
+                        # happen on member-join or on next publish fallback paths.
+                        pass
 
                 for event in events:
                     if self._stop_event.is_set():
@@ -461,10 +498,34 @@ class RobustThreadedRoomClient:
                                         result.info.message_type
                                     ),
                                 )
-                        except Exception:
-                            # Decryption failed, might be cleartext or error.
-                            # Pass through original event, maybe UI can show lock error?
-                            pass
+                        except Exception as _decrypt_exc:
+                            # First, try a best-effort fallback: attempt group decryption using room_name
+                            # in case group_id wasn't populated by the server.
+                            try:
+                                group_result = engine.decrypt_group(event)
+                                event = replace(
+                                    event,
+                                    payload=group_result.plaintext,
+                                    sender_key_iteration=group_result.iteration,
+                                    payload_type=room_pb2.SignalCiphertextType.SIGNAL_CIPHERTEXT_TYPE_MESSAGE,
+                                )
+                            except Exception as _fallback_exc:
+                                # Decryption failed, log for diagnostics and pass through original event.
+                                try:
+                                    logger.error(
+                                        f"Decrypt FAILED: "
+                                        f"room={self.room} sender={getattr(event, 'sender', None)} "
+                                        f"dev={getattr(event, 'sender_device_id', None)} "
+                                        f"group_id={getattr(event, 'group_id', None)} "
+                                        f"payload_type={getattr(event, 'payload_type', None)} "
+                                        f"len={len(getattr(event, 'payload', b''))} "
+                                        f"error={_decrypt_exc} | fallback_error={_fallback_exc}",
+                                        exc_info=True,
+                                    )
+                                except Exception:
+                                    pass
+                                # Pass through original event so UI can still render something.
+                                pass
 
                     if self._on_event is not None:
                         try:
@@ -477,7 +538,11 @@ class RobustThreadedRoomClient:
                                     pass
         finally:
             if engine:
-                engine.close()
+                try:
+                    engine.close()
+                finally:
+                    # Clear the shared engine reference when the loop ends
+                    self._engine = None
             with self._client_lock:
                 if self._client is not None:
                     try:

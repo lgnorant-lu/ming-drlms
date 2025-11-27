@@ -29,7 +29,7 @@ class FileMessage(Static):
 
         def __init__(self, control: "FileMessage") -> None:
             super().__init__()
-            self.control = control
+            # self.control is a read-only property in Message, do not set it
             self.event = control.event
             self.file_meta = control.file_meta
 

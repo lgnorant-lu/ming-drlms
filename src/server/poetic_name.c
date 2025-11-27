@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "logger.h"
 #if defined(_WIN32)
 #include <bcrypt.h>
 #ifndef STATUS_SUCCESS
@@ -211,10 +212,9 @@ static int load_word_bank(const char *path, WordList *adjectives,
     if (path && *path) {
         if (parse_word_bank(path, adjectives, nouns, version, version_cap) == 0)
             return 0;
-        fprintf(stderr,
-                "poetic_name: failed to parse word bank '%s', falling back to "
-                "builtin\n",
-                path);
+        LOG_WARN("poetic_name: failed to parse word bank '%s', falling back to "
+                 "builtin",
+                 path);
         word_list_free(adjectives);
         word_list_free(nouns);
     }

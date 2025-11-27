@@ -11,6 +11,7 @@ import typer
 from rich import print
 
 from ..i18n import t
+from .. import log
 from ..config import load_config
 from .utils import (
     ROOT,
@@ -25,6 +26,7 @@ from .utils import (
 
 
 server_app = typer.Typer(help="server operations (up/down/status/logs)")
+logger = log.get_logger("cli.server")
 
 
 def _is_fake_server_mode() -> bool:
@@ -253,10 +255,10 @@ def server_up(
         LD_LIBRARY_PATH=str(server_bin.parent),
     )
 
-    # Debug: print environment variables for CI troubleshooting
-    print(
-        f"[DEBUG] CLI server env: DRLMS_ENABLE_MPROTO_V2={env.get('DRLMS_ENABLE_MPROTO_V2', 'NOT_SET')}",
-        file=sys.stderr,
+    # Debug: environment variables for CI troubleshooting
+    logger.debug(
+        "CLI server env: DRLMS_ENABLE_MPROTO_V2=%s",
+        env.get("DRLMS_ENABLE_MPROTO_V2", "NOT_SET"),
     )
     if os.name == "nt":
         # Ensure required DLL locations are on PATH for the spawned server

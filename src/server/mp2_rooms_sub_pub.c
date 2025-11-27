@@ -164,22 +164,25 @@ static int mp2_rooms_perform_publish(platform_socket_t client_fd,
         return -3;
     }
 
-    RoomEvent ev = ROOM_EVENT__INIT;
-    ev.room_name = (char *)room_name;
-    ev.event_id = (int64_t)event_id;
-    ev.payload = payload_msg;
-    ev.display_token = (char *)(display_token ? display_token : "");
+    Mingdrlms__V2__RoomEvent *ev = malloc(sizeof(Mingdrlms__V2__RoomEvent));
+    mingdrlms__v2__room_event__init(ev);
+    ev->room_name = (char *)room_name;
+    ev->event_id = (int64_t)event_id;
+    ev->payload = payload_msg;
+    ev->display_token = (char *)(display_token ? display_token : "");
     mp2_protocol_dbgf("room publish payload debug: ciphertext_len=%zu type=%d",
                       (size_t)payload_msg->ciphertext.len,
                       (int)payload_msg->type);
-    size_t ev_sz = room_event__get_packed_size(&ev);
+    size_t ev_sz = mingdrlms__v2__room_event__get_packed_size(ev);
     unsigned char *ev_buf = (unsigned char *)malloc(ev_sz);
     if (!ev_buf) {
         mp2_protocol_dbgf("fanout alloc failed");
         free(packed_payload);
+        free(ev);
         return 0;
     }
-    room_event__pack(&ev, ev_buf);
+    mingdrlms__v2__room_event__pack(ev, ev_buf);
+    free(ev);
 
     // Broadcast MP2 frame to all subscribers in the room/instance
     // mp2_protocol_send_frame will add the frame header, so we only send the

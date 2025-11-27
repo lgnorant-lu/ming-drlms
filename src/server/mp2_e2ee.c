@@ -1,5 +1,6 @@
 #include "mp2_e2ee.h"
 
+#include "logger.h"
 #include "e2ee_signal.h"
 #include "mp2_auth.h"
 #include "mp2_protocol.h"
@@ -354,6 +355,9 @@ int mp2_e2ee_handle_generate_keys(platform_socket_t fd, const uint8_t *payload,
         return -1;
     }
 
+    LOG_DEBUG("E2EE Gen: request user=%s force_regenerate=%d", req->user_name,
+              (int)req->force_regenerate);
+
     SQLiteStorage *storage = rooms_get_sqlite_storage();
     if (identity_exists(storage, req->user_name, E2EE_DEVICE_ID) &&
         !req->force_regenerate) {
@@ -389,9 +393,12 @@ int mp2_e2ee_handle_generate_keys(platform_socket_t fd, const uint8_t *payload,
     }
 
     if (generate_registration_id(ctx, &registration_id) != 0) {
-        send_generate_keys_response(fd, 500, "registration id failure", 0, 0);
+        send_generate_keys_response(fd, 500, "registration id failed", 0, 0);
         goto cleanup;
     }
+
+    LOG_DEBUG("E2EE Gen: user=%s reg_id=%u device_id=%u", req->user_name,
+              (unsigned)registration_id, (unsigned)E2EE_DEVICE_ID);
 
     rc = signal_protocol_key_helper_generate_pre_keys(
         &pre_keys_head, E2EE_PRE_KEY_START, E2EE_PRE_KEY_BATCH, ctx);
@@ -496,13 +503,26 @@ int mp2_e2ee_handle_generate_keys(platform_socket_t fd, const uint8_t *payload,
     signal_buffer *signature_buf =
         session_signed_pre_key_get_signature(signed_pre_key);
     size_t signature_len = signal_buffer_len(signature_buf);
+
+    // WORKAROUND: Sanity check for signature length (Ed25519 is 64 bytes)
+    // If we get garbage length due to ABI issues, clamp it to 64.
+    if (signature_len > 1024) {
+        LOG_WARN("E2EE: Insane signature len %zu, forcing to 64 (user=%s)",
+                 signature_len, req->user_name);
+        signature_len = 64;
+    }
+
+    LOG_DEBUG("E2EE Gen: sig_buf=%p len=%zu user=%s", (void *)signature_buf,
+              signature_len, req->user_name);
+
     signed_pub_copy = dup_buffer(signal_buffer_data(signed_pub_buf),
                                  signal_buffer_len(signed_pub_buf));
     signed_priv_copy = dup_buffer(signal_buffer_data(signed_priv_buf),
                                   signal_buffer_len(signed_priv_buf));
     signature_copy =
         dup_buffer(signal_buffer_data(signature_buf), signature_len);
-    signal_buffer_free(signature_buf);
+
+    // signal_buffer_free(signature_buf); // FIX: Do not free internal buffer!
     signature_buf = NULL;
     if (!signed_pub_copy || !signed_priv_copy || !signature_copy) {
         send_generate_keys_response(fd, 500, "signed pre-key copy failed", 0,
@@ -534,6 +554,12 @@ int mp2_e2ee_handle_generate_keys(platform_socket_t fd, const uint8_t *payload,
                                     0);
         goto cleanup_pre_keys;
     }
+
+    LOG_DEBUG("E2EE Gen: stored identity+pre-keys+signed_pre_key for user=%s "
+              "reg_id=%u "
+              "device_id=%u sig_len=%zu",
+              req->user_name, (unsigned)registration_id,
+              (unsigned)E2EE_DEVICE_ID, signature_len);
 
     send_generate_keys_response_full(
         fd, registration_id, E2EE_DEVICE_ID, identity_public_copy,

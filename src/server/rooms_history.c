@@ -23,6 +23,7 @@
 #include "rooms_events.h"
 #include "rooms_utils.h"
 #include "sqlite_storage.h"
+#include "logger.h"
 
 #define DEFAULT_HISTORY_LIMIT 50
 #ifndef MAX_SQL_LENGTH
@@ -966,6 +967,10 @@ int rooms_fetch_file_event(Room *room, RoomInstance *instance,
         return -1;
     rooms_file_event_data_clear(out);
     memset(out, 0, sizeof(*out));
+    LOG_DEBUG("rooms_fetch_file_event: room=%s event_id=%llu has_instance=%d "
+              "policy=%d",
+              room->name, (unsigned long long)event_id, instance ? 1 : 0,
+              instance ? instance->storage_policy : -1);
     if (instance && instance->storage_policy == ROOM_STORAGE_EPHEMERAL) {
         int rc = -1;
         platform_mutex_lock(&instance->mu);
@@ -1011,10 +1016,26 @@ int rooms_fetch_file_event(Room *room, RoomInstance *instance,
         return rc;
     }
     if (rooms_is_sqlite_enabled()) {
-        if (rooms_fetch_file_event_sqlite(room, event_id, out) == 0)
+        if (rooms_fetch_file_event_sqlite(room, event_id, out) == 0) {
+            LOG_DEBUG("rooms_fetch_file_event: sqlite hit room=%s "
+                      "event_id=%llu file=%s",
+                      room->name, (unsigned long long)event_id, out->filename);
             return 0;
+        }
+        LOG_DEBUG("rooms_fetch_file_event: sqlite miss room=%s event_id=%llu",
+                  room->name, (unsigned long long)event_id);
         rooms_file_event_data_clear(out);
         memset(out, 0, sizeof(*out));
     }
-    return rooms_fetch_file_event_log(room, event_id, out);
+    int rc_log = rooms_fetch_file_event_log(room, event_id, out);
+    if (rc_log == 0) {
+        LOG_DEBUG("rooms_fetch_file_event: log hit room=%s event_id=%llu "
+                  "file=%s path=%s",
+                  room->name, (unsigned long long)event_id, out->filename,
+                  out->file_path);
+    } else {
+        LOG_WARN("rooms_fetch_file_event: miss room=%s event_id=%llu",
+                 room->name, (unsigned long long)event_id);
+    }
+    return rc_log;
 }

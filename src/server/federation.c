@@ -1,3 +1,4 @@
+#include "logger.h"
 #include "federation.h"
 #include "federation_internal.h"
 #include "platform/platform.h"
@@ -124,13 +125,140 @@ static int append_trusted_server(FederationConfig *cfg, TrustedServer *entry) {
         return -1;
     }
     if (cfg->trusted_servers_count >= MAX_TRUSTED_SERVERS) {
-        fprintf(stderr, "[federation] Trusted servers limit reached (%d)\n",
-                MAX_TRUSTED_SERVERS);
+        LOG_WARN("[federation] Trusted servers limit reached (%d)",
+                 MAX_TRUSTED_SERVERS);
         return -1;
     }
     cfg->trusted_servers[cfg->trusted_servers_count++] = *entry;
     return 0;
 }
+
+// ... existing code ...
+// Include platform thread for Worker
+#include "platform/thread.h"
+
+// --- Federation Async Task Queue ---
+
+typedef struct TaskNode {
+    FederationTask task;
+    struct TaskNode *next;
+} TaskNode;
+
+static TaskNode *g_fed_queue_head = NULL;
+static TaskNode *g_fed_queue_tail = NULL;
+static platform_mutex_t g_fed_queue_mu;
+static platform_thread_t g_fed_worker_thread;
+static int g_fed_worker_running = 0;
+
+void federation_queue_push(const FederationTask *task) {
+    if (!g_fed_worker_running)
+        return;
+
+    TaskNode *node = (TaskNode *)malloc(sizeof(TaskNode));
+    if (!node)
+        return;
+    node->task = *task;
+
+    if (task->payload && task->payload_len > 0) {
+        node->task.payload = (unsigned char *)malloc(task->payload_len);
+        if (node->task.payload) {
+            memcpy(node->task.payload, task->payload, task->payload_len);
+        } else {
+            free(node);
+            return;
+        }
+    } else {
+        node->task.payload = NULL;
+        node->task.payload_len = 0;
+    }
+    node->next = NULL;
+
+    platform_mutex_lock(&g_fed_queue_mu);
+    if (g_fed_queue_tail) {
+        g_fed_queue_tail->next = node;
+        g_fed_queue_tail = node;
+    } else {
+        g_fed_queue_head = g_fed_queue_tail = node;
+    }
+    platform_mutex_unlock(&g_fed_queue_mu);
+}
+
+static int federation_queue_pop(FederationTask *out_task) {
+    platform_mutex_lock(&g_fed_queue_mu);
+    if (g_fed_queue_head) {
+        TaskNode *node = g_fed_queue_head;
+        *out_task = node->task;
+        g_fed_queue_head = node->next;
+        if (!g_fed_queue_head) {
+            g_fed_queue_tail = NULL;
+        }
+        platform_mutex_unlock(&g_fed_queue_mu);
+        free(node);
+        return 1;
+    }
+    platform_mutex_unlock(&g_fed_queue_mu);
+    return 0;
+}
+
+static void *federation_worker_func(void *arg) {
+    (void)arg;
+    while (g_fed_worker_running) {
+        FederationTask task;
+        if (federation_queue_pop(&task)) {
+            if (task.type == FED_TASK_NOTIFY_SUB) {
+                federation_perform_notify_subscription(
+                    task.room_name, task.instance_id_hex, task.subscribe);
+            } else if (task.type == FED_TASK_FORWARD_PUB) {
+                federation_perform_forward_publish(
+                    task.room_name, task.instance_id_hex, task.event_id,
+                    task.timestamp, task.sender_user, task.display_token,
+                    task.payload, task.payload_len, task.sha_hex,
+                    task.ephemeral, task.event_kind, task.filename,
+                    task.file_size_bytes);
+                if (task.payload)
+                    free(task.payload);
+            }
+        } else {
+#if defined(_WIN32)
+            Sleep(50);
+#else
+            usleep(50000);
+#endif
+        }
+    }
+    return NULL;
+}
+
+void federation_worker_start(void) {
+    if (g_fed_worker_running)
+        return;
+    if (platform_mutex_init(&g_fed_queue_mu) != 0)
+        return;
+    g_fed_worker_running = 1;
+    if (platform_thread_create(&g_fed_worker_thread, federation_worker_func,
+                               NULL) != 0) {
+        g_fed_worker_running = 0;
+        platform_mutex_destroy(&g_fed_queue_mu);
+    }
+}
+
+void federation_worker_stop(void) {
+    g_fed_worker_running = 0;
+#if defined(_WIN32)
+    Sleep(100); // Give it a moment
+#else
+    usleep(100000);
+#endif
+
+    FederationTask task;
+    while (federation_queue_pop(&task)) {
+        if (task.payload)
+            free(task.payload);
+    }
+    platform_mutex_destroy(&g_fed_queue_mu);
+}
+
+// --- End Queue ---
 
 int federation_load_config(const char *config_path,
                            FederationConfig *out_config) {
@@ -293,8 +421,8 @@ int federation_load_config(const char *config_path,
 
     if (cfg.enabled) {
         if (cfg.server_id[0] == '\0' || cfg.bearer_token[0] == '\0') {
-            fprintf(stderr, "[federation] Invalid federation config: missing "
-                            "server_id or bearer_token\n");
+            LOG_WARN("[federation] Invalid federation config: missing "
+                     "server_id or bearer_token");
             cfg.enabled = 0;
         }
     }
@@ -324,14 +452,15 @@ int federation_init(const FederationConfig *config) {
             return -1;
         }
         g_federation_mutex_ready = 1;
+        // Start async worker
+        federation_worker_start();
     }
 
     g_federation_initialized = 1;
-    fprintf(stderr,
-            "[federation] Initialized: enabled=%d, server_id=%s, "
-            "trusted_servers=%zu\n",
-            g_federation_config.enabled, g_federation_config.server_id,
-            g_federation_config.trusted_servers_count);
+    LOG_INFO("[federation] Initialized: enabled=%d, server_id=%s, "
+             "trusted_servers=%zu",
+             g_federation_config.enabled, g_federation_config.server_id,
+             g_federation_config.trusted_servers_count);
 
     return 0;
 }
@@ -342,6 +471,8 @@ void federation_shutdown(void) {
     }
 
     if (g_federation_mutex_ready) {
+        federation_worker_stop();
+
         platform_mutex_lock(&g_federation_mu);
 
         RemoteSubscriber *curr = g_remote_subscribers;
@@ -385,5 +516,48 @@ int federation_verify_token(const char *bearer_token) {
     return -1;
 }
 
-// Publish/subscribe handlers moved to federation_publish.* (and provide stubs
-// when protobuf-c is unavailable)
+// Public API proxies (Async)
+int federation_notify_subscription(const char *room_name,
+                                   const char *instance_id_hex, int subscribe) {
+    if (!g_federation_initialized || !g_federation_config.enabled)
+        return 0;
+    FederationTask task = {0};
+    task.type = FED_TASK_NOTIFY_SUB;
+    safe_strcpy(task.room_name, sizeof(task.room_name), room_name);
+    safe_strcpy(task.instance_id_hex, sizeof(task.instance_id_hex),
+                instance_id_hex);
+    task.subscribe = subscribe;
+    federation_queue_push(&task);
+    return 0;
+}
+
+int federation_forward_publish(const char *room_name,
+                               const char *instance_id_hex, uint64_t event_id,
+                               const char *timestamp, const char *sender_user,
+                               const char *display_token,
+                               const unsigned char *payload, size_t payload_len,
+                               const char *sha_hex, int ephemeral,
+                               Mingdrlms__V2__RoomEventKind event_kind,
+                               const char *filename, uint64_t file_size_bytes) {
+    if (!g_federation_initialized || !g_federation_config.enabled)
+        return 0;
+    FederationTask task = {0};
+    task.type = FED_TASK_FORWARD_PUB;
+    safe_strcpy(task.room_name, sizeof(task.room_name), room_name);
+    safe_strcpy(task.instance_id_hex, sizeof(task.instance_id_hex),
+                instance_id_hex);
+    task.event_id = event_id;
+    safe_strcpy(task.timestamp, sizeof(task.timestamp), timestamp);
+    safe_strcpy(task.sender_user, sizeof(task.sender_user), sender_user);
+    safe_strcpy(task.display_token, sizeof(task.display_token), display_token);
+    task.payload = (unsigned char *)payload; // Will be copied by push
+    task.payload_len = payload_len;
+    safe_strcpy(task.sha_hex, sizeof(task.sha_hex), sha_hex);
+    task.ephemeral = ephemeral;
+    task.event_kind = event_kind;
+    safe_strcpy(task.filename, sizeof(task.filename), filename);
+    task.file_size_bytes = file_size_bytes;
+
+    federation_queue_push(&task);
+    return 0;
+}

@@ -24,6 +24,8 @@
 #include "mp2_protocol.h"
 #include "federation.h"
 
+#include "logger.h"
+
 #if defined(_WIN32)
 #include <windows.h>
 #include <direct.h>
@@ -97,38 +99,57 @@ static int detect_mp2_protocol_on_socket(platform_socket_t fd) {
 #else
     struct timeval tv;
     tv.tv_sec = 0;
-    tv.tv_usec = 100000;
+    tv.tv_usec = 100000; /* 100ms */
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 #endif
-    int n = recv(fd, (char *)hdr, 4, MSG_PEEK);
-    if (n == 4) {
-        /* MP2 magic is 0xDEADBEEF in network byte order */
-        fprintf(
-            stderr,
-            "[DEBUG] detect_mp2: fd=%d, first 4 bytes: %02x %02x %02x %02x\n",
-            (int)fd, hdr[0], hdr[1], hdr[2], hdr[3]);
-        if (hdr[0] == 0xDE && hdr[1] == 0xAD && hdr[2] == 0xBE &&
-            hdr[3] == 0xEF) {
-            fprintf(stderr,
-                    "[DEBUG] detect_mp2: detected MP2 magic for fd=%d\n",
-                    (int)fd);
-            // Set blocking mode for MP2 connections
+
+    /* Try multiple peeks (up to ~500ms total) to avoid misclassifying
+     * slow-starting MP2 clients as legacy. */
+    for (int attempt = 0; attempt < 5; ++attempt) {
+        int n = recv(fd, (char *)hdr, 4, MSG_PEEK);
+        if (n == 4) {
+            /* MP2 magic is 0xDEADBEEF in network byte order */
+            LOG_DEBUG("detect_mp2: fd=%d, first 4 bytes: %02x %02x %02x %02x",
+                      (int)fd, hdr[0], hdr[1], hdr[2], hdr[3]);
+            if (hdr[0] == 0xDE && hdr[1] == 0xAD && hdr[2] == 0xBE &&
+                hdr[3] == 0xEF) {
+                LOG_DEBUG("detect_mp2: detected MP2 magic for fd=%d", (int)fd);
+                /* Set blocking mode for MP2 connections */
 #if defined(_WIN32)
-            u_long mode = 0; // blocking
-            ioctlsocket(fd, FIONBIO, &mode);
+                u_long mode = 0; /* blocking */
+                ioctlsocket(fd, FIONBIO, &mode);
 #else
-            fcntl(fd, F_SETFL, 0);
+                fcntl(fd, F_SETFL, 0);
 #endif
-            return 1; /* MP2 */
+                return 1; /* MP2 */
+            }
+            LOG_DEBUG("detect_mp2: detected text protocol for fd=%d", (int)fd);
+            return 0; /* looks like text */
         }
-        fprintf(stderr,
-                "[DEBUG] detect_mp2: detected text protocol for fd=%d\n",
-                (int)fd);
-        return 0; /* looks like text */
+
+        /* For timeouts, partial reads, or no data yet, retry a few times */
+#if defined(_WIN32)
+        Sleep(100);
+#else
+        /* best-effort short sleep */
+        struct timespec ts;
+        ts.tv_sec = 0;
+        ts.tv_nsec = 100000000L; /* 100ms */
+        nanosleep(&ts, NULL);
+#endif
     }
-    /* On timeout or partial read, default to text to keep legacy tests stable
-     */
+
+    /* After retries with no conclusive header: on Windows, default to MP2 to
+     * avoid misclassifying slow-starting clients; on other platforms keep
+     * legacy. */
+#if defined(_WIN32)
+    LOG_DEBUG("detect_mp2: inconclusive after retries; defaulting to MP2 on "
+              "Windows for fd=%d",
+              (int)fd);
+    return 1;
+#else
     return 0;
+#endif
 }
 
 static int ensure_dir(const char *path) {
@@ -376,10 +397,9 @@ static int legacy_handle_subscribe(LegacySession *session,
     if (!room_name || !rooms_valid_name(room_name))
         return legacy_sendf(session->fd, "ERR|SUB|invalid room\n");
     Room *room = rooms_get_or_create(room_name, NULL);
-    fprintf(stderr,
-            "[DEBUG] legacy_handle_subscribe: rooms_get_or_create returned %p "
-            "for room %s\n",
-            room, room_name ? room_name : "NULL");
+    LOG_DEBUG(
+        "legacy_handle_subscribe: rooms_get_or_create returned %p for room %s",
+        room, room_name ? room_name : "NULL");
     if (!room)
         return legacy_sendf(session->fd, "ERR|SUB|internal error\n");
     InstanceUUID uuid;
@@ -389,30 +409,28 @@ static int legacy_handle_subscribe(LegacySession *session,
         rooms_assign_instance(room, NULL, &uuid, &instance, &is_new);
     if (assign_rc != ROOM_ASSIGN_OK || !instance)
         return legacy_sendf(session->fd, "ERR|SUB|no capacity\n");
-    fprintf(stderr,
-            "[DEBUG] legacy_handle_subscribe: adding subscriber fd=%d user=%s "
-            "to instance %p\n",
-            (int)session->fd, session->user ? session->user : "NULL", instance);
+    LOG_DEBUG("legacy_handle_subscribe: adding subscriber fd=%d user=%s to "
+              "instance %p",
+              (int)session->fd, session->user ? session->user : "NULL",
+              instance);
     int add_rc =
         rooms_add_subscriber(room, instance, session->fd, session->user);
-    fprintf(stderr,
-            "[DEBUG] legacy_handle_subscribe: rooms_add_subscriber result=%d, "
-            "instance subs=%zu\n",
-            add_rc, instance->subs_len);
+    LOG_DEBUG("legacy_handle_subscribe: rooms_add_subscriber result=%d, "
+              "instance subs=%zu",
+              add_rc, instance->subs_len);
     // Debug: check subscriber info
     for (size_t i = 0; i < instance->subs_len; ++i) {
         Subscriber *sub = &instance->subs[i];
-        fprintf(stderr, "[DEBUG] subscriber[%zu]: fd=%d, user='%s'\n", i,
-                (int)sub->fd, sub->user);
+        LOG_DEBUG("subscriber[%zu]: fd=%d, user='%s'", i, (int)sub->fd,
+                  sub->user);
     }
     if (add_rc != 0)
         return legacy_sendf(session->fd, "ERR|SUB|subscribe failed\n");
     rooms_assign_owner_if_empty(room, room_name, session->user, session->fd);
     char instance_hex[33];
     rooms_uuid_to_hex(&uuid, instance_hex);
-    fprintf(stderr,
-            "[DEBUG] legacy_handle_subscribe: returning OK|SUB for fd=%d\n",
-            (int)session->fd);
+    LOG_DEBUG("legacy_handle_subscribe: returning OK|SUB for fd=%d",
+              (int)session->fd);
     return legacy_sendf(session->fd, "OK|SUB|%s|%s\n", room_name, instance_hex);
 }
 
@@ -483,14 +501,11 @@ static int legacy_handle_publish_text(LegacySession *session,
     memset(&ctx, 0, sizeof ctx);
     int ctx_rc = mp2_rooms_prepare_publish_ctx(session->fd, session->user,
                                                room_name, &ctx);
-    fprintf(
-        stderr,
-        "[DEBUG] mp2_rooms_prepare_publish_ctx result: rc=%d, instance=%p\n",
-        ctx_rc, ctx.instance);
+    LOG_DEBUG("mp2_rooms_prepare_publish_ctx result: rc=%d, instance=%p",
+              ctx_rc, ctx.instance);
     if (ctx_rc != 0 || !ctx.instance) {
-        fprintf(stderr,
-                "[DEBUG] Using fallback publish logic for fd=%d room=%s\n",
-                (int)session->fd, room_name);
+        LOG_DEBUG("Using fallback publish logic for fd=%d room=%s",
+                  (int)session->fd, room_name);
         // Fallback: assign an instance without attaching this fd as a
         // subscriber
         Room *fb_room = rooms_get_or_create(room_name, NULL);
@@ -518,17 +533,14 @@ static int legacy_handle_publish_text(LegacySession *session,
                 }
             }
             // Add the publisher as a subscriber to the target instance
-            fprintf(stderr,
-                    "[DEBUG] Adding publisher fd=%d user=%s to instance %p "
-                    "(subs before: %zu)\n",
-                    (int)session->fd, session->user ? session->user : "NULL",
-                    target_instance, target_instance->subs_len);
+            LOG_DEBUG("Adding publisher fd=%d user=%s to instance %p (subs "
+                      "before: %zu)",
+                      (int)session->fd, session->user ? session->user : "NULL",
+                      target_instance, target_instance->subs_len);
             int add_rc = rooms_add_subscriber(fb_room, target_instance,
                                               session->fd, session->user);
-            fprintf(
-                stderr,
-                "[DEBUG] rooms_add_subscriber result: %d (subs after: %zu)\n",
-                add_rc, target_instance->subs_len);
+            LOG_DEBUG("rooms_add_subscriber result: %d (subs after: %zu)",
+                      add_rc, target_instance->subs_len);
             if (add_rc != 0) {
                 platform_mutex_unlock(&fb_room->mu);
                 free(payload);
@@ -558,13 +570,12 @@ static int legacy_handle_publish_text(LegacySession *session,
                           (unsigned long long)event_id);
 
     // Broadcast to all instances in the room
-    fprintf(stderr,
-            "[DEBUG] Broadcasting PUBT event to room: %s, event_id: %llu\n",
-            room_name, (unsigned long long)event_id);
+    LOG_DEBUG("Broadcasting PUBT event to room: %s, event_id: %llu", room_name,
+              (unsigned long long)event_id);
     int broadcast_rc = rooms_fanout_text_to_room(
         room_name, ts, session->user, event_id, payload, payload_len, sha_lower,
         session->rate_down_bps, session->fd);
-    fprintf(stderr, "[DEBUG] Broadcast result: %d\n", broadcast_rc);
+    LOG_DEBUG("Broadcast result: %d", broadcast_rc);
     free(payload);
     return rc;
 }
@@ -691,7 +702,11 @@ static void *handle_client(void *arg) {
     if (!data_dir || !*data_dir)
         data_dir = ".";
 
-    int use_mp2 = mp2_protocol_is_enabled() ? 1 : 0;
+    int use_mp2;
+#if defined(_WIN32)
+    use_mp2 = 1;
+#else
+    use_mp2 = mp2_protocol_is_enabled() ? 1 : 0;
     /* Override by peeking the first bytes on the socket to avoid protocol
      * mix-up */
     if (use_mp2) {
@@ -702,7 +717,16 @@ static void *handle_client(void *arg) {
             use_mp2 = 1;
         }
     }
+#endif
 
+    if (!use_mp2) {
+        /* Double-check before falling back to legacy: a late-arriving MP2
+         * header within a few hundred milliseconds should still switch to MP2.
+         */
+        if (detect_mp2_protocol_on_socket(fd)) {
+            use_mp2 = 1;
+        }
+    }
     if (!use_mp2) {
         // Reset socket timeout for text protocol connections to prevent
         // premature disconnection
@@ -764,8 +788,12 @@ int main(void) {
     signal(SIGPIPE, SIG_IGN);
 #endif
 
+    /* Initialize C logging early (reads env; creates files) */
+    clog_init();
+    LOG_INFO("log_collector_server starting up");
+
     if (platform_net_initialize() != 0) {
-        fprintf(stderr, "failed to initialize network stack\n");
+        LOG_ERROR("failed to initialize network stack");
         return 1;
     }
 
@@ -781,7 +809,7 @@ int main(void) {
     size_t dl = strnlen(audit_dir, sizeof(audit_dir));
     size_t sl = strlen(suffix);
     if (dl + sl + 1 > sizeof(audit_path)) {
-        fprintf(stderr, "audit path too long (data_dir=%s)\n", data_dir);
+        LOG_ERROR("audit path too long (data_dir=%s)", data_dir);
         return 1;
     }
     memcpy(audit_path, audit_dir, dl);
@@ -817,7 +845,7 @@ int main(void) {
     memset(&opt, 0, sizeof(opt));
     // Initialize connection accounting
     if (platform_mutex_init(&g_conn_mu) != 0) {
-        fprintf(stderr, "failed to init mutex\n");
+        LOG_ERROR("failed to init mutex");
         return 1;
     }
     g_active_conn = 0;
@@ -836,5 +864,7 @@ int main(void) {
     platform_net_cleanup();
     // No explicit shutdown hooks for these modules in current API
 
+    LOG_INFO("server shutting down (rc=%d)", rc);
+    clog_shutdown();
     return (rc == 0) ? 0 : 1;
 }

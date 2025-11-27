@@ -11,6 +11,7 @@ import socket
 import struct
 from dataclasses import dataclass
 from typing import Optional
+from .. import log
 
 MP2_MAGIC = 0xDEADBEEF
 MP2_VERSION = 0x0002
@@ -49,8 +50,28 @@ def read_frame(sock: socket.socket) -> MP2Frame:
     header = _read_exact(sock, _HEADER_SIZE)
     magic, version, msg_type, payload_len = _HEADER_STRUCT.unpack(header)
     if magic != MP2_MAGIC:
+        logger = log.get_logger("core.mp2_transport")
+        try:
+            logger.error(
+                "invalid MP2 magic got=0x%08x expected=0x%08x header=%s",
+                magic,
+                MP2_MAGIC,
+                header.hex(),
+            )
+        except Exception:
+            pass
         raise ValueError(f"invalid MP2 magic 0x{magic:08x}")
     if version != MP2_VERSION:
+        logger = log.get_logger("core.mp2_transport")
+        try:
+            logger.error(
+                "invalid MP2 version got=0x%04x expected=0x%04x header=%s",
+                version,
+                MP2_VERSION,
+                header.hex(),
+            )
+        except Exception:
+            pass
         raise ValueError(f"unsupported MP2 version 0x{version:04x}")
     payload = _read_exact(sock, payload_len)
     return MP2Frame(msg_type=msg_type, payload=payload)

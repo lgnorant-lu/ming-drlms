@@ -1,15 +1,13 @@
 """Startup debugging utility."""
 
 import time
-import sys
-import os
+from .. import log
 
 _START_TIME = time.time()
-_ENABLED = os.getenv("DRLMS_DEBUG_STARTUP", "1") == "1"
+_logger = log.get_logger("utils.startup")
 
 
 def log_time(msg: str) -> None:
     """Log a message with timestamp relative to module import time."""
-    if _ENABLED:
-        elapsed = time.time() - _START_TIME
-        print(f"[DEBUG] {elapsed:.3f}s: {msg}", file=sys.stderr)
+    elapsed = time.time() - _START_TIME
+    _logger.debug("%.3fs: %s", elapsed, msg)

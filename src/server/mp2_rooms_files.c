@@ -3,6 +3,8 @@
 #include "federation.h"
 #include "mp2_protocol.h"
 #include "rooms.h"
+#include "rooms_instance.h"
+#include "logger.h"
 
 #include <openssl/sha.h>
 #include <stdio.h>
@@ -331,6 +333,28 @@ int mp2_rooms_handle_file_publish_begin(platform_socket_t fd,
     platform_mutex_unlock(&g_mp2_file_uploads_mu);
     session_registered = 1;
 
+    // Send success response
+    RoomFilePublishBegin resp;
+    mingdrlms__v2__room_file_publish_begin__init(&resp);
+    resp.room_name = session->room_name;
+    resp.access_token = ""; // Not needed in response
+    resp.filename = session->filename;
+    resp.size_bytes = session->size_bytes;
+    resp.sha256_hex = session->sha256_hex;
+    resp.ephemeral = session->requested_ephemeral;
+    resp.upload_id = session->upload_id;
+
+    size_t resp_sz =
+        mingdrlms__v2__room_file_publish_begin__get_packed_size(&resp);
+    unsigned char *resp_buf = (unsigned char *)malloc(resp_sz);
+    if (resp_buf) {
+        mingdrlms__v2__room_file_publish_begin__pack(&resp, resp_buf);
+        mp2_protocol_send_frame(
+            fd, MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ROOM_FILE_PUB_BEGIN,
+            resp_buf, (uint32_t)resp_sz);
+        free(resp_buf);
+    }
+
 finish:
     if (err_code != 0) {
         mp2_rooms_send_error(
@@ -567,9 +591,10 @@ int mp2_rooms_handle_file_publish_commit(platform_socket_t fd,
 
     cleanup_remove_tmp = 0;
 
-    RoomEvent ev = ROOM_EVENT__INIT;
-    Mingdrlms__V2__RoomFileMetadata meta =
-        MINGDRLMS__V2__ROOM_FILE_METADATA__INIT;
+    RoomEvent ev;
+    mingdrlms__v2__room_event__init(&ev);
+    Mingdrlms__V2__RoomFileMetadata meta;
+    mingdrlms__v2__room_file_metadata__init(&meta);
     ev.room_name = session->room_name;
     ev.event_id = (int64_t)event_id;
     ev.display_token = (char *)(display ? display : "");
@@ -621,7 +646,8 @@ int mp2_rooms_handle_file_publish_commit(platform_socket_t fd,
                           fed_result);
     }
 
-    RoomFilePublishResult result = ROOM_FILE_PUBLISH_RESULT__INIT;
+    RoomFilePublishResult result;
+    mingdrlms__v2__room_file_publish_result__init(&result);
     result.upload_id = session->upload_id;
     result.room_name = session->room_name;
     result.event_id = (int64_t)event_id;
@@ -695,8 +721,65 @@ int mp2_rooms_handle_file_download(platform_socket_t fd,
 
     InstanceUUID inst_uuid;
     RoomInstance *instance = rooms_find_instance_by_fd(room, fd, &inst_uuid);
+    LOG_DEBUG("file_download: user=%s room=%s fd=%d event_id=%d instance=%p "
+              "policy=%d",
+              username, req->room_name, (int)fd, (int)req->event_id,
+              (void *)instance, instance ? instance->storage_policy : -1);
+
+    if (!instance) {
+        char owner[65] = "";
+        int room_policy = 0;
+        size_t subs = 0;
+        unsigned long long last_event_id = 0;
+        time_t created_at = 0;
+        size_t total_instances = 0;
+        size_t max_capacity = 0;
+        int storage_policy = -1;
+
+        rooms_get_info(room, owner, sizeof(owner), &room_policy, &subs,
+                       &last_event_id, &created_at, &total_instances,
+                       &max_capacity, &storage_policy);
+
+        LOG_WARN("file_download: no instance bound for fd=%d; only persistent "
+                 "history "
+                 "backends will be consulted (ephemeral instance events "
+                 "unavailable). "
+                 "room=%s owner=%s room_policy=%d storage_policy=%d "
+                 "instances=%zu subs=%zu last_event_id=%llu",
+                 (int)fd, req->room_name, owner, room_policy, storage_policy,
+                 (size_t)total_instances, (size_t)subs,
+                 (unsigned long long)last_event_id);
+
+        /* Attempt to bind this download fd to an existing or new instance, so
+         * that instance-scoped history (including ephemeral/file events) can
+         * be consulted on subsequent lookups. If this fails we leave
+         * instance==NULL and fall back to the prior behaviour (persistent
+         * backends only).
+         */
+        int is_new_instance = 0;
+        RoomAssignResult assign_rc = rooms_assign_instance(
+            room, NULL, &inst_uuid, &instance, &is_new_instance);
+        LOG_DEBUG("file_download: rooms_assign_instance result=%d is_new=%d "
+                  "instance=%p",
+                  (int)assign_rc, is_new_instance, (void *)instance);
+        if (assign_rc == ROOM_ASSIGN_OK && instance) {
+            int add_rc = rooms_add_subscriber(room, instance, fd, username);
+            LOG_DEBUG("file_download: rooms_add_subscriber result=%d subs=%zu",
+                      add_rc, instance->subs_len);
+            if (add_rc != 0) {
+                /* On failure, revert to NULL so downstream behaves as before.
+                 */
+                instance = NULL;
+            }
+        }
+    }
+
     if (rooms_fetch_file_event(room, instance, (uint64_t)req->event_id,
                                &event_data) != 0) {
+        LOG_WARN("file_download: event not found room=%s event_id=%d "
+                 "instance=%p policy=%d",
+                 req->room_name, (int)req->event_id, (void *)instance,
+                 instance ? instance->storage_policy : -1);
         err_code = 404;
         err_message = "event not found";
         goto finish;
@@ -768,7 +851,8 @@ int mp2_rooms_handle_file_download(platform_socket_t fd,
         if (total_size > 0 && offset + chunk_bytes >= total_size)
             is_last = 1;
 
-        RoomFileDownloadChunk chunk = ROOM_FILE_DOWNLOAD_CHUNK__INIT;
+        RoomFileDownloadChunk chunk;
+        mingdrlms__v2__room_file_download_chunk__init(&chunk);
         chunk.room_name = req->room_name;
         chunk.event_id = req->event_id;
         chunk.filename = (char *)filename;
@@ -788,7 +872,8 @@ int mp2_rooms_handle_file_download(platform_socket_t fd,
             done = 1;
     }
 
-    RoomFileDownloadDone done_msg = ROOM_FILE_DOWNLOAD_DONE__INIT;
+    RoomFileDownloadDone done_msg;
+    mingdrlms__v2__room_file_download_done__init(&done_msg);
     done_msg.room_name = req->room_name;
     done_msg.event_id = req->event_id;
     mp2_rooms_send_message(
