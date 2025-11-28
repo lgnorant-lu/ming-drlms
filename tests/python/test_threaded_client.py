@@ -9,7 +9,9 @@ from unittest import mock
 
 import pytest
 
-from ming_drlms.core.threaded_client import ThreadedRoomClient
+from ming_drlms.core.threaded_client import (
+    ThreadedRoomClient,
+)
 from ming_drlms.core.mproto_v2_client import RoomEvent, MP2Error
 
 

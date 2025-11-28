@@ -41,8 +41,9 @@ class FileMessage(Static):
     def render(self) -> Text:
         icon = "📄"
         size_str = f"{self.file_meta.size_bytes / 1024:.1f}KB"
+        eph = " (ephemeral)" if getattr(self.file_meta, "ephemeral", False) else ""
         return Text(
-            f"{icon} {self.file_meta.filename} ({size_str})\n[Click to Download]",
+            f"{icon} {self.file_meta.filename} ({size_str}){eph}\n[Click to Download]",
             style="bold",
         )
 

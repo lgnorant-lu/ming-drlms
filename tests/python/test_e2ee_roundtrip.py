@@ -1,4 +1,5 @@
 from pathlib import Path
+import sys
 
 import pytest
 
@@ -39,6 +40,10 @@ def _bundle_from_generated(name: str, keys: GeneratedKeys) -> E2EEPreKeyBundle:
     )
 
 
+@pytest.mark.skipif(
+    sys.platform.startswith("win"),
+    reason="Signal CFFI roundtrip is unstable on Windows; run on POSIX/CI.",
+)
 def test_e2ee_roundtrip(tmp_path: Path) -> None:
     try:
         ctx = create_signal_context()

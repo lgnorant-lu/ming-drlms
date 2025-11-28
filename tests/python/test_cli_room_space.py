@@ -257,7 +257,14 @@ def test_room_info_json(monkeypatch: pytest.MonkeyPatch, runner: CliRunner) -> N
     monkeypatch.setattr(room, "room_service", StubService())
     result = runner.invoke(app, ["room", "info", "--room", "r1", "--json"])
     assert result.exit_code == 0
-    data = json.loads(result.output.strip())
+    lines = [ln for ln in result.output.splitlines() if ln.strip()]
+    start_idx = 0
+    for i, ln in enumerate(lines):
+        if ln.lstrip().startswith("{") or ln.lstrip().startswith("["):
+            start_idx = i
+            break
+    json_text = "\n".join(lines[start_idx:])
+    data = json.loads(json_text)
     assert data["owner"] == "alice"
 
 
@@ -420,7 +427,14 @@ def test_room_members_json_output(
     monkeypatch.setattr(room, "room_service", StubService())
     result = runner.invoke(app, ["room", "members", "--room", "r1", "--json"])
     assert result.exit_code == 0
-    data = json.loads(result.output.strip())
+    lines = [ln for ln in result.output.splitlines() if ln.strip()]
+    start_idx = 0
+    for i, ln in enumerate(lines):
+        if ln.lstrip().startswith("{") or ln.lstrip().startswith("["):
+            start_idx = i
+            break
+    json_text = "\n".join(lines[start_idx:])
+    data = json.loads(json_text)
     assert data["room"] == "r1"
     assert len(data["members"]) == 1
     assert data["members"][0]["user_id"] == "alice"

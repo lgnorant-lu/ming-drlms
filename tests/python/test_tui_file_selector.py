@@ -21,11 +21,11 @@ def test_file_selector_modal_init():
     assert modal_default.initial_path == Path.home()
 
 
-@patch("ming_drlms.tui.screens.ConfigManager")
-@patch("ming_drlms.tui.screens.ChatController")
+@patch("ming_drlms.tui.chat_screen.ConfigManager")
+@patch("ming_drlms.tui.chat_screen.ChatController")
 def test_chat_screen_config_loading(MockController, MockConfigManager):
     """测试ChatScreen是否正确从配置加载路径"""
-    from ming_drlms.tui.screens import ChatScreen
+    from ming_drlms.tui.chat_screen import ChatScreen
 
     # 模拟配置: 指定路径
     mock_config = MagicMock()
@@ -36,11 +36,11 @@ def test_chat_screen_config_loading(MockController, MockConfigManager):
     assert screen.file_picker_root == Path("/tmp/custom_root")
 
 
-@patch("ming_drlms.tui.screens.ConfigManager")
-@patch("ming_drlms.tui.screens.ChatController")
+@patch("ming_drlms.tui.chat_screen.ConfigManager")
+@patch("ming_drlms.tui.chat_screen.ChatController")
 def test_chat_screen_default_path(MockController, MockConfigManager):
     """测试ChatScreen默认路径逻辑"""
-    from ming_drlms.tui.screens import ChatScreen
+    from ming_drlms.tui.chat_screen import ChatScreen
 
     # 模拟配置: 空字符串
     mock_config = MagicMock()

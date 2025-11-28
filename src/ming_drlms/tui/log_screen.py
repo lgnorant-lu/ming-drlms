@@ -1,11 +1,12 @@
 from textual.app import ComposeResult
 from textual.screen import Screen
-from textual.widgets import Header, Footer, RichLog, Checkbox
-from textual.containers import Horizontal
+from textual.widgets import Header, Footer, RichLog, Checkbox, Label
+from textual.containers import Horizontal, Vertical
 from textual import on
 import logging
 from datetime import datetime
 from pathlib import Path
+import os
 
 from .. import log
 
@@ -25,17 +26,20 @@ class LogScreen(Screen):
         super().__init__()
         self.handler = handler
         self.log_widget = RichLog(highlight=True, markup=True, id="log_view")
+        self.path_label = Label(id="log_paths")
 
     def compose(self) -> ComposeResult:
         yield Header()
-        yield Horizontal(
-            Checkbox("DEBUG", value=False, id="chk_debug"),
-            Checkbox("INFO", value=True, id="chk_info"),
-            Checkbox("WARN", value=True, id="chk_warn"),
-            Checkbox("ERROR", value=True, id="chk_error"),
-            classes="filter_bar",
-        )
-        yield self.log_widget
+        with Vertical():
+            yield Horizontal(
+                Checkbox("DEBUG", value=False, id="chk_debug"),
+                Checkbox("INFO", value=True, id="chk_info"),
+                Checkbox("WARN", value=True, id="chk_warn"),
+                Checkbox("ERROR", value=True, id="chk_error"),
+                classes="filter_bar",
+            )
+            yield self.path_label
+            yield self.log_widget
         yield Footer()
 
     def on_mount(self) -> None:
@@ -43,6 +47,7 @@ class LogScreen(Screen):
         self.handler.set_target(self.log_widget, self.app)
         # Default view level based on current checkboxes
         self._update_handler_level()
+        self._update_paths()
 
     def on_unmount(self) -> None:
         """Disconnect handler to stop updates when screen is hidden."""
@@ -61,17 +66,41 @@ class LogScreen(Screen):
 
         level = logging.CRITICAL
 
-        if self.query_one("#chk_debug", Checkbox).value:
+        try:
+            debug_cb = self.query_one("#chk_debug", Checkbox)
+            info_cb = self.query_one("#chk_info", Checkbox)
+            warn_cb = self.query_one("#chk_warn", Checkbox)
+            error_cb = self.query_one("#chk_error", Checkbox)
+        except Exception:
+            # If the filter checkboxes are not yet available (e.g. during early
+            # mount or in a degraded layout), keep the default level and avoid
+            # crashing the TUI.
+            self.handler.setLevel(level)
+            return
+
+        if debug_cb.value:
             level = logging.DEBUG
-        elif self.query_one("#chk_info", Checkbox).value:
+        elif info_cb.value:
             level = logging.INFO
-        elif self.query_one("#chk_warn", Checkbox).value:
+        elif warn_cb.value:
             level = logging.WARNING
-        elif self.query_one("#chk_error", Checkbox).value:
+        elif error_cb.value:
             level = logging.ERROR
 
         self.handler.setLevel(level)
         # self.log_widget.write(f"[dim]Log level set to {logging.getLevelName(level)}[/dim]")
+
+    def _update_paths(self) -> None:
+        py_dir = log.get_log_dir()
+        if not py_dir:
+            py_dir = Path.home() / ".drlms" / "logs"
+        c_dir = os.environ.get("DRLMS_C_LOG_DIR")
+        if not c_dir:
+            c_dir = os.environ.get("DRLMS_LOG_DIR")
+        if not c_dir:
+            data_dir = os.environ.get("DRLMS_DATA_DIR") or "."
+            c_dir = str(Path(data_dir) / "logs")
+        self.path_label.update(f"Python: {py_dir}    C: {c_dir}")
 
     def action_clear_log(self) -> None:
         self.log_widget.clear()

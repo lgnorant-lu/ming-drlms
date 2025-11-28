@@ -6,13 +6,16 @@ A functional chat client integrating with DRLMS RoomService and ThreadedRoomClie
 from textual.app import App
 from textual import on
 import os
+import platform
 
-from .screens import LoginScreen, ChatScreen
+from .login_screen import LoginScreen
+from .chat_screen import ChatScreen
 from .theme import ThemeManager
 from .config import ConfigManager
 from .logging_handler import TextualLogHandler
 from .log_screen import LogScreen
 from .settings_screen import SettingsScreen
+from .profiles_screen import ServerProfilesScreen
 import logging
 
 
@@ -31,7 +34,10 @@ class DRLMSApp(App):
         ("ctrl+c", "quit", "Quit"),
         ("ctrl+q", "quit", "Quit"),
         ("ctrl+l", "open_log", "Logs"),
+        ("f1", "open_log", "Logs"),
         ("ctrl+comma", "open_settings", "Settings"),
+        ("f2", "open_settings", "Settings"),
+        ("f3", "open_profiles", "Profiles"),
     ]
 
     def __init__(self, **kwargs):
@@ -64,6 +70,7 @@ class DRLMSApp(App):
     def on_mount(self) -> None:
         """Show login screen on startup."""
         self.push_screen(LoginScreen())
+        self._utf8_guard()
 
     def action_open_log(self) -> None:
         try:
@@ -74,6 +81,12 @@ class DRLMSApp(App):
     def action_open_settings(self) -> None:
         try:
             self.push_screen(SettingsScreen())
+        except Exception:
+            pass
+
+    def action_open_profiles(self) -> None:
+        try:
+            self.push_screen(ServerProfilesScreen())
         except Exception:
             pass
 
@@ -160,6 +173,23 @@ class DRLMSApp(App):
         """Show error on login screen."""
         if isinstance(self.screen, LoginScreen):
             self.screen.show_error(f"Login failed: {message}")
+
+    def _utf8_guard(self) -> None:
+        try:
+            if platform.system() == "Linux":
+                env = (
+                    os.environ.get("LC_ALL")
+                    or os.environ.get("LC_CTYPE")
+                    or os.environ.get("LANG")
+                    or ""
+                )
+                if ("UTF-8" not in env) and ("utf8" not in env):
+                    self.notify(
+                        "Linux 未使用 UTF-8，本应用可能出现输入/显示问题。请设置 LANG/LC_ALL 为 UTF-8。",
+                        severity="warning",
+                    )
+        except Exception:
+            pass
 
     @on(LoginScreen.LoginAttempt)
     def on_login_attempt(self, message: LoginScreen.LoginAttempt) -> None:

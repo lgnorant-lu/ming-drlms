@@ -593,4 +593,51 @@ class RobustThreadedRoomClient:
                         pass
 
 
-__all__ = ["RobustThreadedRoomClient", "ConnectionState"]
+class ThreadedRoomClient(RobustThreadedRoomClient):
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        username: str,
+        room: str,
+        *,
+        since_id: int = 0,
+        timeout: Optional[float] = None,
+        token_store_path: Optional[Path | str] = None,
+    ) -> None:
+        super().__init__(
+            host=host,
+            port=port,
+            username=username,
+            room=room,
+            since_id=since_id,
+            timeout=timeout,
+            token_store_path=token_store_path,
+            e2ee_store_path=None,
+            enable_heartbeat=False,
+            enable_auto_reconnect=False,
+        )
+        self._thread: Optional[threading.Thread] = None
+
+    def start(
+        self,
+        on_event: Callable[[RoomEvent], None],
+        on_error: Optional[Callable[[Exception], None]] = None,
+    ) -> None:
+        if self._subscribe_thread is not None and self._subscribe_thread.is_alive():
+            raise RuntimeError("ThreadedRoomClient is already running")
+        super().start(
+            on_event=on_event,
+            on_error=on_error,
+            on_connection_state=None,
+        )
+        self._thread = self._subscribe_thread
+        if self._thread is not None:
+            self._thread.name = f"ThreadedRoomClient-{self.room}"
+
+    def stop(self, timeout: float = 5.0) -> None:
+        super().stop(timeout=timeout)
+        self._thread = self._subscribe_thread
+
+
+__all__ = ["RobustThreadedRoomClient", "ConnectionState", "ThreadedRoomClient"]

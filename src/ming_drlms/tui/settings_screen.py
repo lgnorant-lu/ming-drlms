@@ -19,6 +19,14 @@ class SettingsScreen(Screen):
 
     def __init__(self) -> None:
         super().__init__()
+        # Theme controls
+        self.theme_select = Select(
+            options=[
+                ("forest", "forest"),
+                ("cyberpunk", "cyberpunk"),
+            ],
+            id="theme",
+        )
         self.level = Select(
             options=[
                 ("DEBUG", "DEBUG"),
@@ -39,6 +47,10 @@ class SettingsScreen(Screen):
     def compose(self) -> ComposeResult:
         yield Header()
         with Vertical():
+            yield Label("Theme Settings")
+            with Horizontal():
+                yield Label("Theme", id="lab_theme")
+                yield self.theme_select
             yield Label("Logging Settings")
             with Horizontal():
                 yield Label("Level", id="lab_level")
@@ -78,6 +90,11 @@ class SettingsScreen(Screen):
             if hasattr(cfg.config, "general")
             else {}
         )
+        # theme
+        try:
+            self.theme_select.value = cfg.config.tui.theme or "forest"
+        except Exception:
+            self.theme_select.value = "forest"
         level = str(g.get("level", "INFO")).upper()
         if level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
             level = "INFO"
@@ -92,6 +109,14 @@ class SettingsScreen(Screen):
     @on(Button.Pressed, "#btn_apply")
     def _apply_now(self) -> None:
         try:
+            # Apply theme immediately (runtime switch)
+            try:
+                theme_name = self.theme_select.value or "forest"
+                self.app.theme_manager.set_theme(theme_name)
+                # Trigger a redraw so CSS variables take effect
+                self.app.refresh()
+            except Exception:
+                pass
             log.set_level(self.level.value or "INFO")
             log.enable_console(self.console.value)
             self.app.notify("Applied", severity="information")
@@ -105,6 +130,11 @@ class SettingsScreen(Screen):
             cfg.load()
             if not hasattr(cfg.config, "general"):
                 cfg.config.general = {}
+            # persist theme
+            try:
+                cfg.config.tui.theme = self.theme_select.value or "forest"
+            except Exception:
+                pass
             g: dict[str, Any] = dict(cfg.config.general.get("logging", {}))
             g["level"] = self.level.value or "INFO"
             g["console_enabled"] = bool(self.console.value)

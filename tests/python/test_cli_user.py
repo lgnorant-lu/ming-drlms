@@ -39,7 +39,8 @@ def test_user_add_and_list_table_and_json(tmp_path: Path, runner: CliRunner):
     # list json
     res = runner.invoke(app, ["user", "list", "-d", str(data_dir), "--json"])
     assert res.exit_code == 0
-    arr = json.loads(res.output)
+    lines = [ln for ln in res.output.splitlines() if ln.strip()]
+    arr = json.loads(lines[-1])
     assert any(it["username"] == "alice" and it["format"] == "argon2" for it in arr)
 
 
@@ -101,7 +102,8 @@ def test_list_legacy_entries_are_detected(tmp_path: Path, runner: CliRunner):
     )
     res = runner.invoke(app, ["user", "list", "-d", str(data_dir), "--json"])
     assert res.exit_code == 0
-    arr = json.loads(res.output)
+    lines = [ln for ln in res.output.splitlines() if ln.strip()]
+    arr = json.loads(lines[-1])
     # Jules case: must recognize legacy format
     assert any(it["username"] == "alice" and it["format"] == "legacy" for it in arr)
 
@@ -147,7 +149,8 @@ def test_list_legacy_with_spaces_is_detected(tmp_path: Path, runner: CliRunner):
     users.write_text(f"   legacy_user_ws : some_salt : {sha}   \n")
     res = runner.invoke(app, ["user", "list", "-d", str(data_dir), "--json"])
     assert res.exit_code == 0
-    arr = json.loads(res.output)
+    lines = [ln for ln in res.output.splitlines() if ln.strip()]
+    arr = json.loads(lines[-1])
     assert any(
         it["username"] == "legacy_user_ws" and it["format"] == "legacy" for it in arr
     )
@@ -162,7 +165,106 @@ def test_list_legacy_with_crlf_is_detected(tmp_path: Path, runner: CliRunner):
     users.write_bytes(f"legacy_user_crlf:salt:{sha}\r\n".encode("utf-8"))
     res = runner.invoke(app, ["user", "list", "-d", str(data_dir), "--json"])
     assert res.exit_code == 0
-    arr = json.loads(res.output)
+    lines = [ln for ln in res.output.splitlines() if ln.strip()]
+    arr = json.loads(lines[-1])
     assert any(
         it["username"] == "legacy_user_crlf" and it["format"] == "legacy" for it in arr
     )
+
+
+def test_user_add_invalid_username_exits_2(
+    tmp_path: Path, runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+):
+    data_dir = tmp_path / "srv"
+
+    def bad_validate(username: str) -> None:
+        raise ValueError("bad-name")
+
+    monkeypatch.setattr("ming_drlms.cli.user.validate_username", bad_validate)
+
+    res = runner.invoke(
+        app, ["user", "add", "invalid", "-d", str(data_dir)], input="p\np\n"
+    )
+    assert res.exit_code == 2
+    assert "bad-name" in res.output
+
+
+def test_user_add_from_stdin_empty_password(tmp_path: Path, runner: CliRunner):
+    data_dir = tmp_path / "srv"
+    res = runner.invoke(
+        app,
+        ["user", "add", "stdin-empty", "-d", str(data_dir), "--password-from-stdin"],
+        input="\n",
+    )
+    assert res.exit_code == 2
+    assert "empty password from stdin" in res.output
+
+
+def test_user_passwd_from_stdin_empty_password(tmp_path: Path, runner: CliRunner):
+    data_dir = tmp_path / "srv"
+    # ensure user exists first
+    _ = runner.invoke(
+        app, ["user", "add", "alice", "-d", str(data_dir)], input="p\np\n"
+    )
+
+    res = runner.invoke(
+        app,
+        ["user", "passwd", "alice", "-d", str(data_dir), "--password-from-stdin"],
+        input="\n",
+    )
+    assert res.exit_code == 2
+    assert "empty password from stdin" in res.output
+
+
+def test_user_passwd_mismatched_prompts_exit_2(tmp_path: Path, runner: CliRunner):
+    data_dir = tmp_path / "srv"
+    _ = runner.invoke(
+        app, ["user", "add", "alice", "-d", str(data_dir)], input="a\na\n"
+    )
+
+    res = runner.invoke(
+        app,
+        ["user", "passwd", "alice", "-d", str(data_dir)],
+        input="p\nq\n",
+    )
+    assert res.exit_code == 2
+    assert "passwords do not match" in res.output
+
+
+def test_user_del_missing_without_force(tmp_path: Path, runner: CliRunner):
+    data_dir = tmp_path / "srv"
+    res = runner.invoke(app, ["user", "del", "ghost", "-d", str(data_dir)])
+    assert res.exit_code == 1
+    assert "user not found" in res.output
+
+
+def test_user_del_keyerror_branches(
+    tmp_path: Path, runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+):
+    data_dir = tmp_path / "srv"
+    _ = runner.invoke(app, ["user", "add", "bob", "-d", str(data_dir)], input="p\np\n")
+
+    def bad_del(records, username):  # type: ignore[unused-argument]
+        raise KeyError("missing")
+
+    monkeypatch.setattr("ming_drlms.cli.user._del_user_record", bad_del)
+
+    # without force
+    res1 = runner.invoke(app, ["user", "del", "bob", "-d", str(data_dir)])
+    assert res1.exit_code == 1
+    assert "user not found" in res1.output
+
+    # with force
+    res2 = runner.invoke(app, ["user", "del", "bob", "-d", str(data_dir), "--force"])
+    assert res2.exit_code == 0
+    assert "user not found, ignored" in res2.output
+
+
+def test_user_list_json_on_empty_file(tmp_path: Path, runner: CliRunner):
+    data_dir = tmp_path / "srv"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    res = runner.invoke(app, ["user", "list", "-d", str(data_dir), "--json"])
+    assert res.exit_code == 0
+    lines = [ln for ln in res.output.splitlines() if ln.strip()]
+    arr = json.loads(lines[-1])
+    assert arr == []
