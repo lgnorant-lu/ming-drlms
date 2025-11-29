@@ -91,7 +91,7 @@ class MessageList(ScrollableContainer):
     def add_message(self, text: str | Text, message_type: str = "normal") -> None:
         """Add a message to the display."""
         if message_type == "system":
-            msg_widget = Static(f"~ {text} ~", classes="message-system")
+            msg_widget = Static(Text(f"~ {text} ~"), classes="message-system")
         else:
             msg_widget = Static(text, classes="message-line")
 

@@ -40,10 +40,13 @@ class ChatController:
         if self.client:
             self.client.stop()
 
-        token_path = Path.home() / ".drlms" / "tokens.json"
+        config_dir = Path(
+            os.environ.get("MING_DRLMS_CONFIG_DIR") or (Path.home() / ".drlms")
+        )
+        token_path = config_dir / "tokens.json"
 
         # Load last seen event ID
-        state_path = Path.home() / ".drlms" / "tui_state.json"
+        state_path = config_dir / "tui_state.json"
         since_id = 0
         try:
             if state_path.exists():
@@ -109,6 +112,15 @@ class ChatController:
     def send_message(self, message: str, ephemeral: Optional[bool] = None) -> None:
         if self.client:
             use_ephemeral = self._ephemeral if ephemeral is None else bool(ephemeral)
+            try:
+                logger.info(
+                    "send_message: user=%s size=%d ephemeral=%s",
+                    self.username,
+                    len(message.encode("utf-8")),
+                    use_ephemeral,
+                )
+            except Exception:
+                pass
             self.client.publish(message.encode("utf-8"), ephemeral=use_ephemeral)
 
     def set_ephemeral_mode(self, enabled: bool) -> None:
@@ -118,9 +130,23 @@ class ChatController:
         self, room: str, filepath: Path, *, ephemeral: Optional[bool] = None
     ) -> None:
         """Upload a file (blocking, run in worker)."""
-        token_path = Path.home() / ".drlms" / "tokens.json"
+        config_dir = Path(
+            os.environ.get("MING_DRLMS_CONFIG_DIR") or (Path.home() / ".drlms")
+        )
+        token_path = config_dir / "tokens.json"
+        eph_flag = bool(ephemeral) if ephemeral is not None else False
         if self._progress_cb is None:
             service = RoomService()
+            try:
+                logger.info(
+                    "upload_file: room=%s file=%s ephemeral=%s path=%s",
+                    room,
+                    filepath.name,
+                    eph_flag,
+                    str(filepath),
+                )
+            except Exception:
+                pass
             service.publish_file(
                 host=self.host,
                 port=self.port,
@@ -128,7 +154,7 @@ class ChatController:
                 room=room,
                 file_path=filepath,
                 token_store=token_path,
-                ephemeral=bool(ephemeral) if ephemeral is not None else False,
+                ephemeral=eph_flag,
             )
             return
 
@@ -219,7 +245,10 @@ class ChatController:
         total_bytes: Optional[int] = None,
     ) -> None:
         """Download a file (blocking, run in worker)."""
-        token_path = Path.home() / ".drlms" / "tokens.json"
+        config_dir = Path(
+            os.environ.get("MING_DRLMS_CONFIG_DIR") or (Path.home() / ".drlms")
+        )
+        token_path = config_dir / "tokens.json"
         if self._progress_cb is None:
             service = RoomService()
             service.download_file(
@@ -281,7 +310,10 @@ class ChatController:
     def fetch_rooms(self) -> list:
         """Fetch list of rooms (blocking, run in worker)."""
         service = RoomService()
-        token_path = Path.home() / ".drlms" / "tokens.json"
+        config_dir = Path(
+            os.environ.get("MING_DRLMS_CONFIG_DIR") or (Path.home() / ".drlms")
+        )
+        token_path = config_dir / "tokens.json"
         rooms, _, _ = service.list_rooms(
             host=self.host,
             port=self.port,
@@ -293,7 +325,10 @@ class ChatController:
     def fetch_members(self, room_name: str) -> list:
         """Fetch list of members for a room."""
         service = RoomService()
-        token_path = Path.home() / ".drlms" / "tokens.json"
+        config_dir = Path(
+            os.environ.get("MING_DRLMS_CONFIG_DIR") or (Path.home() / ".drlms")
+        )
+        token_path = config_dir / "tokens.json"
         return service.get_room_members_mp2(
             host=self.host,
             port=self.port,
@@ -305,7 +340,10 @@ class ChatController:
     def save_last_seen(self, room_name: str, event_id: int) -> None:
         """Save last seen event ID."""
         try:
-            state_path = Path.home() / ".drlms" / "tui_state.json"
+            config_dir = Path(
+                os.environ.get("MING_DRLMS_CONFIG_DIR") or (Path.home() / ".drlms")
+            )
+            state_path = config_dir / "tui_state.json"
             state_path.parent.mkdir(parents=True, exist_ok=True)
 
             state = {}

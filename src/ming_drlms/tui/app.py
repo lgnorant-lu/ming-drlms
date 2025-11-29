@@ -113,7 +113,10 @@ class DRLMSApp(App):
 
         try:
             # Use default token store location (creation is enough here)
-            token_store_path = Path.home() / ".drlms" / "tokens.json"
+            config_dir = Path(
+                os.environ.get("MING_DRLMS_CONFIG_DIR") or (Path.home() / ".drlms")
+            )
+            token_store_path = config_dir / "tokens.json"
             token_store_path.parent.mkdir(parents=True, exist_ok=True)
 
             # Note: the synchronous login logic is implemented in _login_worker.
@@ -129,7 +132,10 @@ class DRLMSApp(App):
         from pathlib import Path
 
         try:
-            token_store_path = Path.home() / ".drlms" / "tokens.json"
+            config_dir = Path(
+                os.environ.get("MING_DRLMS_CONFIG_DIR") or (Path.home() / ".drlms")
+            )
+            token_store_path = config_dir / "tokens.json"
             token_store_path.parent.mkdir(parents=True, exist_ok=True)
             token_store = TokenStore(token_store_path)
 
