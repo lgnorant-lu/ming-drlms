@@ -96,6 +96,46 @@ def test_upload_with_directory_shows_not_a_file(tmp_path: Path):
     assert controller.upload_file_calls == []
 
 
+def test_upload_with_valid_file_but_controller_raises_reports_failure(
+    tmp_path: Path,
+) -> None:
+    controller, screen, handler = _make_handler()
+
+    file_path = tmp_path / "hello.txt"
+    file_path.write_text("hello", encoding="utf-8")
+
+    def bad_upload(room: str, filepath: Path) -> None:  # type: ignore[no-redef]
+        raise RuntimeError("boom-upload")
+
+    handler.controller.upload_file = bad_upload  # type: ignore[assignment]
+
+    handled = handler.handle(f"/upload {file_path}")
+
+    assert handled is True
+    text = "\n".join(screen.messages)
+    assert "Upload failed" in text
+
+
+def test_upload_ephemeral_with_valid_file_but_controller_raises_reports_failure(
+    tmp_path: Path,
+) -> None:
+    controller, screen, handler = _make_handler()
+
+    file_path = tmp_path / "hello.txt"
+    file_path.write_text("hello", encoding="utf-8")
+
+    def bad_upload(room: str, filepath: Path, ephemeral: bool = False) -> None:  # type: ignore[no-redef]
+        raise RuntimeError("boom-upload-ephemeral")
+
+    handler.controller.upload_file = bad_upload  # type: ignore[assignment]
+
+    handled = handler.handle(f"/upload-ephemeral {file_path}")
+
+    assert handled is True
+    text = "\n".join(screen.messages)
+    assert "Upload failed" in text
+
+
 def test_upload_with_valid_file_calls_upload_and_reports_success(tmp_path: Path):
     controller, screen, handler = _make_handler()
 
@@ -217,3 +257,39 @@ def test_download_with_output_file_uses_exact_path(tmp_path: Path) -> None:
     assert event_id == 7
     assert out_path == out_file
     assert total is None
+
+
+def test_upload_ephemeral_without_path_triggers_visual_selector() -> None:
+    controller, screen, handler = _make_handler()
+
+    handled = handler.handle("/upload-ephemeral")
+
+    assert handled is True
+    assert screen.action_show_upload_help_called is True
+    assert controller.upload_file_calls == []
+
+
+def test_upload_ephemeral_with_nonexistent_file_shows_error(tmp_path: Path) -> None:
+    controller, screen, handler = _make_handler()
+
+    missing_path = tmp_path / "nope.txt"
+    handled = handler.handle(f"/upload-ephemeral {missing_path}")
+
+    assert handled is True
+    text = "\n".join(screen.messages)
+    assert "File not found" in text
+    assert controller.upload_file_calls == []
+
+
+def test_upload_ephemeral_with_directory_shows_not_a_file(tmp_path: Path) -> None:
+    controller, screen, handler = _make_handler()
+
+    dir_path = tmp_path / "subdir"
+    dir_path.mkdir()
+
+    handled = handler.handle(f"/upload-ephemeral {dir_path}")
+
+    assert handled is True
+    text = "\n".join(screen.messages)
+    assert "Not a file" in text
+    assert controller.upload_file_calls == []

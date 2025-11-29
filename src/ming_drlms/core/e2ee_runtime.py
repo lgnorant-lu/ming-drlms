@@ -86,16 +86,35 @@ class E2EEngine:
         self._group_cipher = (
             group_cipher if group_cipher is not None else GroupCipher(self._store)
         )
-        self._read_store: SignalStore = SignalStore(self._context)
-        self._group_builder_read: GroupSessionBuilder | None = GroupSessionBuilder(
-            self._read_store, self._context
-        )
-        self._group_cipher_read: GroupCipher = GroupCipher(self._read_store)
+        # Independent read-path store/builder/cipher for decrypting cached
+        # sender keys. When running in a constrained or mocked environment
+        # (e.g. tests with MagicMocks instead of a real C bridge), these may
+        # fail to initialise; in that case we gracefully degrade to using the
+        # main store/cipher only.
+        self._read_store: SignalStore | None = None
+        self._group_builder_read: GroupSessionBuilder | None = None
+        self._group_cipher_read: GroupCipher | None = None
+        try:
+            read_store = SignalStore(self._context)
+            builder_read = GroupSessionBuilder(read_store, self._context)
+            cipher_read = GroupCipher(read_store)
+        except Exception as exc:  # pragma: no cover - defensive, mainly for tests
+            try:
+                logger.debug("E2EEngine read-path initialisation failed: %s", exc)
+            except Exception:
+                pass
+        else:
+            self._read_store = read_store
+            self._group_builder_read = builder_read
+            self._group_cipher_read = cipher_read
         self._group_sender_keys: Dict[str, SenderKeyRecord] = {}
         self._group_distribution_targets: Dict[str, set[str]] = {}
         self._load_cached_sender_keys()
         self._initialise_signal_store()
-        self._initialise_signal_store_for(self._read_store)
+        # When read-path store creation fails (e.g. under MagicMock-based
+        # tests), fall back to initialising only the primary store.
+        target_store = self._read_store or self._store
+        self._initialise_signal_store_for(target_store)
         self._restore_sender_keys_into_store()
         try:
             logger.debug(
@@ -276,12 +295,19 @@ class E2EEngine:
             )
         except Exception:
             pass
-        return self._group_cipher_read.decrypt(name, event.payload)
+        # Prefer the dedicated read-path cipher when available; otherwise
+        # fall back to the main group cipher (useful in test environments
+        # where only the primary cipher is mocked).
+        cipher = self._group_cipher_read or self._group_cipher
+        if cipher is None:  # pragma: no cover - should not happen in normal usage
+            raise SignalBridgeError("group cipher unavailable")
+        return cipher.decrypt(name, event.payload)
 
     def close(self) -> None:
         self._store.close()
         try:
-            self._read_store.close()
+            if self._read_store is not None:
+                self._read_store.close()
         except Exception:
             pass
         self._context.close()

@@ -145,12 +145,13 @@ class GroupSessionBuilder:
     def __init__(self, store: SignalStore, context: SignalContext) -> None:
         self._ffi = store._ffi
         self._lib = store._lib
+        self._builder = self._ffi.NULL
+        self._context = context
+        self._closed = False
         builder_ptr = self._ffi.new("group_session_builder **")
         rc = self._lib.drlms_group_session_builder_create(builder_ptr, store.handle)
         check_rc(rc, "drlms_group_session_builder_create")
         self._builder = builder_ptr[0]
-        self._context = context
-        self._closed = False
 
     def close(self) -> None:
         if not self._closed and self._builder not in (None, self._ffi.NULL):

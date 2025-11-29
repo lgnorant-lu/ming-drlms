@@ -251,6 +251,27 @@ def test_e2ee_prekey_nonzero_code_shows_warning(MockClient) -> None:
 
 
 @patch("ming_drlms.tui.command_modules.e2ee.create_mp2_client")
+def test_e2ee_prekey_404_shows_hint(MockClient) -> None:
+    controller, screen, handler = _make_handler()
+
+    client_ctx = MockClient.return_value
+    client_ctx.__enter__.return_value = SimpleNamespace(
+        e2ee_fetch_prekey_bundle=lambda *a, **k: SimpleNamespace(
+            code=404, message="not found"
+        )
+    )
+
+    handled = handler.handle("/e2ee-prekey")
+
+    assert handled is True
+    text = "\n".join(screen.messages)
+    assert "PreKey fetch nonzero code=404" in text
+    assert "not found" in text
+    # New hint should suggest running /e2ee-init on the target user
+    assert "/e2ee-init" in text or "published E2EE keys" in text
+
+
+@patch("ming_drlms.tui.command_modules.e2ee.create_mp2_client")
 def test_e2ee_prekey_error_is_reported(MockClient) -> None:
     controller, screen, handler = _make_handler()
 

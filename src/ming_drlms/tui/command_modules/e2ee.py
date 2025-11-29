@@ -136,10 +136,17 @@ def register_e2ee_commands(handler: Any) -> None:
                 bundle = client.e2ee_fetch_prekey_bundle(
                     handler.controller.username, target
                 )
-            if getattr(bundle, "code", 0) != 0:
-                handler.screen.show_system_message(
-                    f"⚠ PreKey fetch nonzero code={bundle.code}: {bundle.message}"
-                )
+            code = getattr(bundle, "code", 0)
+            message = getattr(bundle, "message", "")
+            if code != 0:
+                base = f"⚠ PreKey fetch nonzero code={code}: {message}"
+                low = str(message).lower()
+                if code == 404 or "404" in low or "not found" in low:
+                    base += (
+                        "\nHint: target user may not have published E2EE keys yet. "
+                        "Ensure they have run '/e2ee-init' and that the server has stored their prekeys."
+                    )
+                handler.screen.show_system_message(base)
                 return
             did = getattr(bundle, "device_id", None)
             rid = getattr(bundle, "registration_id", None)

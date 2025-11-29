@@ -92,6 +92,7 @@ def _from_env(cfg: CLIConfig) -> CLIConfig:
             "DRLMS_EPHEMERAL_HISTORY_LIMIT",
             cfg.rooms_ephemeral_history_limit,
         ),
+        federation=cfg.federation,
     )
 
 

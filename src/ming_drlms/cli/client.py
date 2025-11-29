@@ -127,6 +127,13 @@ def client_log(
         print(resp)
         s.close()
         raise typer.Exit(code=1)
+    # Be defensive in case text is not a plain str (e.g. tests may pass
+    # a bytes-like object); normalise to a UTF-8 string first.
+    if not isinstance(text, str):  # pragma: no cover - safety for odd callers
+        try:
+            text = str(text, "utf-8", "ignore")  # type: ignore[arg-type]
+        except Exception:
+            text = str(text)
     s.sendall(f"LOG|{text}\n".encode())
     ack = recv_line(s)
     print(ack)

@@ -198,3 +198,51 @@ def test_action_save_log_success(tmp_path: _P, monkeypatch: pytest.MonkeyPatch) 
 
     assert any("Saved to" in msg for msg, sev in dummy_app.messages)
     assert any(sev == "information" for msg, sev in dummy_app.messages)
+
+
+def test_action_save_log_handles_invalid_utf8(
+    tmp_path: _P, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(ls.log, "get_log_dir", lambda: tmp_path)
+
+    src = tmp_path / "drlms.log"
+    src.write_bytes(b"hello\xffworld")
+
+    handler = TextualLogHandler()
+    dummy_app = DummyApp()
+    monkeypatch.setattr(LogScreen, "app", dummy_app, raising=False)
+    screen = LogScreen(handler)
+
+    screen.action_save_log()
+
+    saved_logs = [p for p in tmp_path.iterdir() if p.name.startswith("tui_log_")]
+    assert saved_logs
+    text = saved_logs[0].read_text(encoding="utf-8")
+    assert text == "helloworld"
+    assert any("Saved to" in msg for msg, sev in dummy_app.messages)
+    assert any(sev == "information" for msg, sev in dummy_app.messages)
+
+
+def test_action_save_log_write_failure_notifies_error(
+    tmp_path: _P, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(ls.log, "get_log_dir", lambda: tmp_path)
+
+    src = tmp_path / "drlms.log"
+    src.write_text("data", encoding="utf-8")
+
+    handler = TextualLogHandler()
+    dummy_app = DummyApp()
+    monkeypatch.setattr(LogScreen, "app", dummy_app, raising=False)
+    screen = LogScreen(handler)
+
+    def fake_write_text(self, *args, **kwargs):  # type: ignore[override]
+        raise OSError("disk-full")
+
+    monkeypatch.setattr(_P, "write_text", fake_write_text)
+
+    screen.action_save_log()
+
+    assert any("Save failed" in msg for msg, sev in dummy_app.messages)
+    assert any("disk-full" in msg for msg, sev in dummy_app.messages)
+    assert any(sev == "error" for msg, sev in dummy_app.messages)

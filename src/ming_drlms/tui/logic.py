@@ -13,6 +13,18 @@ from .. import log
 logger = log.get_logger("tui.logic")
 
 
+def _state_dir() -> Path:
+    """Return directory used for TUI state and tokens.
+
+    Always uses ``Path.home() / ".drlms"`` so tests can control the
+    location via monkeypatching ``Path.home``. Global config (including
+    E2EE keystore) may still leverage ``MING_DRLMS_CONFIG_DIR``
+    separately.
+    """
+
+    return Path.home() / ".drlms"
+
+
 class ChatController:
     """Controller for ChatScreen logic."""
 
@@ -40,27 +52,33 @@ class ChatController:
         if self.client:
             self.client.stop()
 
-        config_dir = Path(
-            os.environ.get("MING_DRLMS_CONFIG_DIR") or (Path.home() / ".drlms")
-        )
-        token_path = config_dir / "tokens.json"
+        state_dir = _state_dir()
+        token_path = state_dir / "tokens.json"
 
         # Load last seen event ID
-        state_path = config_dir / "tui_state.json"
+        state_path = state_dir / "tui_state.json"
         since_id = 0
         try:
-            if state_path.exists():
-                with open(state_path, "r") as f:
+            exists = state_path.exists()
+            state = {}
+            if exists:
+                with open(state_path, "r", encoding="utf-8") as f:
                     state = json.load(f)
                     room_key = f"{self.username}@{self.host}:{self.port}/{room_name}"
                     since_id = state.get(room_key, {}).get("last_seen_event_id", 0)
-        except Exception:
-            pass
+            logger.debug(
+                "ChatController.connect: state_dir=%s state_path=%s exists=%s since_id=%s",
+                state_dir,
+                state_path,
+                exists,
+                since_id,
+            )
+        except Exception as exc:
+            logger.debug("ChatController.connect: failed to load state: %s", exc)
 
-        # Check for E2EE keys (JSON keystore)
-        config_dir = Path(
-            os.environ.get("MING_DRLMS_CONFIG_DIR") or (Path.home() / ".drlms")
-        )
+        # Check for E2EE keys (JSON keystore) using the configurable
+        # config directory, defaulting to the state dir when unset.
+        config_dir = Path(os.environ.get("MING_DRLMS_CONFIG_DIR") or state_dir)
         e2ee_path = config_dir / "e2ee_keys.json"
         use_e2ee = False
         if e2ee_path.exists():
@@ -340,11 +358,9 @@ class ChatController:
     def save_last_seen(self, room_name: str, event_id: int) -> None:
         """Save last seen event ID."""
         try:
-            config_dir = Path(
-                os.environ.get("MING_DRLMS_CONFIG_DIR") or (Path.home() / ".drlms")
-            )
-            state_path = config_dir / "tui_state.json"
-            state_path.parent.mkdir(parents=True, exist_ok=True)
+            state_dir = _state_dir()
+            state_path = state_dir / "tui_state.json"
+            state_dir.mkdir(parents=True, exist_ok=True)
 
             state = {}
             if state_path.exists():

@@ -722,3 +722,175 @@ def test_help_includes_room_management_commands():
     assert "/transfer-owner" in text
     assert "/clear-owner" in text
     assert "/destroy-room" in text
+
+
+@patch("ming_drlms.tui.commands.RoomService", new=FakeRoomService)
+def test_join_without_name_shows_usage() -> None:
+    controller = FakeController()
+    screen = FakeScreen()
+    handler = CommandHandler(controller, screen)
+
+    handled = handler.handle("/join   ")
+
+    assert handled is True
+    text = "\n".join(screen.messages)
+    assert "Usage: /join <room_name>" in text
+
+
+@patch("ming_drlms.tui.commands.RoomService")
+def test_join_nonexistent_room_shows_use_create_and_does_not_connect(
+    MockService,
+) -> None:
+    class NotFoundService(FakeRoomService):
+        def fetch_info(self, **kwargs):  # type: ignore[override]
+            raise RuntimeError("404 not found")
+
+    MockService.side_effect = NotFoundService  # type: ignore[assignment]
+
+    controller = FakeController()
+    screen = FakeScreen()
+    handler = CommandHandler(controller, screen)
+
+    handled = handler.handle("/join ghost-room")
+
+    assert handled is True
+    # current_room should remain unchanged
+    assert screen.current_room == "Town Square"
+    # no connection attempt
+    assert screen.connected_rooms == []
+    text = "\n".join(screen.messages)
+    assert "does not exist" in text and "create-room ghost-room" in text
+
+
+@patch("ming_drlms.tui.commands.RoomService")
+def test_join_fetch_info_error_reports_failure(MockService) -> None:
+    class ErrService(FakeRoomService):
+        def fetch_info(self, **kwargs):  # type: ignore[override]
+            raise RuntimeError("network error")
+
+    MockService.side_effect = ErrService  # type: ignore[assignment]
+
+    controller = FakeController()
+    screen = FakeScreen()
+    handler = CommandHandler(controller, screen)
+
+    handled = handler.handle("/join demo-room")
+
+    assert handled is True
+    # no connection attempt
+    assert screen.connected_rooms == []
+    # room not switched
+    assert screen.current_room == "Town Square"
+    text = "\n".join(screen.messages)
+    assert "Failed to join room demo-room" in text
+
+
+@patch("ming_drlms.tui.commands.RoomService")
+def test_room_info_service_error_is_reported(MockService) -> None:
+    class ErrorInfoService(FakeRoomService):
+        def fetch_info(self, **kwargs):  # type: ignore[override]
+            raise RuntimeError("boom-info")
+
+    MockService.side_effect = ErrorInfoService  # type: ignore[assignment]
+
+    controller = FakeController()
+    screen = FakeScreen()
+    handler = CommandHandler(controller, screen)
+
+    handled = handler.handle("/room-info demo-room")
+    assert handled is True
+    text = "\n".join(screen.messages)
+    assert "/room-info failed:" in text
+    assert "boom-info" in text
+
+
+@patch("ming_drlms.tui.commands.RoomService", new=FakeRoomService)
+def test_leave_with_empty_current_room_shows_usage() -> None:
+    controller = FakeController()
+    screen = FakeScreen()
+    screen.current_room = ""
+    handler = CommandHandler(controller, screen)
+
+    handled = handler.handle("/leave")
+    assert handled is True
+    text = "\n".join(screen.messages)
+    assert "Usage: /leave [room_name]" in text
+
+
+@patch("ming_drlms.tui.commands.RoomService", new=FakeRoomService)
+def test_create_room_without_name_shows_usage() -> None:
+    controller = FakeController()
+    screen = FakeScreen()
+    handler = CommandHandler(controller, screen)
+
+    handled = handler.handle("/create-room")
+
+    assert handled is True
+    text = "\n".join(screen.messages)
+    assert "Usage: /create-room <name> [policy" in text
+
+
+@patch("ming_drlms.tui.commands.RoomService", new=FakeRoomService)
+def test_room_info_without_arg_defaults_to_current() -> None:
+    controller = FakeController()
+    screen = FakeScreen()
+    handler = CommandHandler(controller, screen)
+
+    handled = handler.handle("/room-info")
+
+    assert handled is True
+    text = "\n".join(screen.messages)
+    assert "Room info for 'Town Square'" in text
+
+
+@patch("ming_drlms.tui.commands.RoomService", new=FakeRoomService)
+def test_members_without_arg_defaults_to_current() -> None:
+    controller = FakeController()
+    screen = FakeScreen()
+    handler = CommandHandler(controller, screen)
+
+    handled = handler.handle("/members")
+
+    assert handled is True
+    text = "\n".join(screen.messages)
+    assert "Members in 'Town Square'" in text
+
+
+@patch("ming_drlms.tui.commands.RoomService")
+def test_set_policy_invalid_policy_is_reported(MockService) -> None:
+    class InvalidPolicyService(FakeRoomService):
+        def set_policy(self, **kwargs):  # type: ignore[override]
+            raise RuntimeError("Invalid policy: foo")
+
+    MockService.side_effect = InvalidPolicyService  # type: ignore[assignment]
+
+    controller = FakeController()
+    screen = FakeScreen()
+    handler = CommandHandler(controller, screen)
+
+    handled = handler.handle("/set-policy demo-room foo")
+
+    assert handled is True
+    text = "\n".join(screen.messages)
+    assert "/set-policy failed:" in text
+    assert "Invalid policy" in text
+
+
+@patch("ming_drlms.tui.commands.RoomService")
+def test_set_storage_invalid_policy_is_reported(MockService) -> None:
+    class InvalidStorageService(FakeRoomService):
+        def set_storage_policy(self, **kwargs):  # type: ignore[override]
+            raise RuntimeError("Invalid storage policy: foo")
+
+    MockService.side_effect = InvalidStorageService  # type: ignore[assignment]
+
+    controller = FakeController()
+    screen = FakeScreen()
+    handler = CommandHandler(controller, screen)
+
+    handled = handler.handle("/set-storage demo-room foo")
+
+    assert handled is True
+    text = "\n".join(screen.messages)
+    assert "/set-storage failed:" in text
+    assert "Invalid storage policy" in text

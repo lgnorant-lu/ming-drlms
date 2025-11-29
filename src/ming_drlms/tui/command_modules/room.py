@@ -39,6 +39,30 @@ def register_room_commands(handler: Any) -> None:
         if not room:
             handler.screen.show_system_message("Usage: /join <room_name>")
             return
+        # Scheme A: enforce atomicity — only join existing rooms.
+        # Pre-check existence via fetch_info; do not implicitly create by subscribe.
+        try:
+            service = handler._room_service()
+            token_path = handler._token_store_path()
+            # If fetch_info fails (e.g., 404), treat as non-existent and refuse join.
+            service.fetch_info(
+                host=handler.controller.host,
+                port=handler.controller.port,
+                user=handler.controller.username,
+                room=room,
+                token_store_path=token_path,
+            )
+        except Exception as e:
+            msg = str(e)
+            low = msg.lower()
+            if "404" in low or "not found" in low:
+                handler.screen.show_system_message(
+                    f" Room '{room}' does not exist. Use /create-room {room} first."
+                )
+            else:
+                handler.screen.show_system_message(f" Failed to join room {room}: {e}")
+            return
+
         handler.screen.current_room = room
         try:
             try:
