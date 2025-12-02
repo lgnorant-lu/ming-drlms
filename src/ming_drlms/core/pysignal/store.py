@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from .._pysignal_utils import c_bytes_copy, check_rc, consume_buffer
 from .._pysignal_errors import SignalBridgeError
 from .context import SignalContext
@@ -172,7 +173,12 @@ class SignalStore:
             data = c_bytes_copy(self._ffi, info.data, info.len)
         finally:
             if info.data not in (self._ffi.NULL, None):
-                self._lib.free(info.data)
+                # Avoid cross-CRT free on Windows which can cause heap corruption
+                try:
+                    if os.name != "nt":
+                        self._lib.free(info.data)
+                except Exception:
+                    pass
         pre_key_id = info.pre_key_id if info.has_pre_key_id else None
         signed_id = info.signed_pre_key_id if info.has_signed_pre_key_id else None
         return Ciphertext(

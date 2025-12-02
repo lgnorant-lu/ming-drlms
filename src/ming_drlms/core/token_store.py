@@ -40,6 +40,8 @@ class TokenRecord:
     access_token: str
     access_expires_at: float
     refresh_token: str
+    accepted_device_id: int | None = None
+    recorded_identity: bool | None = None
 
     def cache_key(self) -> str:
         return f"{self.username}@{self.host}:{self.port}"

@@ -20,7 +20,7 @@ _sym_db = _symbol_database.Default()
 
 
 DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(
-    b'\n\x14schema/v2/auth.proto\x12\x0cmingdrlms.v2"(\n\x14\x41uthChallengeRequest\x12\x10\n\x08username\x18\x01 \x01(\t"&\n\x15\x41uthChallengeResponse\x12\r\n\x05nonce\x18\x01 \x01(\t"1\n\x0b\x41uthRequest\x12\x10\n\x08username\x18\x01 \x01(\t\x12\x10\n\x08response\x18\x02 \x01(\t"\\\n\x0c\x41uthResponse\x12\x14\n\x0c\x61\x63\x63\x65ss_token\x18\x01 \x01(\t\x12\x15\n\rrefresh_token\x18\x02 \x01(\t\x12\x1f\n\x17\x61\x63\x63\x65ss_token_expires_in\x18\x03 \x01(\x03",\n\x13RefreshTokenRequest\x12\x15\n\rrefresh_token\x18\x01 \x01(\t"M\n\x14RefreshTokenResponse\x12\x14\n\x0c\x61\x63\x63\x65ss_token\x18\x01 \x01(\t\x12\x1f\n\x17\x61\x63\x63\x65ss_token_expires_in\x18\x02 \x01(\x03\x62\x06proto3'
+    b'\n\x14schema/v2/auth.proto\x12\x0cmingdrlms.v2"(\n\x14\x41uthChallengeRequest\x12\x10\n\x08username\x18\x01 \x01(\t";\n\x15\x41uthChallengeResponse\x12\r\n\x05nonce\x18\x01 \x01(\t\x12\x13\n\x0bserver_salt\x18\x02 \x01(\t"[\n\x0b\x41uthRequest\x12\x10\n\x08username\x18\x01 \x01(\t\x12\x10\n\x08response\x18\x02 \x01(\t\x12(\n\x06\x63lient\x18\x03 \x01(\x0b\x32\x18.mingdrlms.v2.ClientInfo"\x93\x01\n\x0c\x41uthResponse\x12\x14\n\x0c\x61\x63\x63\x65ss_token\x18\x01 \x01(\t\x12\x15\n\rrefresh_token\x18\x02 \x01(\t\x12\x1f\n\x17\x61\x63\x63\x65ss_token_expires_in\x18\x03 \x01(\x03\x12\x1a\n\x12\x61\x63\x63\x65pted_device_id\x18\x04 \x01(\x05\x12\x19\n\x11recorded_identity\x18\x05 \x01(\x08"\xff\x01\n\nClientInfo\x12\x11\n\tdevice_id\x18\x01 \x01(\x05\x12\x17\n\x0fregistration_id\x18\x02 \x01(\x05\x12\x17\n\x0fidentity_pubkey\x18\x03 \x01(\x0c\x12\x14\n\x0cidentity_sig\x18\x04 \x01(\x0c\x12\x0e\n\x06sig_ts\x18\x05 \x01(\x03\x12\x13\n\x0b\x64\x65vice_guid\x18\x06 \x01(\t\x12\x10\n\x08platform\x18\x07 \x01(\t\x12\x13\n\x0b\x61pp_version\x18\x08 \x01(\t\x12\x14\n\x0c\x63\x61pabilities\x18\t \x01(\x04\x12\x1c\n\x14prev_identity_pubkey\x18\n \x01(\x0c\x12\x16\n\x0erotation_proof\x18\x0b \x01(\x0c",\n\x13RefreshTokenRequest\x12\x15\n\rrefresh_token\x18\x01 \x01(\t"M\n\x14RefreshTokenResponse\x12\x14\n\x0c\x61\x63\x63\x65ss_token\x18\x01 \x01(\t\x12\x1f\n\x17\x61\x63\x63\x65ss_token_expires_in\x18\x02 \x01(\x03\x62\x06proto3'
 )
 
 _globals = globals()
@@ -31,13 +31,15 @@ if not _descriptor._USE_C_DESCRIPTORS:
     _globals["_AUTHCHALLENGEREQUEST"]._serialized_start = 38
     _globals["_AUTHCHALLENGEREQUEST"]._serialized_end = 78
     _globals["_AUTHCHALLENGERESPONSE"]._serialized_start = 80
-    _globals["_AUTHCHALLENGERESPONSE"]._serialized_end = 118
-    _globals["_AUTHREQUEST"]._serialized_start = 120
-    _globals["_AUTHREQUEST"]._serialized_end = 169
-    _globals["_AUTHRESPONSE"]._serialized_start = 171
-    _globals["_AUTHRESPONSE"]._serialized_end = 263
-    _globals["_REFRESHTOKENREQUEST"]._serialized_start = 265
-    _globals["_REFRESHTOKENREQUEST"]._serialized_end = 309
-    _globals["_REFRESHTOKENRESPONSE"]._serialized_start = 311
-    _globals["_REFRESHTOKENRESPONSE"]._serialized_end = 388
+    _globals["_AUTHCHALLENGERESPONSE"]._serialized_end = 139
+    _globals["_AUTHREQUEST"]._serialized_start = 141
+    _globals["_AUTHREQUEST"]._serialized_end = 232
+    _globals["_AUTHRESPONSE"]._serialized_start = 235
+    _globals["_AUTHRESPONSE"]._serialized_end = 382
+    _globals["_CLIENTINFO"]._serialized_start = 385
+    _globals["_CLIENTINFO"]._serialized_end = 640
+    _globals["_REFRESHTOKENREQUEST"]._serialized_start = 642
+    _globals["_REFRESHTOKENREQUEST"]._serialized_end = 686
+    _globals["_REFRESHTOKENRESPONSE"]._serialized_start = 688
+    _globals["_REFRESHTOKENRESPONSE"]._serialized_end = 765
 # @@protoc_insertion_point(module_scope)

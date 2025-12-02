@@ -3,12 +3,31 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import os
+import threading
+import time
+import base64
+import hashlib
 from typing import Optional, Callable
 
 from ..core.threaded_client import RobustThreadedRoomClient, ConnectionState
 from ..cli.services.room_service import RoomService
 from ..core.mproto_v2_client import RoomEvent, MP2Client
+from ..proto.schema.v2 import room_pb2
+from ..core.relay_client import RelayHTTPClient
+from ..core.relay_crypto import (
+    build_decrypt_and_verify,
+    ed25519_sign_py,
+)
+from ..core.clear_event import canonical_serialize, event_hash_hex
+from ..core.pysignal.context import create_signal_context
+from ..core.pysignal.store import SignalStore
+from ..core.pysignal.signature import sign_bytes_with_store, is_xeddsa_available
+from ..core._pysignal_errors import SignalBridgeError
+from ..core.e2ee_store import LocalKeyStore
+from .config import ConfigManager
 from .. import log
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
 logger = log.get_logger("tui.logic")
 
@@ -46,6 +65,14 @@ class ChatController:
         self._on_connection_state = on_connection_state
         self._progress_cb: Optional[Callable[[dict], None]] = None
         self._ephemeral: bool = False
+        # Backend selection: 'mp2' (default) or 'relay'
+        self._backend: str = self._load_backend()
+        # Relay runtime fields (only used when backend=relay)
+        self._relay_thread: Optional[threading.Thread] = None
+        self._relay_stop: threading.Event = threading.Event()
+        self._relay_base_url: str = self._resolve_relay_base_url()
+        self._relay_room: Optional[str] = None
+        self._relay_since_seq: int = 0
 
     def connect(self, room_name: str) -> None:
         """Connect to a room."""
@@ -103,33 +130,167 @@ class ChatController:
         except Exception:
             pass
 
-        self.client = RobustThreadedRoomClient(
-            host=self.host,
-            port=self.port,
-            username=self.username,
-            room=room_name,
-            since_id=since_id,
-            token_store_path=token_path,
-            e2ee_store_path=e2ee_path if use_e2ee else None,
-            enable_heartbeat=True,
-            enable_auto_reconnect=True,
-        )
+        if self._backend == "relay":
+            self._start_relay(room_name)
+            try:
+                # Non-blocking self-test
+                import threading as _t
 
-        self.client.start(
-            on_event=self._on_event,
-            on_error=self._on_error,
-            on_connection_state=self._on_connection_state,
-        )
+                _t.Thread(
+                    target=lambda: self._selftest_xeddsa(e2ee_path), daemon=True
+                ).start()
+            except Exception:
+                pass
+        else:
+            # Default MP2 behavior
+            self.client = RobustThreadedRoomClient(
+                host=self.host,
+                port=self.port,
+                username=self.username,
+                room=room_name,
+                since_id=since_id,
+                token_store_path=token_path,
+                e2ee_store_path=e2ee_path if use_e2ee else None,
+                enable_heartbeat=True,
+                enable_auto_reconnect=True,
+            )
+
+            self.client.start(
+                on_event=self._on_event,
+                on_error=self._on_error,
+                on_connection_state=self._on_connection_state,
+            )
 
     def disconnect(self) -> None:
         """Disconnect from room."""
         if self.client:
             self.client.stop()
             self.client = None
+        # Stop relay poller if running
+        if self._relay_thread is not None:
+            self._relay_stop.set()
+            try:
+                self._relay_thread.join(timeout=2.0)
+            except Exception:
+                pass
+            self._relay_thread = None
 
     def send_message(self, message: str, ephemeral: Optional[bool] = None) -> None:
+        use_ephemeral = self._ephemeral if ephemeral is None else bool(ephemeral)
+        if self._backend == "relay":
+            # Sign JSON envelope and POST to Relay
+            try:
+                content_bytes = message.encode("utf-8")
+                ks = LocalKeyStore()
+                st = ks.load_state(self.username)
+                if st is None:
+                    raise RuntimeError(
+                        "No LocalKeyState found; initialize identity first"
+                    )
+                did = int(getattr(st, "device_id", 1) or 1)
+                ctx = create_signal_context()
+                store = SignalStore(ctx)
+                try:
+                    store.set_identity(
+                        public_key=st.identity_key.public_key,
+                        private_key=st.identity_key.private_key,
+                        registration_id=st.registration_id,
+                        device_id=did,
+                    )
+                    env_ts = int(time.time())
+                    serialized = canonical_serialize(
+                        room=self._relay_room or "",
+                        ts=env_ts,
+                        sender_id=self.username,
+                        device_id=did,
+                        content_type="text",
+                        content_bytes=content_bytes,
+                    )
+                    try:
+                        cfg = ConfigManager()
+                        cfg.load()
+                        general = cfg.config.general if hasattr(cfg, "config") else {}
+                        relay_cfg = (
+                            general.get("relay", {})
+                            if isinstance(general, dict)
+                            else {}
+                        )
+                        enforce = bool(relay_cfg.get("enforce_signed", False))
+                    except Exception:
+                        enforce = False
+                    try:
+                        avail = is_xeddsa_available(store)
+                        logger.debug("relay_sign: xeddsa symbols available=%s", avail)
+                    except Exception:
+                        pass
+                    if enforce:
+                        try:
+                            sig = sign_bytes_with_store(store, serialized)
+                            sig_hex = sig.hex()
+                        except SignalBridgeError as _se:
+                            try:
+                                logger.debug(
+                                    "relay_sign: cffi sign failed (strict): %s", _se
+                                )
+                            except Exception:
+                                pass
+                            raise RuntimeError("Relay signing required but unavailable")
+                        except Exception:
+                            raise RuntimeError("Relay signing required but unavailable")
+                    else:
+                        try:
+                            sig = sign_bytes_with_store(store, serialized)
+                            sig_hex = sig.hex()
+                        except Exception:
+                            try:
+                                priv = st.identity_key.private_key
+                                sig = ed25519_sign_py(
+                                    priv
+                                    if isinstance(priv, (bytes, bytearray))
+                                    else bytes(priv),
+                                    serialized,
+                                )
+                                sig_hex = sig.hex()
+                                try:
+                                    logger.debug("relay_sign: py_ed25519_fallback used")
+                                except Exception:
+                                    pass
+                            except Exception:
+                                sig_hex = ""
+                    envelope = {
+                        "sender_id": self.username,
+                        "device_id": did,
+                        "ts": env_ts,
+                        "content_type": "text",
+                        "content_bytes_b64": base64.b64encode(content_bytes).decode(
+                            "ascii"
+                        ),
+                        "signature_hex": sig_hex,
+                    }
+                    env_bytes = json.dumps(envelope).encode("utf-8")
+                    ciphertext = base64.b64encode(env_bytes).decode("ascii")
+                finally:
+                    store.close()
+                    ctx.close()
+                client = RelayHTTPClient(self._relay_base_url)
+                try:
+                    client.post_event(
+                        room=self._relay_room or "",
+                        ciphertext=ciphertext,
+                        content_len=len(content_bytes),
+                        client_event_hash=event_hash_hex(serialized),
+                        client_ts=env_ts,
+                    )
+                finally:
+                    client.close()
+            except Exception as exc:
+                try:
+                    self._on_error(exc)
+                except Exception:
+                    pass
+            return
+        # MP2 path
         if self.client:
-            use_ephemeral = self._ephemeral if ephemeral is None else bool(ephemeral)
             try:
                 logger.info(
                     "send_message: user=%s size=%d ephemeral=%s",
@@ -148,52 +309,141 @@ class ChatController:
         self, room: str, filepath: Path, *, ephemeral: Optional[bool] = None
     ) -> None:
         """Upload a file (blocking, run in worker)."""
-        config_dir = Path(
-            os.environ.get("MING_DRLMS_CONFIG_DIR") or (Path.home() / ".drlms")
-        )
-        token_path = config_dir / "tokens.json"
-        eph_flag = bool(ephemeral) if ephemeral is not None else False
-        if self._progress_cb is None:
-            service = RoomService()
+        if not filepath.exists() or not filepath.is_file():
+            raise FileNotFoundError(str(filepath))
+        if self._progress_cb:
             try:
-                logger.info(
-                    "upload_file: room=%s file=%s ephemeral=%s path=%s",
-                    room,
-                    filepath.name,
-                    eph_flag,
-                    str(filepath),
+                self._progress_cb(
+                    {"filename": filepath.name, "percent": 0, "done": False}
                 )
             except Exception:
                 pass
-            service.publish_file(
-                host=self.host,
-                port=self.port,
-                user=self.username,
-                room=room,
-                file_path=filepath,
-                token_store=token_path,
-                ephemeral=eph_flag,
-            )
-            return
 
-        # Progress-enabled path using MP2Client
-        import hashlib
+        if self._backend == "relay":
+            http = RelayHTTPClient(self._relay_base_url)
+            try:
+                meta = http.upload_file(file_path=str(filepath), room=room)
+                if self._progress_cb:
+                    try:
+                        self._progress_cb(
+                            {"filename": filepath.name, "percent": 50, "done": False}
+                        )
+                    except Exception:
+                        pass
+                ks = LocalKeyStore()
+                st = ks.load_state(self.username)
+                if st is None:
+                    raise RuntimeError(
+                        "No LocalKeyState found; initialize identity first"
+                    )
+                did = int(getattr(st, "device_id", 1) or 1)
+                ctx = create_signal_context()
+                store = SignalStore(ctx)
+                try:
+                    store.set_identity(
+                        public_key=st.identity_key.public_key,
+                        private_key=st.identity_key.private_key,
+                        registration_id=st.registration_id,
+                        device_id=did,
+                    )
+                    env_ts = int(meta.get("ts") or time.time())
+                    content = {
+                        "file_id": int(meta.get("file_id") or 0),
+                        "filename": str(meta.get("filename") or filepath.name),
+                        "size_bytes": int(
+                            meta.get("size_bytes") or filepath.stat().st_size
+                        ),
+                        "sha256_hex": str(meta.get("sha256_hex") or ""),
+                        "ephemeral": bool(
+                            ephemeral if ephemeral is not None else self._ephemeral
+                        ),
+                        "timestamp": str(env_ts),
+                    }
+                    content_bytes = json.dumps(content, ensure_ascii=False).encode(
+                        "utf-8"
+                    )
+                    serialized = canonical_serialize(
+                        room=room,
+                        ts=env_ts,
+                        sender_id=self.username,
+                        device_id=did,
+                        content_type="file",
+                        content_bytes=content_bytes,
+                    )
+                    try:
+                        cfg = ConfigManager()
+                        cfg.load()
+                        general = cfg.config.general if hasattr(cfg, "config") else {}
+                        relay_cfg = (
+                            general.get("relay", {})
+                            if isinstance(general, dict)
+                            else {}
+                        )
+                        enforce = bool(relay_cfg.get("enforce_signed", False))
+                    except Exception:
+                        enforce = False
+                    if enforce:
+                        sig = sign_bytes_with_store(store, serialized)
+                    else:
+                        try:
+                            sig = sign_bytes_with_store(store, serialized)
+                        except Exception:
+                            priv = st.identity_key.private_key
+                            sig = ed25519_sign_py(
+                                priv
+                                if isinstance(priv, (bytes, bytearray))
+                                else bytes(priv),
+                                serialized,
+                            )
+                    envelope = {
+                        "sender_id": self.username,
+                        "device_id": did,
+                        "ts": env_ts,
+                        "content_type": "file",
+                        "content_bytes_b64": base64.b64encode(content_bytes).decode(
+                            "ascii"
+                        ),
+                        "signature_hex": sig.hex(),
+                    }
+                    env_bytes = json.dumps(envelope).encode("utf-8")
+                    ciphertext = base64.b64encode(env_bytes).decode("ascii")
+                finally:
+                    store.close()
+                    ctx.close()
+                http.post_event(
+                    room=room,
+                    ciphertext=ciphertext,
+                    content_len=len(content_bytes),
+                    client_event_hash=event_hash_hex(serialized),
+                    client_ts=env_ts,
+                )
+                if self._progress_cb:
+                    try:
+                        self._progress_cb(
+                            {"filename": filepath.name, "percent": 100, "done": True}
+                        )
+                    except Exception:
+                        pass
+                return
+            finally:
+                http.close()
 
         size = filepath.stat().st_size
-        sha256 = hashlib.sha256()
-        with open(filepath, "rb") as f:
-            while chunk := f.read(8192):
-                sha256.update(chunk)
-        sha_hex = sha256.hexdigest()
-
-        store = None
+        m = hashlib.sha256()
+        with open(filepath, "rb") as fp:
+            while True:
+                chunk = fp.read(1024 * 1024)
+                if not chunk:
+                    break
+                m.update(chunk)
+        sha_hex = m.hexdigest()
+        token_path = _state_dir() / "tokens.json"
         try:
             from ..core.token_store import TokenStore
-
-            store = TokenStore(token_path)
         except Exception:
             store = None
-
+        else:
+            store = TokenStore(token_path)
         client = MP2Client(self.host, self.port, timeout=30.0, token_store=store)
         try:
             client.ensure_access_token(self.username)
@@ -203,15 +453,12 @@ class ChatController:
                 filepath.name,
                 size,
                 sha_hex,
-                ephemeral=bool(ephemeral) if ephemeral is not None else False,
+                ephemeral if ephemeral is not None else bool(self._ephemeral),
             )
-
-            sent = 0
-            last_pct = -1
-            with open(filepath, "rb") as f:
-                offset = 0
+            offset = 0
+            with open(filepath, "rb") as fp:
                 while True:
-                    data = f.read(64 * 1024)
+                    data = fp.read(512 * 1024)
                     if not data:
                         break
                     offset_end = offset + len(data)
@@ -220,32 +467,21 @@ class ChatController:
                     offset = offset_end
                     sent = offset
                     pct = int((sent * 100) / max(size, 1))
-                    if pct // 10 != last_pct // 10:
-                        last_pct = pct
+                    if self._progress_cb:
                         try:
                             self._progress_cb(
                                 {
-                                    "type": "upload",
                                     "filename": filepath.name,
-                                    "bytes": sent,
-                                    "total": size,
                                     "percent": pct,
+                                    "done": False,
                                 }
                             )
                         except Exception:
                             pass
-
             client.publish_file_commit(upload_id)
             try:
                 self._progress_cb(
-                    {
-                        "type": "upload",
-                        "filename": filepath.name,
-                        "bytes": size,
-                        "total": size,
-                        "percent": 100,
-                        "done": True,
-                    }
+                    {"filename": filepath.name, "percent": 100, "done": True}
                 )
             except Exception:
                 pass
@@ -263,26 +499,71 @@ class ChatController:
         total_bytes: Optional[int] = None,
     ) -> None:
         """Download a file (blocking, run in worker)."""
-        config_dir = Path(
-            os.environ.get("MING_DRLMS_CONFIG_DIR") or (Path.home() / ".drlms")
-        )
-        token_path = config_dir / "tokens.json"
-        if self._progress_cb is None:
-            service = RoomService()
-            service.download_file(
-                host=self.host,
-                port=self.port,
-                user=self.username,
-                room=room,
-                event_id=event_id,
-                output_path=output_path,
-                token_store=token_path,
-            )
+        if self._backend == "relay":
+            http = RelayHTTPClient(self._relay_base_url)
+            try:
+                expected_size = None
+                expected_sha = None
+                try:
+                    meta = http.head_file(int(event_id))
+                    if meta:
+                        if meta.get("size_bytes"):
+                            expected_size = int(meta["size_bytes"])  # type: ignore[index]
+                        if meta.get("sha256_hex"):
+                            expected_sha = str(meta["sha256_hex"])  # type: ignore[index]
+                except Exception:
+                    pass
+                hasher = hashlib.sha256() if expected_sha else None
+                total = total_bytes or expected_size
+                bytes_done = 0
+                with open(output_path, "wb") as f:
+                    for chunk in http.download_file(int(event_id)):
+                        f.write(chunk)
+                        bytes_done += len(chunk)
+                        if hasher:
+                            try:
+                                hasher.update(chunk)
+                            except Exception:
+                                pass
+                        if total:
+                            try:
+                                pct = int((bytes_done * 100) / max(int(total), 1))
+                            except Exception:
+                                pct = None
+                            else:
+                                if self._progress_cb and pct is not None:
+                                    try:
+                                        self._progress_cb(
+                                            {
+                                                "filename": output_path.name,
+                                                "percent": pct,
+                                                "done": False,
+                                            }
+                                        )
+                                    except Exception:
+                                        pass
+                if hasher and expected_sha:
+                    actual = hasher.hexdigest()
+                    if actual.lower() != str(expected_sha).lower():
+                        try:
+                            os.remove(output_path)
+                        except Exception:
+                            pass
+                        raise RuntimeError("download sha256 mismatch")
+                try:
+                    if self._progress_cb:
+                        self._progress_cb(
+                            {"filename": output_path.name, "percent": 100, "done": True}
+                        )
+                except Exception:
+                    pass
+            finally:
+                http.close()
             return
 
         from ..core.token_store import TokenStore
 
-        store = TokenStore(token_path)
+        store = TokenStore(_state_dir() / "tokens.json")
         client = MP2Client(self.host, self.port, timeout=30.0, token_store=store)
         try:
             client.ensure_access_token(self.username)
@@ -292,33 +573,31 @@ class ChatController:
                     f.write(chunk)
                     bytes_done += len(chunk)
                     pct = None
-                    if total_bytes and total_bytes > 0:
-                        pct = int((bytes_done * 100) / total_bytes)
-                    try:
-                        self._progress_cb(
-                            {
-                                "type": "download",
-                                "filename": output_path.name,
-                                "bytes": bytes_done,
-                                "total": total_bytes or 0,
-                                "percent": pct if pct is not None else 0,
-                            }
-                        )
-                    except Exception:
-                        pass
+                    if total_bytes:
+                        try:
+                            pct = int((bytes_done * 100) / max(int(total_bytes), 1))
+                        except Exception:
+                            pct = None
+                    if self._progress_cb and pct is not None:
+                        try:
+                            self._progress_cb(
+                                {
+                                    "filename": output_path.name,
+                                    "percent": pct,
+                                    "done": False,
+                                }
+                            )
+                        except Exception:
+                            pass
             try:
-                self._progress_cb(
-                    {
-                        "type": "download",
-                        "filename": output_path.name,
-                        "bytes": bytes_done,
-                        "total": total_bytes or bytes_done,
-                        "percent": 100,
-                        "done": True,
-                    }
-                )
+                if self._progress_cb:
+                    self._progress_cb(
+                        {"filename": output_path.name, "percent": 100, "done": True}
+                    )
             except Exception:
                 pass
+        except Exception as e:
+            raise RuntimeError(str(e))
         finally:
             try:
                 client.close()
@@ -399,3 +678,287 @@ class ChatController:
     def set_progress_callback(self, cb: Optional[Callable[[dict], None]]) -> None:
         """Set a callback for upload/download progress reporting."""
         self._progress_cb = cb
+
+    # ------------------------------------------------------------------
+    # Backend helpers
+    # ------------------------------------------------------------------
+    def _load_backend(self) -> str:
+        try:
+            cfg = ConfigManager()
+            cfg.load()
+            general = cfg.config.general if hasattr(cfg, "config") else {}
+            backend = str(general.get("backend", "")).strip().lower()
+            if backend in ("mp2", "relay"):
+                return backend
+            # Fallback: if relay section is present, prefer relay
+            if isinstance(general, dict) and isinstance(general.get("relay"), dict):
+                return "relay"
+            return "mp2"
+        except Exception:
+            return "mp2"
+
+    def _resolve_relay_base_url(self) -> str:
+        try:
+            # Priority: config.general.relay.base_url -> env -> default
+            cfg = ConfigManager()
+            cfg.load()
+            general = cfg.config.general if hasattr(cfg, "config") else {}
+            relay_cfg = general.get("relay", {}) if isinstance(general, dict) else {}
+            if isinstance(relay_cfg, dict) and relay_cfg.get("base_url"):
+                return str(relay_cfg["base_url"]).strip()
+            env = os.environ.get("DRLMS_RELAY_BASE_URL") or os.environ.get(
+                "RELAY_BASE_URL"
+            )
+            return env.strip() if env else "http://127.0.0.1:8081"
+        except Exception:
+            return "http://127.0.0.1:8081"
+
+    def _start_relay(self, room_name: str) -> None:
+        # Reset state
+        self._relay_room = room_name
+        self._relay_since_seq = 0
+        self._relay_stop.clear()
+
+        # Build identity resolver (mapping file + LocalKeyStore)
+        mapping_path = os.environ.get("DRLMS_SIGNING_PUBKEYS_FILE")
+        mapping: dict[str, str] = {}
+        if mapping_path and os.path.exists(mapping_path):
+            try:
+                with open(mapping_path, "r", encoding="utf-8") as fp:
+                    loaded = json.load(fp)
+                    if isinstance(loaded, dict):
+                        mapping = {str(k): str(v) for k, v in loaded.items()}
+            except Exception:
+                mapping = {}
+
+        def identity_resolver(sender_id: str, device_id: int) -> bytes:
+            key = f"{sender_id}#{int(device_id)}"
+            hexval = mapping.get(key)
+            if isinstance(hexval, str):
+                try:
+                    return bytes.fromhex(hexval)
+                except Exception:
+                    return b""
+            # Try LocalKeyStore (both remote-signing and self identity)
+            try:
+                ks = LocalKeyStore()
+                if sender_id == self.username:
+                    st = ks.load_state(self.username)
+                    if st and st.identity_key and st.identity_key.private_key:
+                        try:
+                            seed = st.identity_key.private_key
+                            seed_b = (
+                                seed
+                                if isinstance(seed, (bytes, bytearray))
+                                else bytes(seed)
+                            )
+                            priv = Ed25519PrivateKey.from_private_bytes(seed_b[:32])
+                            pub = priv.public_key().public_bytes(
+                                Encoding.Raw, PublicFormat.Raw
+                            )
+                            return pub
+                        except Exception:
+                            if st.identity_key.public_key:
+                                return st.identity_key.public_key
+                data = ks.get_remote_signing_identity(
+                    self.username, sender_id, int(device_id)
+                )
+                return data or b""
+            except Exception:
+                return b""
+
+        def _on_verified(s: str, d: int, pub: bytes) -> None:
+            try:
+                ks2 = LocalKeyStore()
+                ks2.record_remote_signing_identity(self.username, s, int(d), pub)
+            except Exception:
+                pass
+
+        dec = build_decrypt_and_verify(lambda: None, identity_resolver, _on_verified)
+
+        def _poll_loop() -> None:
+            # Signal connecting/connected
+            try:
+                self._on_connection_state(ConnectionState.CONNECTING)
+            except Exception:
+                pass
+            client = RelayHTTPClient(self._relay_base_url)
+            try:
+                try:
+                    self._on_connection_state(ConnectionState.CONNECTED)
+                except Exception:
+                    pass
+                while not self._relay_stop.is_set():
+                    try:
+                        items = client.get_events(
+                            room=self._relay_room or "",
+                            since_seq=int(self._relay_since_seq),
+                            limit=100,
+                        )
+                        if items:
+                            max_seq = self._relay_since_seq
+                            for item in items:
+                                clear = dec(item)
+                                if not clear or not clear.get("verified", False):
+                                    continue
+                                ct = str(clear.get("content_type") or "binary")
+                                payload = clear.get("content_bytes") or b""
+                                sender = str(clear.get("sender_id", ""))
+                                did = int(clear.get("device_id", 1))
+                                if ct == "file":
+                                    file_meta = None
+                                    try:
+                                        meta = (
+                                            json.loads(payload.decode("utf-8"))
+                                            if payload
+                                            else {}
+                                        )
+                                        from ..core.mproto_v2_client import RoomFileMeta
+
+                                        file_meta = RoomFileMeta(
+                                            filename=str(meta.get("filename") or ""),
+                                            size_bytes=int(meta.get("size_bytes") or 0),
+                                            sha256_hex=str(
+                                                meta.get("sha256_hex") or ""
+                                            ),
+                                            ephemeral=bool(
+                                                meta.get("ephemeral") or False
+                                            ),
+                                            timestamp=str(
+                                                meta.get("timestamp")
+                                                or str(int(clear.get("ts") or 0))
+                                            ),
+                                            file_id=(
+                                                int(meta.get("file_id"))
+                                                if meta.get("file_id") is not None
+                                                else None
+                                            ),
+                                        )
+                                    except Exception:
+                                        file_meta = None
+                                    evt = RoomEvent(
+                                        room_name=self._relay_room or "",
+                                        event_id=int(item.get("server_seq") or 0),
+                                        payload=b"",
+                                        display_token=sender,
+                                        kind=room_pb2.RoomEventKind.ROOM_EVENT_KIND_FILE,  # type: ignore[attr-defined]
+                                        sender=sender,
+                                        sender_device_id=did,
+                                        timestamp=(
+                                            str(int(clear.get("ts")))
+                                            if clear.get("ts") is not None
+                                            else None
+                                        ),
+                                        file=file_meta,
+                                    )
+                                else:
+                                    evt = RoomEvent(
+                                        room_name=self._relay_room or "",
+                                        event_id=int(item.get("server_seq") or 0),
+                                        payload=payload,
+                                        display_token=sender,
+                                        kind=room_pb2.RoomEventKind.ROOM_EVENT_KIND_TEXT,  # type: ignore[attr-defined]
+                                        sender=sender,
+                                        sender_device_id=did,
+                                        timestamp=(
+                                            str(int(clear.get("ts")))
+                                            if clear.get("ts") is not None
+                                            else None
+                                        ),
+                                    )
+                                self._on_event(evt)
+                                if item.get("server_seq"):
+                                    seq = int(item["server_seq"])
+                                    if seq > max_seq:
+                                        max_seq = seq
+                            self._relay_since_seq = max_seq
+                    except Exception as exc:
+                        self._on_error(exc)
+                        try:
+                            self._on_connection_state(ConnectionState.RECONNECTING)
+                        except Exception:
+                            pass
+                    finally:
+                        time.sleep(1.0)
+            finally:
+                try:
+                    client.close()
+                except Exception:
+                    pass
+                try:
+                    self._on_connection_state(ConnectionState.DISCONNECTED)
+                except Exception:
+                    pass
+
+        self._relay_thread = threading.Thread(
+            target=_poll_loop, name="relay-poller", daemon=True
+        )
+        self._relay_thread.start()
+
+    def _selftest_xeddsa(self, e2ee_path: Path) -> None:
+        try:
+            from ..core.e2ee_store import LocalKeyStore
+        except Exception:
+            return
+        try:
+            ks = LocalKeyStore(e2ee_path)
+            st = ks.load_state(self.username)
+            if st is None or not st.identity_key:
+                return
+            ctx = create_signal_context()
+            store = SignalStore(ctx)
+            try:
+                store.set_identity(
+                    public_key=st.identity_key.public_key,
+                    private_key=st.identity_key.private_key,
+                    registration_id=st.registration_id,
+                    device_id=int(getattr(st, "device_id", 1) or 1),
+                )
+                try:
+                    avail = is_xeddsa_available(store)
+                    logger.debug("xeddsa selftest: symbols available=%s", avail)
+                except Exception:
+                    pass
+                msg = b"drlms-xeddsa-selftest"
+                try:
+                    _ = sign_bytes_with_store(store, msg)
+                    ok = True
+                except Exception:
+                    ok = False
+                if not ok:
+                    try:
+                        priv = st.identity_key.private_key
+                        from ..core.relay_crypto import ed25519_sign_py as _s
+
+                        _ = _s(
+                            priv
+                            if isinstance(priv, (bytes, bytearray))
+                            else bytes(priv),
+                            msg,
+                        )
+                        try:
+                            logger.debug(
+                                "xeddsa selftest: cffi failed, python ed25519 available"
+                            )
+                        except Exception:
+                            pass
+                    except Exception:
+                        try:
+                            logger.debug(
+                                "xeddsa selftest: both cffi and python ed25519 unavailable"
+                            )
+                        except Exception:
+                            pass
+                else:
+                    try:
+                        logger.debug("xeddsa selftest: cffi sign ok")
+                    except Exception:
+                        pass
+            finally:
+                try:
+                    store.close()
+                    ctx.close()
+                except Exception:
+                    pass
+        except Exception:
+            pass

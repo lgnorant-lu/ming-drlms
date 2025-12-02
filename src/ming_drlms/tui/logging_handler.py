@@ -45,8 +45,13 @@ class TextualLogHandler(logging.Handler):
                 rich_msg.stylize("dim cyan")
 
             if self.widget and self.app:
-                # Textual widgets are not thread-safe, must use call_from_thread
-                self.app.call_from_thread(self.widget.write, rich_msg)
+                try:
+                    self.app.call_from_thread(self.widget.write, rich_msg)
+                except Exception:
+                    try:
+                        self.widget.write(rich_msg)
+                    except Exception:
+                        self._buffer.append(rich_msg)
             else:
                 self._buffer.append(rich_msg)
         except Exception:

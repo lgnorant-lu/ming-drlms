@@ -7,6 +7,7 @@ import os
 import socket
 import time
 import uuid
+import importlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Generator, Iterable, Optional, cast
@@ -30,6 +31,13 @@ msg_types = cast(Any, _msg_types)
 from .mp2_transport import MP2Frame, read_frame, write_frame  # noqa: E402
 from .token_store import TokenRecord, TokenStore  # noqa: E402
 from ..users import parse_users  # noqa: E402
+from cryptography.hazmat.primitives.asymmetric.ed25519 import (  # noqa: E402
+    Ed25519PrivateKey,
+)
+from cryptography.hazmat.primitives.serialization import (  # noqa: E402
+    Encoding,
+    PublicFormat,
+)
 
 logger = log.get_logger("core.mproto_v2_client")
 
@@ -56,6 +64,7 @@ class RoomFileMeta:
     sha256_hex: str
     ephemeral: bool
     timestamp: str
+    file_id: int | None = None
 
 
 @dataclass(slots=True)
@@ -243,12 +252,72 @@ class MP2Client:
             raise AuthenticationError(
                 f"expected AUTH_CHALLENGE_RESPONSE, got msg_type={frame.msg_type}"
             )
-        nonce = self._parse_challenge_nonce(frame)
+        ch = auth_pb2.AuthChallengeResponse()
+        ch.ParseFromString(frame.payload)
+        if not ch.nonce:
+            raise AuthenticationError("challenge response missing nonce")
+        nonce = ch.nonce
+        server_salt = getattr(ch, "server_salt", "") or ""
 
         response_digest = hashlib.sha256((stored_hash + nonce).encode()).hexdigest()
         auth_req = auth_pb2.AuthRequest()
         auth_req.username = username
         auth_req.response = response_digest
+
+        # 14C: attach ClientInfo with device/identity and binding signature (robust path)
+        try:
+            # Lazy import to avoid circular import with e2ee_store
+            ks_mod = importlib.import_module("ming_drlms.core.e2ee_store")
+            LocalKeyStore = getattr(ks_mod, "LocalKeyStore")
+            ks = LocalKeyStore()
+            st = ks.load_state(username)
+        except Exception:
+            st = None
+
+        if (
+            st
+            and getattr(st, "identity_key", None)
+            and getattr(st.identity_key, "private_key", None)
+        ):
+            try:
+                seed = st.identity_key.private_key
+                seed_b = seed if isinstance(seed, (bytes, bytearray)) else bytes(seed)
+                priv = Ed25519PrivateKey.from_private_bytes(seed_b[:32])
+                pub = priv.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+                ts = int(time.time())
+                binding_parts = [
+                    b"MP2-LOGIN-V1",
+                    username.encode("utf-8"),
+                    str(int(getattr(st, "device_id", 0))).encode("ascii"),
+                    str(int(getattr(st, "registration_id", 0))).encode("ascii"),
+                    (nonce or "").encode("ascii"),
+                    (server_salt or "").encode("utf-8"),
+                    str(ts).encode("ascii"),
+                ]
+                binding = b"|".join(binding_parts)
+                sig = priv.sign(binding)
+
+                client = auth_pb2.ClientInfo()
+                client.device_id = int(getattr(st, "device_id", 0))
+                client.registration_id = int(getattr(st, "registration_id", 0))
+                client.identity_pubkey = pub
+                client.identity_sig = sig
+                client.sig_ts = ts
+                try:
+                    client.platform = os.name
+                except Exception:
+                    pass
+                # app_version and device_guid left empty unless externally provided
+                try:
+                    # Prefer CopyFrom to ensure correct message assignment when field exists
+                    if hasattr(auth_req, "client"):
+                        auth_req.client.CopyFrom(client)  # type: ignore[attr-defined]
+                except Exception:
+                    pass
+            except Exception:
+                # Non-fatal: proceed without ClientInfo
+                pass
+
         write_frame(
             sock,
             common_pb2.MSG_TYPE_AUTH_REQUEST,
@@ -271,6 +340,19 @@ class MP2Client:
             raise AuthenticationError("server did not return access/refresh tokens")
 
         expires_in = auth_resp.access_token_expires_in or 0
+        accepted_device_id = None
+        recorded_identity = None
+        if hasattr(auth_resp, "accepted_device_id"):
+            try:
+                accepted_device_id = int(getattr(auth_resp, "accepted_device_id"))
+            except Exception:
+                accepted_device_id = None
+        if hasattr(auth_resp, "recorded_identity"):
+            try:
+                recorded_identity = bool(getattr(auth_resp, "recorded_identity"))
+            except Exception:
+                recorded_identity = None
+
         record = TokenRecord(
             username=username,
             host=self.host,
@@ -278,6 +360,8 @@ class MP2Client:
             access_token=auth_resp.access_token,
             access_expires_at=time.time() + max(30, float(expires_in)),
             refresh_token=auth_resp.refresh_token,
+            accepted_device_id=accepted_device_id,
+            recorded_identity=recorded_identity,
         )
         self._token_store.store(record)
         return record
@@ -331,6 +415,8 @@ class MP2Client:
             access_token=resp.access_token,
             access_expires_at=time.time() + max(30, float(expires_in)),
             refresh_token=record.refresh_token,
+            accepted_device_id=record.accepted_device_id,
+            recorded_identity=record.recorded_identity,
         )
 
     def create_room(

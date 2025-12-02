@@ -24,6 +24,8 @@ int sqlite_storage_init(SQLiteStorage *storage, const char *db_path) {
         return -1;
     }
 
+    /* moved below */
+
     // Ensure directory exists
     char *dir = strdup(db_path);
     if (!dir) {
@@ -251,6 +253,30 @@ int sqlite_storage_init(SQLiteStorage *storage, const char *db_path) {
         return -1;
     }
 
+    // client_identities (14C)
+    const char *ident_sql =
+        "CREATE TABLE IF NOT EXISTS client_identities ("
+        "  user_name TEXT NOT NULL,"
+        "  device_id INTEGER NOT NULL,"
+        "  pubkey BLOB NOT NULL,"
+        "  registration_id INTEGER,"
+        "  device_guid TEXT,"
+        "  platform TEXT,"
+        "  app_version TEXT,"
+        "  updated_at INTEGER NOT NULL,"
+        "  PRIMARY KEY (user_name, device_id)"
+        ");"
+        "CREATE INDEX IF NOT EXISTS idx_client_identities_user ON "
+        "client_identities(user_name);";
+    rc = sqlite3_exec(storage->db, ident_sql, NULL, NULL, &err_msg);
+    if (rc != SQLITE_OK) {
+        LOG_ERROR("SQL error: %s", err_msg ? err_msg : "(null)");
+        if (err_msg)
+            sqlite3_free(err_msg);
+        sqlite_storage_cleanup(storage);
+        return -1;
+    }
+
     return 0;
 }
 
@@ -331,6 +357,76 @@ int sqlite_find_refresh_token_path(const char *db_path, const char *token,
         return -1;
     int rc = sqlite_find_refresh_token(&s, token, out_user, out_user_cap,
                                        out_expires_at);
+    sqlite_storage_cleanup(&s);
+    return rc;
+}
+
+int sqlite_upsert_client_identity(SQLiteStorage *storage, const char *user,
+                                  int device_id, const unsigned char *pubkey,
+                                  size_t pubkey_len, int registration_id,
+                                  const char *device_guid, const char *platform,
+                                  const char *app_version,
+                                  sqlite3_int64 updated_at) {
+    if (!storage || !user || !*user || !pubkey || pubkey_len == 0 ||
+        device_id <= 0) {
+        return -1;
+    }
+    platform_mutex_lock(&storage->mu);
+    const char *sql =
+        "INSERT INTO client_identities("
+        "user_name, device_id, pubkey, registration_id, device_guid, "
+        "platform, app_version, updated_at) "
+        "VALUES(?,?,?,?,?,?,?,?) "
+        "ON CONFLICT(user_name, device_id) DO UPDATE SET "
+        "pubkey=excluded.pubkey, "
+        "registration_id=excluded.registration_id, "
+        "device_guid=excluded.device_guid, "
+        "platform=excluded.platform, "
+        "app_version=excluded.app_version, "
+        "updated_at=excluded.updated_at;";
+    sqlite3_stmt *stmt = NULL;
+    int rc = sqlite3_prepare_v2(storage->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        platform_mutex_unlock(&storage->mu);
+        return -1;
+    }
+    sqlite3_bind_text(stmt, 1, user, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(stmt, 2, device_id);
+    sqlite3_bind_blob(stmt, 3, pubkey, (int)pubkey_len, SQLITE_TRANSIENT);
+    if (registration_id > 0)
+        sqlite3_bind_int(stmt, 4, registration_id);
+    else
+        sqlite3_bind_null(stmt, 4);
+    if (device_guid && *device_guid)
+        sqlite3_bind_text(stmt, 5, device_guid, -1, SQLITE_TRANSIENT);
+    else
+        sqlite3_bind_null(stmt, 5);
+    if (platform && *platform)
+        sqlite3_bind_text(stmt, 6, platform, -1, SQLITE_TRANSIENT);
+    else
+        sqlite3_bind_null(stmt, 6);
+    if (app_version && *app_version)
+        sqlite3_bind_text(stmt, 7, app_version, -1, SQLITE_TRANSIENT);
+    else
+        sqlite3_bind_null(stmt, 7);
+    sqlite3_bind_int64(stmt, 8, updated_at);
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    platform_mutex_unlock(&storage->mu);
+    return (rc == SQLITE_DONE) ? 0 : -1;
+}
+
+int sqlite_upsert_client_identity_path(
+    const char *db_path, const char *user, int device_id,
+    const unsigned char *pubkey, size_t pubkey_len, int registration_id,
+    const char *device_guid, const char *platform, const char *app_version,
+    sqlite3_int64 updated_at) {
+    SQLiteStorage s = {0};
+    if (sqlite_storage_init(&s, db_path) != 0)
+        return -1;
+    int rc = sqlite_upsert_client_identity(
+        &s, user, device_id, pubkey, pubkey_len, registration_id, device_guid,
+        platform, app_version, updated_at);
     sqlite_storage_cleanup(&s);
     return rc;
 }

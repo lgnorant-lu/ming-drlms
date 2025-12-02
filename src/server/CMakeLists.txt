@@ -79,7 +79,9 @@ set(GENERATED_PY)
 # Force use pre-generated sets to prevent version mismatch with bundled runtime
 # set(PROTOBUF_C_USE_PREGENSETS TRUE)
 
-if(PROTOBUF_C_USE_PREGENSETS)
+# Prefer dynamic generation whenever protoc-c is available; only fall back to
+# pre-generated sets when we do not have a working protoc-c.
+if(PROTOBUF_C_USE_PREGENSETS AND NOT PROTOC_C_EXECUTABLE)
     # Manually populate GENERATED_SRC because PROTOBUF_C_SOURCES might be incomplete
     set(GENERATED_SRC)
     set(GENERATED_HDR)
@@ -109,15 +111,28 @@ else()
                 set(OUT_C ${OUT_DIR}/${PBN}.pb-c.c)
                 set(OUT_H ${OUT_DIR}/${PBN}.pb-c.h)
                 set(OUT_PY ${OUT_DIR}/${PBN}_pb2.py)
-                add_custom_command(
-                    OUTPUT ${OUT_C} ${OUT_H} ${OUT_PY}
-                    COMMAND ${CMAKE_COMMAND} -E echo "[proto_gen] ${PF} -> ${OUT_C}"
-                    COMMAND ${CMAKE_COMMAND} -E make_directory ${OUT_DIR}
-                    COMMAND ${PROTOC_EXECUTABLE} --proto_path=${PROJECT_SOURCE_DIR} --proto_path=${PROJECT_SOURCE_DIR}/schema/v2 --c_out=${GENERATED_DIR} --python_out=${GENERATED_DIR} ${PF}
-                    DEPENDS ${PF}
-                    VERBATIM
-                    COMMENT "Generating protobuf-c and python sources for ${PBN}"
-                )
+                if(WIN32)
+                    add_custom_command(
+                        OUTPUT ${OUT_C} ${OUT_H} ${OUT_PY}
+                        COMMAND ${CMAKE_COMMAND} -E echo "[proto_gen] ${PF} -> ${OUT_C}"
+                        COMMAND ${CMAKE_COMMAND} -E make_directory ${OUT_DIR}
+                        COMMAND ${PROTOC_EXECUTABLE} --plugin=protoc-gen-c=${PROTOC_C_EXECUTABLE} --proto_path=${PROJECT_SOURCE_DIR} --proto_path=${PROJECT_SOURCE_DIR}/schema/v2 --c_out=${GENERATED_DIR} --python_out=${GENERATED_DIR} ${PF}
+                        DEPENDS ${PF}
+                        VERBATIM
+                        COMMENT "Generating protobuf-c and python sources for ${PBN} (Windows plugin mode)"
+                    )
+                else()
+                    add_custom_command(
+                        OUTPUT ${OUT_C} ${OUT_H} ${OUT_PY}
+                        COMMAND ${CMAKE_COMMAND} -E echo "[proto_gen] ${PF} -> ${OUT_C}"
+                        COMMAND ${CMAKE_COMMAND} -E make_directory ${OUT_DIR}
+                        COMMAND ${PROTOC_C_EXECUTABLE} --proto_path=${PROJECT_SOURCE_DIR} --proto_path=${PROJECT_SOURCE_DIR}/schema/v2 --c_out=${GENERATED_DIR} ${PF}
+                        COMMAND ${PROTOC_EXECUTABLE} --proto_path=${PROJECT_SOURCE_DIR} --proto_path=${PROJECT_SOURCE_DIR}/schema/v2 --python_out=${GENERATED_DIR} ${PF}
+                        DEPENDS ${PF}
+                        VERBATIM
+                        COMMENT "Generating protobuf-c (protoc-c CLI) and python sources for ${PBN}"
+                    )
+                endif()
                 list(APPEND GENERATED_SRC ${OUT_C})
                 list(APPEND GENERATED_HDR ${OUT_H})
                 list(APPEND GENERATED_PY ${OUT_PY})
@@ -306,6 +321,11 @@ if(WIN32)
     target_sources(drlms_signal_bridge PRIVATE
         ${PROJECT_SOURCE_DIR}/src/server/c_logging.c
     )
+
+    # Compile XEdDSA stubs/implementation into the bridge (future real impl)
+    target_sources(drlms_signal_bridge PRIVATE
+        ${PROJECT_SOURCE_DIR}/src/ming_drlms/core/drlms_xeddsa.c
+    )
     
     # Ensure DLL is output to the same directory as the server executable for easy finding
     set_target_properties(drlms_signal_bridge PROPERTIES
@@ -325,6 +345,9 @@ if(WIN32)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "$<TARGET_FILE:drlms_signal_bridge>"
             "${CMAKE_BINARY_DIR}/Release/drlms_signal_bridge.dll"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:drlms_signal_bridge>"
+            "${SIGNAL_INSTALL_PREFIX}/bin/drlms_signal_bridge.dll"
         COMMENT "Copying drlms_signal_bridge.dll to top-level Release directory"
     )
     

@@ -75,3 +75,59 @@
 - 如何让两端日志写到同一目录？
   - 统一设置 `DRLMS_LOG_DIR`（必要时再用 `DRLMS_C_LOG_DIR` 单独覆盖 C 端）。
 
+## Relay 日志命名与示例配置
+
+- **Logger 名称（Python）**
+  - `ming_drlms.relay.server`（FastAPI 中继服务端）
+  - `ming_drlms.core.relay_client`（HTTP 客户端/同步管理器）
+  - `ming_drlms.core.relay_crypto`（下行解密与验签路径）
+  - `ming_drlms.core.bridge`（CFFI 桥接加载/动态符号）
+  - `ming_drlms.cli.relay`（CLI 入口与用户交互）
+
+- **推荐级别**
+  - 生产：`server=INFO`，其余 `INFO`；
+  - 排障：将 `relay_client`/`relay_crypto`/`core.bridge` 提升至 `DEBUG`。
+
+- **最小示例（Python）**
+
+```python
+import logging, os
+
+level = os.getenv("DRLMS_LOG_LEVEL", "INFO").upper()
+logging.basicConfig(
+    level=getattr(logging, level, logging.INFO),
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+)
+
+# Fine-tune specific modules when diagnosing Relay
+logging.getLogger("ming_drlms.core.relay_client").setLevel(logging.DEBUG)
+logging.getLogger("ming_drlms.core.relay_crypto").setLevel(logging.DEBUG)
+logging.getLogger("ming_drlms.core.bridge").setLevel(logging.DEBUG)
+```
+
+- 若使用库内初始化：在程序入口调用 `ming_drlms.log.setup_logging()`，再使用上述 `getLogger(...).setLevel(...)` 精细化模块级别。
+
+### Relay 字段与脱敏原则（强制）
+
+- 服务端（`ming_drlms.relay.server`）允许输出：
+  - room（字符串）
+  - server_seq（整数）、server_ts（整数）
+  - content_len（整数）
+  - since_seq、limit（查询参数）
+  - 错误码、异常类型与堆栈（必要时）
+- 服务端禁止输出：
+  - 明文内容（content_bytes）
+  - 密文原文（ciphertext 字节/字符串），仅可记录长度（len(ciphertext)）
+  - 任何密钥材料、公钥/私钥、签名原文（signature bytes/hex）
+- 客户端（`core.relay_client`/`core.relay_crypto`）建议输出：
+  - 同步游标（last_seen_seq → max_seq）
+  - 验签结果（通过/失败，不输出签名细节）
+  - 解密/验签失败原因（分类：base64 解码失败、protobuf 解析失败、Signal 解密失败、XEdDSA 验签失败）
+  - Sender 标识（sender_id、device_id），但不输出任何密文/明文
+- 客户端禁止输出：
+  - 明文内容（仅可在 DEBUG 时输出长度 len(content_bytes)，默认关闭）
+  - 任何密钥材料、公钥/私钥、密钥派生中间值
+
+建议：
+- 若需排障内容比对，采用“长度 + 前 8 字节十六进制”的最小指纹，并仅在本地 DEBUG 开启；默认禁止。
+

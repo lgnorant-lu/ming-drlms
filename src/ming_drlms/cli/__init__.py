@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import atexit
 import time
 from pathlib import Path
 from typing import Optional
@@ -157,6 +156,7 @@ from . import config as _config  # noqa: E402
 from . import server as _server  # noqa: E402  # registers server group & aliases
 from . import room as _room  # noqa: E402
 from . import e2ee as _e2ee  # noqa: E402
+from . import relay as _relay  # noqa: E402
 
 app.add_typer(_client.client_app, name="client")
 app.add_typer(_config.config_app, name="config")
@@ -168,6 +168,7 @@ app.add_typer(_help.help_app, name="help")
 app.add_typer(_demo.demo_app, name="demo")
 app.add_typer(_server.server_app, name="server")
 app.add_typer(_e2ee.e2ee_app, name="e2ee")
+app.add_typer(_relay.relay_app, name="relay")
 _server.register_top_level_aliases(app)
 
 
@@ -195,16 +196,61 @@ def cli_tui():
     tui_main()
 
 
-# Import and register dev group (test/coverage/pkg/artifacts)
-from .dev import dev_app as _dev_app  # noqa: E402
+# XEdDSA self-test command
+@app.command(
+    "xeddsa-selftest",
+    help="Run XEdDSA sign/verify self-test with local keystore identity",
+)
+def cli_xeddsa_selftest(
+    username: Optional[str] = typer.Option(
+        None, "--user", "-u", help="username for keystore lookup"
+    ),
+):
+    import os
+    from ..core.e2ee_store import LocalKeyStore
+    from ..core.pysignal.context import create_signal_context
+    from ..core.pysignal.store import SignalStore
+    from ..core.pysignal.signature import sign_bytes_with_store, verify_bytes
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
-app.add_typer(_dev_app, name="dev")
-
-
-# atexit notification for new version (throttled)
-from .utils import notify_exit  # noqa: E402
-
-atexit.register(notify_exit)
+    user = username or os.environ.get("DRLMS_USER")
+    if not user:
+        print("[red]username is required (use --user or set DRLMS_USER)[/red]")
+        raise typer.Exit(code=2)
+    ks = LocalKeyStore()
+    st = ks.load_state(user)
+    if st is None or not st.identity_key:
+        print("[red]keystore identity not found[/red]")
+        raise typer.Exit(code=2)
+    ctx = create_signal_context()
+    store = SignalStore(ctx)
+    try:
+        store.set_identity(
+            public_key=st.identity_key.public_key,
+            private_key=st.identity_key.private_key,
+            registration_id=st.registration_id,
+            device_id=int(getattr(st, "device_id", 1) or 1),
+        )
+        msg = b"drlms-xeddsa-selftest"
+        sig = sign_bytes_with_store(store, msg)
+        seed = st.identity_key.private_key
+        seed_b = seed if isinstance(seed, (bytes, bytearray)) else bytes(seed)
+        priv = Ed25519PrivateKey.from_private_bytes(seed_b[:32])
+        pub = priv.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+        ok = verify_bytes(ctx, public_key=pub, data=msg, signature=sig)
+        if ok:
+            print("[green]xeddsa self-test ok[/green]")
+            raise typer.Exit(code=0)
+        else:
+            print("[red]xeddsa self-test failed[/red]")
+            raise typer.Exit(code=1)
+    finally:
+        try:
+            store.close()
+            ctx.close()
+        except Exception:
+            pass
 
 
 __all__ = ["app"]

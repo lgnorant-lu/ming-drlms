@@ -22,11 +22,13 @@ dependencies = [
     "typer[all]",
     "pyyaml",
     "rich",
-    "psutil",
+
     "argon2-cffi",
     "protobuf==6.33.1",
     "requests",
     "packaging>=24.2",
+    "cffi>=1.15.0",
+    "typing-extensions>=4.7.0",
     "textual>=0.47.0",
     "tomli>=2.0.0; python_version < '3.11'",
     "tomli-w>=1.0.0",
@@ -37,6 +39,13 @@ dev = [
     "pytest>=7.0",
     "pytest-cov",
     "nuitka>=2.0",
+]
+
+relay = [
+    "fastapi",
+    "uvicorn[standard]",
+    "pydantic",
+    "httpx",
 ]
 
 [project.urls]
@@ -79,3 +88,11 @@ exclude = [
     "tools/cli/src/ming_drlms/_version.py",
     "src/ming_drlms/proto/schema/v2/*_pb2.py",  # Generated protobuf files
 ]
+target-version = "py38"
+
+[tool.deptry]
+pep621_dev_dependency_groups = ["dev"]
+
+[tool.deptry.per_rule_ignores]
+DEP002 = ["fastapi", "uvicorn", "pydantic", "httpx", "pytest", "pytest-cov", "nuitka"]
+DEP001 = ["tomllib"]

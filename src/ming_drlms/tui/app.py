@@ -159,7 +159,7 @@ class DRLMSApp(App):
             if password.startswith("$argon2"):
                 p_hash = password
 
-            login_flow(
+            record = login_flow(
                 host,
                 port,
                 username,
@@ -168,7 +168,12 @@ class DRLMSApp(App):
                 token_store=token_store,
             )
 
-            # On success, switch to chat (must be done on main thread)
+            # On success, surface 14C identity info and switch to chat (must be done on main thread)
+            self.call_from_thread(
+                self._show_identity_hint,
+                record.accepted_device_id,
+                record.recorded_identity,
+            )
             self.call_from_thread(self.switch_to_chat, username, f"{host}:{port}")
 
         except Exception as e:
@@ -179,6 +184,17 @@ class DRLMSApp(App):
         """Show error on login screen."""
         if isinstance(self.screen, LoginScreen):
             self.screen.show_error(f"Login failed: {message}")
+
+    def _show_identity_hint(
+        self, accepted_device_id: int | None, recorded_identity: bool | None
+    ) -> None:
+        try:
+            dev = accepted_device_id if accepted_device_id is not None else 0
+            rec = bool(recorded_identity) if recorded_identity is not None else False
+            msg = f"14C 身份: device_id={dev}, recorded_identity={rec}"
+            self.notify(msg, severity="information")
+        except Exception:
+            pass
 
     def _utf8_guard(self) -> None:
         try:

@@ -55,7 +55,7 @@ def migrate_database(db_path: str = "drlms.db") -> bool:
 
     try:
         # 1. Add new columns to rooms table
-        print("[1/6] Checking rooms table columns...")
+        print("[1/10] Checking rooms table columns...")
 
         if not check_column_exists(cursor, "rooms", "ownership_type"):
             print("  → Adding ownership_type column...")
@@ -79,7 +79,7 @@ def migrate_database(db_path: str = "drlms.db") -> bool:
             print("  ✓ last_activity already exists")
 
         # 2. Create room_members table
-        print("\n[2/6] Checking room_members table...")
+        print("\n[2/10] Checking room_members table...")
         if not check_table_exists(cursor, "room_members"):
             print("  → Creating room_members table...")
             cursor.execute("""
@@ -98,8 +98,70 @@ def migrate_database(db_path: str = "drlms.db") -> bool:
         else:
             print("  ✓ room_members table already exists")
 
-        # 3. Create indexes
-        print("\n[3/6] Creating indexes...")
+        # 3. Create relay_events table (server-side encrypted events)
+        print("\n[3/10] Checking relay_events table...")
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS relay_events (
+                room TEXT NOT NULL,
+                server_seq INTEGER NOT NULL,
+                server_ts INTEGER NOT NULL,
+                ciphertext BLOB NOT NULL,
+                client_hash TEXT,
+                content_len INTEGER,
+                PRIMARY KEY (room, server_seq)
+            )
+            """
+        )
+        print("  ✓ relay_events table exists")
+
+        # 4. Create room_seq table (per-room sequence allocator)
+        print("\n[4/10] Checking room_seq table...")
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS room_seq (
+                room TEXT PRIMARY KEY,
+                seq INTEGER NOT NULL
+            )
+            """
+        )
+        print("  ✓ room_seq table exists")
+
+        # 5. Create client_events table (local decrypted events)
+        print("\n[5/10] Checking client_events table...")
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS client_events (
+                room TEXT NOT NULL,
+                server_seq INTEGER,
+                ts INTEGER NOT NULL,
+                sender_id TEXT NOT NULL,
+                device_id INTEGER NOT NULL,
+                content_type TEXT NOT NULL,
+                content_bytes BLOB,
+                signature BLOB NOT NULL,
+                verified INTEGER NOT NULL DEFAULT 0,
+                client_hash TEXT,
+                PRIMARY KEY (room, ts, sender_id, device_id)
+            )
+            """
+        )
+        print("  ✓ client_events table exists")
+
+        # 6. Create client_sync_state table (since_seq tracking)
+        print("\n[6/10] Checking client_sync_state table...")
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS client_sync_state (
+                room TEXT PRIMARY KEY,
+                last_seen_seq INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
+        print("  ✓ client_sync_state table exists")
+
+        # 7. Create indexes
+        print("\n[7/10] Creating indexes...")
         indexes = [
             (
                 "idx_room_members_power",
@@ -109,14 +171,30 @@ def migrate_database(db_path: str = "drlms.db") -> bool:
                 "idx_room_members_last_seen",
                 "CREATE INDEX IF NOT EXISTS idx_room_members_last_seen ON room_members(room_name, last_seen_at DESC)",
             ),
+            (
+                "idx_relay_events_room_seq",
+                "CREATE INDEX IF NOT EXISTS idx_relay_events_room_seq ON relay_events(room, server_seq)",
+            ),
+            (
+                "idx_relay_events_room_ts",
+                "CREATE INDEX IF NOT EXISTS idx_relay_events_room_ts ON relay_events(room, server_ts)",
+            ),
+            (
+                "idx_client_events_room_ts",
+                "CREATE INDEX IF NOT EXISTS idx_client_events_room_ts ON client_events(room, ts)",
+            ),
+            (
+                "idx_client_events_room_seq",
+                "CREATE INDEX IF NOT EXISTS idx_client_events_room_seq ON client_events(room, server_seq)",
+            ),
         ]
 
         for idx_name, idx_sql in indexes:
             cursor.execute(idx_sql)
             print(f"  ✓ Created index: {idx_name}")
 
-        # 4. Update existing rooms to use delegate policy
-        print("\n[4/6] Updating room policies...")
+        # 8. Update existing rooms to use delegate policy
+        print("\n[8/10] Updating room policies...")
         cursor.execute("SELECT COUNT(*) FROM rooms WHERE policy = 0")
         retain_count = cursor.fetchone()[0]
 
@@ -128,8 +206,8 @@ def migrate_database(db_path: str = "drlms.db") -> bool:
         else:
             print("  ✓ No rooms need policy update")
 
-        # 5. Clear expired owners
-        print("\n[5/6] Checking for expired owners...")
+        # 9. Clear expired owners
+        print("\n[9/10] Checking for expired owners...")
         cursor.execute("""
             SELECT name, owner, 
                    julianday('now') - julianday(updated_at) as days_inactive
@@ -160,8 +238,8 @@ def migrate_database(db_path: str = "drlms.db") -> bool:
         else:
             print("  ✓ No expired owners found")
 
-        # 6. Commit changes
-        print("\n[6/6] Committing changes...")
+        # 10. Commit changes
+        print("\n[10/10] Committing changes...")
         conn.commit()
         print("  ✓ All changes committed")
 

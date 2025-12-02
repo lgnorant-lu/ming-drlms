@@ -537,7 +537,15 @@ class ChatScreen(Screen):
             return
 
         msg_list = self.query_one(MessageList)
-        time_str = datetime.now().strftime("%H:%M")
+        ts_val = getattr(event, "timestamp", None)
+        if ts_val:
+            try:
+                ts_int = int(ts_val)
+                time_str = datetime.fromtimestamp(ts_int).strftime("%H:%M")
+            except Exception:
+                time_str = datetime.now().strftime("%H:%M")
+        else:
+            time_str = datetime.now().strftime("%H:%M")
         colors = self.app.theme_manager.current_theme.colors
 
         # Handle based on event kind
@@ -633,18 +641,34 @@ class ChatScreen(Screen):
         ):
             self._last_error_time = current_time
             self._last_error_type = error_type
-            self.app.call_from_thread(
-                lambda: self.query_one(MessageList).add_message(
-                    friendly_message, "system"
-                )
-            )
-            if self._error_count >= 3:
+            try:
                 self.app.call_from_thread(
                     lambda: self.query_one(MessageList).add_message(
-                        "Press Ctrl+R to retry now, or Ctrl+B to go back to Login",
-                        "system",
+                        friendly_message, "system"
                     )
                 )
+            except Exception:
+                # If we're already on the app thread, update directly
+                try:
+                    self.query_one(MessageList).add_message(friendly_message, "system")
+                except Exception:
+                    pass
+            if self._error_count >= 3:
+                try:
+                    self.app.call_from_thread(
+                        lambda: self.query_one(MessageList).add_message(
+                            "Press Ctrl+R to retry now, or Ctrl+B to go back to Login",
+                            "system",
+                        )
+                    )
+                except Exception:
+                    try:
+                        self.query_one(MessageList).add_message(
+                            "Press Ctrl+R to retry now, or Ctrl+B to go back to Login",
+                            "system",
+                        )
+                    except Exception:
+                        pass
 
     def _classify_error(self, exc: Exception) -> tuple[str, str]:
         """Classify error and return (type, friendly_message)."""
@@ -706,26 +730,40 @@ class ChatScreen(Screen):
 
         out_path = downloads_dir / filename
 
+        # Prefer relay file_id when backend=relay
+        file_id = getattr(event.file, "file_id", None)
+        use_id = (
+            file_id
+            if (getattr(self.controller, "_backend", "") == "relay" and file_id)
+            else event.event_id
+        )
+
         self.app.run_worker(
-            lambda: self._download_worker(event.event_id, out_path, total_bytes),
+            lambda: self._download_worker(
+                self.current_room, use_id, out_path, filename, total_bytes
+            ),
             exclusive=False,
             thread=True,
         )
 
     def _download_worker(
-        self, event_id: int, out_path: Path, total_bytes: int | None = None
+        self,
+        room: str,
+        event_id: int,
+        out_path: Path,
+        filename: str,
+        total_bytes: int | None = None,
     ) -> None:
-        """Worker for file download."""
+        """Worker function to perform file download and report result."""
         try:
-            self.controller.download_file(
-                self.current_room, event_id, out_path, total_bytes
-            )
+            self.controller.download_file(room, event_id, out_path, total_bytes)
+            # On success, show a concise system message
             self.app.call_from_thread(
                 lambda: self.query_one(MessageList).add_message(
                     f"Saved to {out_path}", "system"
                 )
             )
-            # Ensure any lingering transfer status is cleared
+            # Clear any lingering progress status
             self.app.call_from_thread(self._clear_transfer_status)
         except Exception as e:
             err_msg = str(e)
@@ -734,7 +772,6 @@ class ChatScreen(Screen):
                     f"Download failed: {err_msg}", "system"
                 )
             )
-            # Clear progress indicator on error as well
             self.app.call_from_thread(self._clear_transfer_status)
 
     def _handle_connection_state(self, state) -> None:
@@ -895,23 +932,36 @@ class ChatScreen(Screen):
         """Send a text message to the current room."""
         if self._sending:
             return
-
         self._sending = True
-        try:
-            # DEBUG: Log send attempt
-            logger.debug(f"Attempting to send: {text[:20]}...")
+        payload = text
 
-            self.controller.send_message(text)
+        def _worker() -> None:
+            try:
+                logger.debug(f"Attempting to send: {payload[:20]}...")
+                self.controller.send_message(payload)
+                logger.info("Send success")
+            except Exception as e:
+                logger.error(f"Send FAILED: {e}", exc_info=True)
+                try:
+                    self.app.call_from_thread(
+                        lambda e=e: self.query_one(MessageList).add_message(
+                            f"Failed to send: {e}", "system"
+                        )
+                    )
+                except Exception:
+                    try:
+                        self.query_one(MessageList).add_message(
+                            f"Failed to send: {e}", "system"
+                        )
+                    except Exception:
+                        pass
+            finally:
+                try:
+                    self.app.call_from_thread(lambda: setattr(self, "_sending", False))
+                except Exception:
+                    self._sending = False
 
-            logger.info("Send success")
-
-        except Exception as e:
-            # Log the full traceback
-            logger.error(f"Send FAILED: {e}", exc_info=True)
-
-            self.query_one(MessageList).add_message(f"Failed to send: {e}", "system")
-        finally:
-            self._sending = False
+        self.app.run_worker(_worker, exclusive=False, thread=True)
 
     # Methods required by CommandHandler interface
     def show_system_message(self, msg: str) -> None:

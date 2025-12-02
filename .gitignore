@@ -41,6 +41,7 @@ build*/
 # Generated protobuf-c sources (when using Makefile fallback)
 src/generated/*.pb-c.c
 src/generated/*.pb-c.h
+src/generated/schema/**/*.pb-c.*
 
 # Coverage files
 **/*.gcno
@@ -56,9 +57,10 @@ htmlcov/
 # Caches and virtual environments
 **/__pycache__/
 *.pyc
-.venv/
-.venvs/
+.venv*/
 .virtualenv/
+.venv.win/
+.venv.wsl/
 
 # Packaging & test metadata
 *.egg-info/
@@ -76,6 +78,7 @@ src/ming_drlms/bin/
 # ==================================
 vcpkg/
 vcpkg-cache/
+vcpkg_installed/
 
 # ==================================
 # Runtime Data & Logs
@@ -88,11 +91,18 @@ nohup.out
 .drlms/
 logs/
 rooms/
+data-win/
+relay_files/
 
 # SQLite database files and temporary files
+*.db*
 *.db
 *.db-shm
 *.db-wal
+
+# Env files
+.env
+.env.local
 
 # Miscellaneous
 lgn/

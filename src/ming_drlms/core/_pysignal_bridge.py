@@ -325,6 +325,17 @@ _CDEF = """
         uint64_t session_signed_pre_key_get_timestamp(
             const session_signed_pre_key *pre_key);
         void session_signed_pre_key_destroy(signal_type_base *pre_key);
+
+        int drlms_xeddsa_sign_detached(
+            drlms_signal_store *store,
+            const uint8_t *msg, size_t msg_len,
+            uint8_t **sig_out, size_t *sig_len);
+
+        int drlms_xeddsa_verify_detached(
+            signal_context *ctx,
+            const uint8_t *pub_key, size_t pub_len,
+            const uint8_t *msg, size_t msg_len,
+            const uint8_t *sig, size_t sig_len);
 """
 
 _C_SOURCE_PATH = Path(__file__).with_name("_pysignal_runtime.c")
@@ -610,6 +621,12 @@ def load_bridge() -> Tuple[FFI, object]:
             c_logging = server_dir / "c_logging.c"
             if c_logging.exists():
                 cffi_extra_sources.append(str(c_logging))
+
+        core_dir = repo_root / "src" / "ming_drlms" / "core"
+        if core_dir.exists():
+            xeddsa = core_dir / "drlms_xeddsa.c"
+            if xeddsa.exists():
+                cffi_extra_sources.append(str(xeddsa))
 
     link_args = _build_link_args(lib_path, openssl_lib)
 

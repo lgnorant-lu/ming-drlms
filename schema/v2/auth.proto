@@ -8,18 +8,37 @@ message AuthChallengeRequest {
 
 message AuthChallengeResponse {
   string nonce = 1; // 服务器发送的挑战
+  string server_salt = 2; // 可选：服务端提供的域分隔盐，用于签名绑定
 }
 
 // 阶段 2: 认证
 message AuthRequest {
   string username = 1;
   string response = 2; // H(password_hash + nonce)
+  ClientInfo client = 3; // 可选：客户端设备与签名身份信息
 }
 
 message AuthResponse {
   string access_token = 1;  // 短期 JWT
   string refresh_token = 2; // 长期 Opaque
   int64 access_token_expires_in = 3; // (秒)
+  int32 accepted_device_id = 4; // 可选：服务端确认的设备号
+  bool recorded_identity = 5;   // 可选：服务端是否已记录/更新签名身份
+}
+
+// 客户端设备与签名身份提示（可选）
+message ClientInfo {
+  int32 device_id = 1;                // 设备ID（本地生成/持久化）
+  int32 registration_id = 2;          // Signal Registration ID
+  bytes identity_pubkey = 3;          // Ed25519 公钥（32字节）
+  bytes identity_sig = 4;             // 对签名绑定消息的Ed25519签名
+  int64 sig_ts = 5;                   // 客户端签名时间戳（秒）
+  string device_guid = 6;             // 可选：设备GUID/硬件指纹
+  string platform = 7;                // 可选：平台标识（windows/linux/darwin等）
+  string app_version = 8;             // 可选：应用版本
+  uint64 capabilities = 9;            // 可选：能力位
+  bytes prev_identity_pubkey = 10;    // 可选：轮换前公钥
+  bytes rotation_proof = 11;          // 可选：轮换证明（前后密钥相互签名）
 }
 
 // 阶段 4: 刷新

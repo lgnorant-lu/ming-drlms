@@ -141,6 +141,18 @@ if(NOT CMAKE_CONFIGURATION_TYPES)
     list(APPEND _signal_cmake_args -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE})
 endif()
 
+# Determine the expected signal-protocol-c library path so it can be treated
+# as a byproduct of the external project. This lets Ninja know which file is
+# produced when building signal_protocol_ext.
+if(WIN32)
+    # Windows: shared library uses an import library for linking
+    set(_signal_lib_name "signal-protocol-c.lib")
+else()
+    # Unix: static library for better compatibility
+    set(_signal_lib_name "libsignal-protocol-c.a")
+endif()
+set(_signal_lib_path "${SIGNAL_INSTALL_PREFIX}/lib/${_signal_lib_name}")
+
 ExternalProject_Add(signal_protocol_ext
     PREFIX ${CMAKE_BINARY_DIR}/_deps/signal
     GIT_REPOSITORY ${SIGNAL_PROTO_REPO}
@@ -150,6 +162,7 @@ ExternalProject_Add(signal_protocol_ext
     PATCH_COMMAND ${CMAKE_COMMAND} -DSIGNAL_SRC_DIR=<SOURCE_DIR> -P ${_signal_patch_script}
     CMAKE_ARGS ${_signal_cmake_args}
     INSTALL_DIR ${SIGNAL_INSTALL_PREFIX}
+    BUILD_BYPRODUCTS ${_signal_lib_path}
     LOG_DOWNLOAD ON
     LOG_CONFIGURE ON
     LOG_BUILD ON
@@ -159,7 +172,7 @@ if(WIN32 AND DEFINED OPENSSL_ROOT_DIR)
     set(_openssl_bin "${OPENSSL_ROOT_DIR}/bin")
     set(_signal_bin "${SIGNAL_INSTALL_PREFIX}/bin")
     install(CODE "file(MAKE_DIRECTORY \"${_signal_bin}\")")
-    add_custom_command(TARGET signal_protocol_ext POST_INSTALL
+    add_custom_command(TARGET signal_protocol_ext POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_openssl_bin}/libcrypto-3-x64.dll" "${_signal_bin}"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_openssl_bin}/libssl-3-x64.dll" "${_signal_bin}"
         COMMENT "Copying OpenSSL DLLs into signal install bin"
@@ -174,16 +187,7 @@ file(MAKE_DIRECTORY "${SIGNAL_INSTALL_PREFIX}/include")
 file(MAKE_DIRECTORY "${SIGNAL_INSTALL_PREFIX}/lib")
 file(MAKE_DIRECTORY "${SIGNAL_INSTALL_PREFIX}/bin")
 
-# 根据平台设置库文件名
-if(WIN32)
-    # Windows: shared library - use import library for linking
-    set(_signal_lib_name "signal-protocol-c.lib")
-else()
-    # Unix: static library for better compatibility
-    set(_signal_lib_name "libsignal-protocol-c.a")
-endif()
-
-set(_signal_lib_path "${SIGNAL_INSTALL_PREFIX}/lib/${_signal_lib_name}")
+# Imported target pointing at the library produced by the external project.
 add_library(signal_protocol STATIC IMPORTED GLOBAL)
 add_dependencies(signal_protocol signal_protocol_ext)
 set_target_properties(signal_protocol PROPERTIES

@@ -26,8 +26,8 @@
 #include "logger.h"
 #ifdef HAVE_PROTOBUF_C
 
-#include "generated/schema/v2/auth.pb-c.h"
-#include "generated/schema/v2/common.pb-c.h"
+#include "schema/v2/auth.pb-c.h"
+#include "schema/v2/common.pb-c.h"
 
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
@@ -67,6 +67,7 @@ typedef struct AuthConnState {
     int nonce_set;
     char user[64];
     time_t nonce_issued_at;
+    char server_salt[65];
     char access_token[2048];
     time_t access_exp;
     struct AuthConnState *next;
@@ -417,6 +418,12 @@ int mp2_auth_handle_challenge(platform_socket_t fd) {
     AuthChallengeResponse resp;
     mingdrlms__v2__auth_challenge_response__init(&resp);
     resp.nonce = st->nonce;
+    const char *salt_env = getenv("DRLMS_SERVER_SALT");
+    if (!salt_env || !*salt_env) {
+        salt_env = "mp2"; /* domain separation default */
+    }
+    snprintf(st->server_salt, sizeof st->server_salt, "%s", salt_env);
+    resp.server_salt = st->server_salt;
     size_t packed = auth_challenge_response__get_packed_size(&resp);
     unsigned char *buf = (unsigned char *)malloc(packed);
     if (!buf) {
@@ -449,6 +456,8 @@ int mp2_auth_handle_auth_request(platform_socket_t fd,
 
     AuthConnState *st = auth_get(fd, 0);
     int ok = 0;
+    int accepted_device_id = 0;
+    int recorded_identity = 0;
     const char *verbose = getenv("DRLMS_TEST_VERBOSE");
     if (st && st->nonce_set) {
         const char *stored = server_users_find_hash(req->username);
@@ -506,29 +515,139 @@ int mp2_auth_handle_auth_request(platform_socket_t fd,
         if (st) {
             snprintf(st->user, sizeof st->user, "%s", req->username);
         }
-        unsigned long long exp = (unsigned long long)time(NULL) + 15ULL * 60ULL;
-        if (jwt_hs256_make(req->username, exp, secret, jwt, sizeof jwt) == 0) {
-            resp.access_token = jwt;
-            resp.access_token_expires_in = 15 * 60;
+
+        /* 14C: verify ClientInfo identity signature if provided */
+        const char *strict = getenv("DRLMS_REQUIRE_IDENTITY_SIG");
+        int require_sig = (strict && strcmp(strict, "1") == 0) ? 1 : 0;
+        int sig_ok = 0;
+        if (require_sig && !req->client) {
+            ok = 0;
         }
-        if (generate_random_hex(refresh_token, sizeof refresh_token, 64) == 0) {
-            resp.refresh_token = refresh_token;
+        if (req->client) {
+            const Mingdrlms__V2__ClientInfo *ci = req->client;
+            if (ci->identity_pubkey.len == 32 && ci->identity_sig.len > 0) {
+                /* Build binding message:
+                 * MP2-LOGIN-V1|username|device_id|registration_id|nonce|server_salt|sig_ts
+                 */
+                char devbuf[32];
+                char regbuf[32];
+                char tsbuf[32];
+                snprintf(devbuf, sizeof devbuf, "%d", (int)ci->device_id);
+                snprintf(regbuf, sizeof regbuf, "%d", (int)ci->registration_id);
+                snprintf(tsbuf, sizeof tsbuf, "%lld", (long long)ci->sig_ts);
+                const char *uname = req->username ? req->username : "";
+                const char *nonce = (st && st->nonce_set) ? st->nonce : "";
+                const char *salt =
+                    (st && st->server_salt[0]) ? st->server_salt : "";
+                size_t msg_cap = strlen("MP2-LOGIN-V1") + 1 + strlen(uname) +
+                                 1 + strlen(devbuf) + 1 + strlen(regbuf) + 1 +
+                                 strlen(nonce) + 1 + strlen(salt) + 1 +
+                                 strlen(tsbuf) + 1;
+                unsigned char *binding = (unsigned char *)malloc(msg_cap);
+                if (binding) {
+                    int blen = snprintf((char *)binding, msg_cap,
+                                        "MP2-LOGIN-V1|%s|%s|%s|%s|%s|%s", uname,
+                                        devbuf, regbuf, nonce, salt, tsbuf);
+                    if (blen > 0) {
+                        EVP_PKEY *pkey = EVP_PKEY_new_raw_public_key(
+                            EVP_PKEY_ED25519, NULL, ci->identity_pubkey.data,
+                            32);
+                        if (pkey) {
+                            EVP_MD_CTX *md = EVP_MD_CTX_new();
+                            if (md && EVP_DigestVerifyInit(md, NULL, NULL, NULL,
+                                                           pkey) == 1) {
+                                int vrc = EVP_DigestVerify(
+                                    md, ci->identity_sig.data,
+                                    (size_t)ci->identity_sig.len, binding,
+                                    (size_t)blen);
+                                if (vrc == 1) {
+                                    sig_ok = 1;
+                                }
+                            }
+                            if (md)
+                                EVP_MD_CTX_free(md);
+                            EVP_PKEY_free(pkey);
+                        }
+                    }
+                    free(binding);
+                }
+
+                /* Check replay/skew window */
+                if (sig_ok) {
+                    long long skew = 300; /* default 5 minutes */
+                    const char *sk = getenv("DRLMS_IDENTITY_SIG_MAX_SKEW");
+                    if (sk && *sk) {
+                        long long v = atoll(sk);
+                        if (v > 0)
+                            skew = v;
+                    }
+                    long long now = (long long)time(NULL);
+                    long long ts = (long long)ci->sig_ts;
+                    long long diff = now - ts;
+                    if (diff < 0)
+                        diff = -diff;
+                    if (diff > skew) {
+                        sig_ok = 0; /* too old/future */
+                    }
+                }
+            }
+
+            if (require_sig && !sig_ok) {
+                ok = 0; /* enforce */
+            }
+
+            if (ok && sig_ok && cfg && cfg->data_dir &&
+                ci->identity_pubkey.len == 32) {
+                char db_path[PATH_MAX];
+                snprintf(db_path, sizeof db_path, "%s/%s", cfg->data_dir,
+                         "drlms.db");
+                (void)sqlite_upsert_client_identity_path(
+                    db_path, req->username, (int)ci->device_id,
+                    (const unsigned char *)ci->identity_pubkey.data,
+                    (size_t)ci->identity_pubkey.len, (int)ci->registration_id,
+                    (ci->device_guid && *ci->device_guid) ? ci->device_guid
+                                                          : NULL,
+                    (ci->platform && *ci->platform) ? ci->platform : NULL,
+                    (ci->app_version && *ci->app_version) ? ci->app_version
+                                                          : NULL,
+                    (sqlite3_int64)time(NULL));
+                recorded_identity = 1;
+                accepted_device_id = (int)ci->device_id;
+            } else if (ok && ci) {
+                accepted_device_id = (int)ci->device_id;
+            }
         }
-        if (st) {
-            snprintf(st->access_token, sizeof st->access_token, "%s",
-                     resp.access_token ? resp.access_token : "");
-            st->access_exp = time(NULL) + 15 * 60;
-        }
-        if (cfg->data_dir && resp.refresh_token) {
-            char db_path[PATH_MAX];
-            snprintf(db_path, sizeof db_path, "%s/%s", cfg->data_dir,
-                     "drlms.db");
-            sqlite_insert_refresh_token_path(
-                db_path, req->username, resp.refresh_token,
-                (sqlite3_int64)(time(NULL) + 7 * 24 * 3600));
+
+        if (ok) {
+            unsigned long long exp =
+                (unsigned long long)time(NULL) + 15ULL * 60ULL;
+            if (jwt_hs256_make(req->username, exp, secret, jwt, sizeof jwt) ==
+                0) {
+                resp.access_token = jwt;
+                resp.access_token_expires_in = 15 * 60;
+            }
+            if (generate_random_hex(refresh_token, sizeof refresh_token, 64) ==
+                0) {
+                resp.refresh_token = refresh_token;
+            }
+            if (st) {
+                snprintf(st->access_token, sizeof st->access_token, "%s",
+                         resp.access_token ? resp.access_token : "");
+                st->access_exp = time(NULL) + 15 * 60;
+            }
+            if (cfg->data_dir && resp.refresh_token) {
+                char db_path[PATH_MAX];
+                snprintf(db_path, sizeof db_path, "%s/%s", cfg->data_dir,
+                         "drlms.db");
+                sqlite_insert_refresh_token_path(
+                    db_path, req->username, resp.refresh_token,
+                    (sqlite3_int64)(time(NULL) + 7 * 24 * 3600));
+            }
         }
     }
 
+    resp.accepted_device_id = accepted_device_id;
+    resp.recorded_identity = recorded_identity ? 1 : 0;
     size_t packed = auth_response__get_packed_size(&resp);
     unsigned char *buf = (unsigned char *)malloc(packed);
     if (!buf) {

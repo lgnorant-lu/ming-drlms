@@ -19,7 +19,11 @@ add_library(ipc_static STATIC $<TARGET_OBJECTS:libipc_obj>)
 set_target_properties(ipc_static PROPERTIES OUTPUT_NAME ipc)
 
 add_library(ipc_shared SHARED $<TARGET_OBJECTS:libipc_obj>)
-set_target_properties(ipc_shared PROPERTIES OUTPUT_NAME ipc)
+if(WIN32)
+    set_target_properties(ipc_shared PROPERTIES OUTPUT_NAME ipc_shared)
+else()
+    set_target_properties(ipc_shared PROPERTIES OUTPUT_NAME ipc)
+endif()
 
 target_link_libraries(ipc_static PUBLIC Threads::Threads platform)
 

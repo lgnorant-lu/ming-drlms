@@ -883,6 +883,27 @@ static void sha512_cleanup(void *digest_context, void *user_data) {
     free(digest_context);
 }
 
+#ifdef _WIN32
+#ifndef DRLMS_EXPORT
+#define DRLMS_EXPORT __declspec(dllexport)
+#endif
+#else
+#ifndef DRLMS_EXPORT
+#define DRLMS_EXPORT
+#endif
+#endif
+
+DRLMS_EXPORT int drlms_signal_store_get_identity_private(
+    const drlms_signal_store *store, const uint8_t **priv, size_t *priv_len) {
+    if (!store || !priv || !priv_len || !store->identity_private ||
+        store->identity_private_len == 0) {
+        return -1;
+    }
+    *priv = store->identity_private;
+    *priv_len = store->identity_private_len;
+    return 0;
+}
+
 static int aes_process(signal_buffer **output, int cipher, const uint8_t *key,
                        size_t key_len, const uint8_t *iv, size_t iv_len,
                        const uint8_t *input, size_t input_len, int encrypt) {
@@ -1002,6 +1023,21 @@ int drlms_signal_context_configure(signal_context *ctx) {
     provider.user_data = NULL;
     return signal_context_set_crypto_provider(ctx, &provider);
 }
+
+/*
+ * Planned XEdDSA detached sign/verify interface (not yet implemented):
+ *
+ * int drlms_xeddsa_sign_detached(
+ *     drlms_signal_store *store,
+ *     const uint8_t *msg, size_t msg_len,
+ *     uint8_t **sig_out, size_t *sig_len);
+ *
+ * int drlms_xeddsa_verify_detached(
+ *     signal_context *ctx,
+ *     const uint8_t *pub_key, size_t pub_len,
+ *     const uint8_t *msg, size_t msg_len,
+ *     const uint8_t *sig, size_t sig_len);
+ */
 
 static int drlms_signal_store_attach(drlms_signal_store *store) {
     signal_protocol_session_store *session;

@@ -7,7 +7,7 @@ import sys
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 if sys.version_info >= (3, 11):
     import tomllib as tomli
@@ -46,8 +46,15 @@ class AppConfig:
 class ConfigManager:
     """Manages application configuration."""
 
-    def __init__(self, config_path: Path = CONFIG_FILE):
-        self.config_path = config_path
+    def __init__(self, config_path: Optional[Path] = None):
+        if config_path is None:
+            cfg_base = os.environ.get("MING_DRLMS_CONFIG_DIR")
+            config_dir = (
+                Path(cfg_base).expanduser() if cfg_base else (Path.home() / ".drlms")
+            )
+            self.config_path = config_dir / "config.toml"
+        else:
+            self.config_path = config_path
         self.config = AppConfig()
         # Don't create config directory or file on init - do it lazily on save
         self._loaded = False

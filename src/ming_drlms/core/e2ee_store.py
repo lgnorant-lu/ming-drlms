@@ -368,6 +368,33 @@ class LocalKeyStore:
             return _decode_bytes(encoded)
         return None
 
+    def record_remote_signing_identity(
+        self, username: str, peer: str, device_id: int, identity: bytes
+    ) -> None:
+        payload = self._load_user_payload(username)
+        if payload is None:
+            payload = {}
+        remote_map = payload.setdefault("remote_signing_identities", {})
+        if not isinstance(remote_map, dict):
+            remote_map = {}
+            payload["remote_signing_identities"] = remote_map
+        remote_map[f"{peer}#{device_id}"] = identity.hex()
+        self._store_user_payload(username, payload)
+
+    def get_remote_signing_identity(
+        self, username: str, peer: str, device_id: int
+    ) -> Optional[bytes]:
+        payload = self._load_user_payload(username)
+        if not payload:
+            return None
+        remote_map = payload.get("remote_signing_identities")
+        if not isinstance(remote_map, dict):
+            return None
+        encoded = remote_map.get(f"{peer}#{device_id}")
+        if isinstance(encoded, str):
+            return _decode_bytes(encoded)
+        return None
+
     def store_sender_key(self, username: str, record: SenderKeyRecord) -> None:
         payload = self._load_user_payload(username) or {}
         sender_map = payload.setdefault("sender_keys", {})

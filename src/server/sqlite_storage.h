@@ -210,6 +210,20 @@ int sqlite_find_refresh_token_path(const char *db_path, const char *token,
                                    char *out_user, size_t out_user_cap,
                                    sqlite3_int64 *out_expires_at);
 
+/* -------------------- Client identities (14C) -------------------- */
+int sqlite_upsert_client_identity(SQLiteStorage *storage, const char *user,
+                                  int device_id, const unsigned char *pubkey,
+                                  size_t pubkey_len, int registration_id,
+                                  const char *device_guid, const char *platform,
+                                  const char *app_version,
+                                  sqlite3_int64 updated_at);
+
+int sqlite_upsert_client_identity_path(
+    const char *db_path, const char *user, int device_id,
+    const unsigned char *pubkey, size_t pubkey_len, int registration_id,
+    const char *device_guid, const char *platform, const char *app_version,
+    sqlite3_int64 updated_at);
+
 /**
  * 清理SQLite存储资源
  *
