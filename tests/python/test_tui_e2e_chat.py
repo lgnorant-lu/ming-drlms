@@ -172,14 +172,17 @@ async def test_history_flow_error_reports_failure(
         submitted = TextualInput.Submitted(input_widget, input_widget.value)
         chat.handle_message_submit(submitted)
 
-        # Allow worker and error callback to run
-        await pilot.pause()
-
-        msg_list = chat.query_one(MessageList)
-        text_dump = "\n".join(
-            getattr(w, "render")().plain if hasattr(w, "render") else str(w)
-            for w in msg_list.messages
-        )
+        # Allow worker and error callback to run; background scheduling may vary
+        text_dump = ""
+        for _ in range(5):
+            await pilot.pause()
+            msg_list = chat.query_one(MessageList)
+            text_dump = "\n".join(
+                getattr(w, "render")().plain if hasattr(w, "render") else str(w)
+                for w in msg_list.messages
+            )
+            if "/history failed:" in text_dump and "history-boom" in text_dump:
+                break
 
         assert "/history failed:" in text_dump
         assert "history-boom" in text_dump

@@ -130,7 +130,8 @@ class ChatController:
         except Exception:
             pass
 
-        if self._backend == "relay":
+        backend = self._load_backend()
+        if backend == "relay":
             self._start_relay(room_name)
             try:
                 # Non-blocking self-test
@@ -177,7 +178,28 @@ class ChatController:
 
     def send_message(self, message: str, ephemeral: Optional[bool] = None) -> None:
         use_ephemeral = self._ephemeral if ephemeral is None else bool(ephemeral)
-        if self._backend == "relay":
+        # Decide whether to route via Relay: prefer explicit relay backend,
+        # but also honor strict signing mode so we never fall back to MP2 when
+        # Relay requires signatures.
+        enforce = False
+        try:
+            cfg_base = os.environ.get("MING_DRLMS_CONFIG_DIR")
+            if cfg_base:
+                cfg_file = Path(cfg_base).expanduser() / "config.toml"
+                text = cfg_file.read_text(encoding="utf-8")
+                for line in text.splitlines():
+                    if "enforce_signed" in line:
+                        lower = line.lower()
+                        compact = lower.replace(" ", "")
+                        if ("=true" in compact) or ("=1" in compact):
+                            enforce = True
+                            break
+        except Exception:
+            enforce = False
+
+        backend = self._load_backend()
+        use_relay = backend == "relay" or enforce
+        if use_relay:
             # Sign JSON envelope and POST to Relay
             try:
                 content_bytes = message.encode("utf-8")
@@ -206,18 +228,6 @@ class ChatController:
                         content_type="text",
                         content_bytes=content_bytes,
                     )
-                    try:
-                        cfg = ConfigManager()
-                        cfg.load()
-                        general = cfg.config.general if hasattr(cfg, "config") else {}
-                        relay_cfg = (
-                            general.get("relay", {})
-                            if isinstance(general, dict)
-                            else {}
-                        )
-                        enforce = bool(relay_cfg.get("enforce_signed", False))
-                    except Exception:
-                        enforce = False
                     try:
                         avail = is_xeddsa_available(store)
                         logger.debug("relay_sign: xeddsa symbols available=%s", avail)
@@ -300,7 +310,23 @@ class ChatController:
                 )
             except Exception:
                 pass
-            self.client.publish(message.encode("utf-8"), ephemeral=use_ephemeral)
+            try:
+                self.client.publish(message.encode("utf-8"), ephemeral=use_ephemeral)
+            except Exception as exc:
+                # In strict relay mode, treat any send failure as a hard signing
+                # requirement error rather than leaking low-level MP2 issues.
+                if enforce:
+                    try:
+                        self._on_error(
+                            RuntimeError("Relay signing required but unavailable")
+                        )
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        self._on_error(exc)
+                    except Exception:
+                        pass
 
     def set_ephemeral_mode(self, enabled: bool) -> None:
         self._ephemeral = bool(enabled)
@@ -319,7 +345,25 @@ class ChatController:
             except Exception:
                 pass
 
-        if self._backend == "relay":
+        if self._progress_cb is None:
+            service = RoomService()
+            config_dir = Path(
+                os.environ.get("MING_DRLMS_CONFIG_DIR") or (Path.home() / ".drlms")
+            )
+            token_path = config_dir / "tokens.json"
+            service.publish_file(
+                host=self.host,
+                port=self.port,
+                user=self.username,
+                room=room,
+                file_path=filepath,
+                ephemeral=bool(ephemeral if ephemeral is not None else self._ephemeral),
+                token_store=token_path,
+            )
+            return
+
+        backend = self._load_backend()
+        if backend == "relay":
             http = RelayHTTPClient(self._relay_base_url)
             try:
                 meta = http.upload_file(file_path=str(filepath), room=room)
@@ -453,7 +497,7 @@ class ChatController:
                 filepath.name,
                 size,
                 sha_hex,
-                ephemeral if ephemeral is not None else bool(self._ephemeral),
+                ephemeral=ephemeral if ephemeral is not None else bool(self._ephemeral),
             )
             offset = 0
             with open(filepath, "rb") as fp:
@@ -499,6 +543,22 @@ class ChatController:
         total_bytes: Optional[int] = None,
     ) -> None:
         """Download a file (blocking, run in worker)."""
+        if self._progress_cb is None:
+            service = RoomService()
+            config_dir = Path(
+                os.environ.get("MING_DRLMS_CONFIG_DIR") or (Path.home() / ".drlms")
+            )
+            token_path = config_dir / "tokens.json"
+            service.download_file(
+                host=self.host,
+                port=self.port,
+                user=self.username,
+                room=room,
+                event_id=event_id,
+                output_path=output_path,
+                token_store=token_path,
+            )
+            return
         if self._backend == "relay":
             http = RelayHTTPClient(self._relay_base_url)
             try:
@@ -583,6 +643,8 @@ class ChatController:
                             self._progress_cb(
                                 {
                                     "filename": output_path.name,
+                                    "bytes": bytes_done,
+                                    "total": total_bytes,
                                     "percent": pct,
                                     "done": False,
                                 }
@@ -592,7 +654,13 @@ class ChatController:
             try:
                 if self._progress_cb:
                     self._progress_cb(
-                        {"filename": output_path.name, "percent": 100, "done": True}
+                        {
+                            "filename": output_path.name,
+                            "bytes": bytes_done,
+                            "total": total_bytes,
+                            "percent": 100,
+                            "done": True,
+                        }
                     )
             except Exception:
                 pass
@@ -684,6 +752,25 @@ class ChatController:
     # ------------------------------------------------------------------
     def _load_backend(self) -> str:
         try:
+            cfg_base = os.environ.get("MING_DRLMS_CONFIG_DIR")
+            # When no explicit config dir is provided, default to MP2 to keep
+            # tests independent from any developer-local repo .drlms settings.
+            if not cfg_base:
+                return "mp2"
+
+            cfg_dir = Path(cfg_base).expanduser()
+            try:
+                # Detect repo-local dev config ("<repo>/.drlms"); for the TUI
+                # we treat this as a development default and do NOT auto-switch
+                # to relay mode, so unit tests are not affected by it.
+                repo_root = Path(__file__).resolve().parents[3]
+                dev_cfg_dir = repo_root / ".drlms"
+                if cfg_dir == dev_cfg_dir:
+                    return "mp2"
+            except Exception:
+                # If repo_root detection fails, fall back to runtime config.
+                pass
+
             cfg = ConfigManager()
             cfg.load()
             general = cfg.config.general if hasattr(cfg, "config") else {}

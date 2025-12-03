@@ -135,19 +135,55 @@ jobs:
         shell: bash
         run: bash scripts/ci/run-python-tests.sh
 
-      - name: Run coverage and integration suite
-        shell: bash
-        run: bash scripts/ci/run-coverage-suite.sh
-
       - name: Smoke Test M-Proto-v2 Handler
         if: matrix.os == 'ubuntu-latest'
         shell: bash
         run: bash scripts/ci/run-smoke-mproto.sh
 
-      - name: Upload coverage artifacts
+  linux-p2p-coverage:
+    name: Linux P2P + Coverage
+    runs-on: ubuntu-latest
+    needs: cross-platform
+    env:
+      DRLMS_SIGNAL_PREFIX: ${{ github.workspace }}/build/_deps/signal-install
+      RUNNER_OS: ubuntu-latest
+      VCPKG_ROOT: ${{ github.workspace }}/.cache/vcpkg
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.cache/vcpkg-binary-cache
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('pyproject.toml', 'requirements-dev.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+            ${{ runner.os }}-
+
+      - name: Install system dependencies (Linux)
+        shell: bash
+        run: bash scripts/ci/install-linux-deps.sh
+
+      - name: Install Python dependencies
+        shell: bash
+        run: bash scripts/ci/install-python-deps.sh
+
+      - name: Run Linux P2P + coverage suite
+        shell: bash
+        run: bash scripts/ci/run-coverage-suite.sh
+
+      - name: Upload coverage artifacts (Linux)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-${{ matrix.name }}
+          name: coverage-Linux
           path: coverage/
           if-no-files-found: ignore

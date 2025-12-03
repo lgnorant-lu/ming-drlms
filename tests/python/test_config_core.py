@@ -52,6 +52,8 @@ def test_load_config_merges_yaml_rooms_and_federation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.delenv("MING_DRLMS_CONFIG_DIR", raising=False)
+    monkeypatch.delenv("DRLMS_PORT", raising=False)
+    monkeypatch.delenv("DRLMS_DATA_DIR", raising=False)
     monkeypatch.chdir(tmp_path)
 
     yaml_path = tmp_path / "drlms.yaml"

@@ -66,6 +66,7 @@ class RealServerPresenceTest:
         env["DRLMS_ENABLE_MPROTO_V2"] = "1"
         env["DRLMS_MP2_DEBUG"] = "1"
         env["DRLMS_PORT"] = str(reserved_port)
+        env["DRLMS_REQUIRE_IDENTITY_SIG"] = "0"
 
         self.server_process = subprocess.Popen(
             server_binary,

@@ -246,9 +246,6 @@ void mp2_room_members_handle_list_request(platform_socket_t fd,
                 !mp2_protocol_is_fd_mp2(sub->fd) || sub->user[0] == '\0') {
                 continue;
             }
-            if (strcmp(sub->user, requester) == 0) {
-                continue;
-            }
             if (mp2_room_members_snapshot_push(&snapshots, &snapshot_len,
                                                &snapshot_cap, sub->user, 1,
                                                sub->joined_at) != 0) {

@@ -331,3 +331,126 @@ def test_get_room_members_mp2_wraps_errors(monkeypatch: pytest.MonkeyPatch) -> N
 
     with pytest.raises(RoomServiceError):
         svc.get_room_members_mp2(host="h", port=1, user="u", room="r")
+
+
+def test_subscribe_with_e2ee_wraps_decrypt_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When E2EEngine.decrypt raises, RoomService.subscribe should surface a RoomServiceError.
+
+    This exercises the 14A E2EE integration path where runtime E2EE failures are
+    translated into a CLI-friendly error instead of leaking SignalBridgeError.
+    """
+
+    class _Event:
+        def __init__(self) -> None:
+            # Minimal attributes accessed by subscribe when group_id is empty
+            self.kind = None
+            self.presence = None
+            self.group_id = ""
+
+    client = DummyClient(events=[_Event()])
+    svc = _make_service(client)
+
+    # Force _build_key_store to return a truthy value so that E2EEngine path
+    # is exercised.
+    monkeypatch.setattr(
+        RoomService, "_build_key_store", lambda self, path: object(), raising=False
+    )
+
+    class BadEngine:
+        def __init__(self, *args, **kwargs) -> None:  # type: ignore[override]
+            # Normal construction; failure happens during decrypt.
+            pass
+
+        def decrypt(self, event):  # type: ignore[override]
+            raise SignalBridgeError("decrypt-fail")
+
+        def process_sender_key_distribution(self, dist) -> None:  # type: ignore[override]
+            return None
+
+        def close(self) -> None:  # type: ignore[override]
+            return None
+
+    monkeypatch.setattr(rs_mod, "E2EEngine", BadEngine)
+
+    with pytest.raises(RoomServiceError) as excinfo:
+        list(
+            svc.subscribe(
+                host="h",
+                port=1,
+                user="u",
+                room="r",
+                since_id=0,
+                token_store="ts",
+                timeout=1.0,
+                e2ee_store=SysPath("dummy"),
+            )
+        )
+    assert "E2EE 解密失败" in str(excinfo.value)
+
+
+def test_subscribe_with_e2ee_sender_key_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Sender-key processing failures should surface as RoomServiceError.
+
+    This exercises the outer SignalBridgeError -> RoomServiceError mapping in
+    RoomService.subscribe when the sender_key_callback pathway fails.
+    """
+
+    class SenderKeyErrorClient(DummyClient):
+        def subscribe(
+            self,
+            user: str,
+            room: str,
+            *,
+            since_id: int,
+            sender_key_callback=None,
+        ):
+            # Immediately invoke the callback to simulate a sender-key
+            # distribution failure inside the subscribe loop.
+            if sender_key_callback is not None:
+                sender_key_callback(object())
+            return super().subscribe(
+                user, room, since_id=since_id, sender_key_callback=sender_key_callback
+            )
+
+    client = SenderKeyErrorClient(
+        events=[SimpleNamespace(kind=None, presence=None, group_id="")]
+    )
+    svc = _make_service(client)
+
+    # Force E2EEngine path
+    monkeypatch.setattr(
+        RoomService, "_build_key_store", lambda self, path: object(), raising=False
+    )
+
+    class BadEngine:
+        def __init__(self, *args, **kwargs) -> None:  # type: ignore[override]
+            pass
+
+        def process_sender_key_distribution(self, dist) -> None:  # type: ignore[override]
+            raise SignalBridgeError("sender-key-fail")
+
+        def decrypt(self, event):  # type: ignore[override]
+            # Not reached in this test, but must exist for interface completeness.
+            return SimpleNamespace(plaintext=b"x", info=SimpleNamespace(message_type=2))
+
+        def close(self) -> None:  # type: ignore[override]
+            return None
+
+    monkeypatch.setattr(rs_mod, "E2EEngine", BadEngine)
+
+    with pytest.raises(RoomServiceError) as excinfo:
+        list(
+            svc.subscribe(
+                host="h",
+                port=1,
+                user="u",
+                room="r",
+                since_id=0,
+                token_store="ts",
+                timeout=1.0,
+                e2ee_store=SysPath("dummy"),
+            )
+        )
+    assert "E2EE sender key 处理失败" in str(excinfo.value)

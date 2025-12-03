@@ -157,6 +157,7 @@ from . import server as _server  # noqa: E402  # registers server group & aliase
 from . import room as _room  # noqa: E402
 from . import e2ee as _e2ee  # noqa: E402
 from . import relay as _relay  # noqa: E402
+from . import dev as _dev  # noqa: E402
 
 app.add_typer(_client.client_app, name="client")
 app.add_typer(_config.config_app, name="config")
@@ -169,6 +170,7 @@ app.add_typer(_demo.demo_app, name="demo")
 app.add_typer(_server.server_app, name="server")
 app.add_typer(_e2ee.e2ee_app, name="e2ee")
 app.add_typer(_relay.relay_app, name="relay")
+app.add_typer(_dev.dev_app, name="dev")
 _server.register_top_level_aliases(app)
 
 

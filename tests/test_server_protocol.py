@@ -105,6 +105,12 @@ class ServerProcess:
                 "DRLMS_DATA_DIR": str(cfg.data_dir),
                 "DRLMS_AUTH_STRICT": "1",
                 "DRLMS_ENABLE_MPROTO_V2": "1",
+                # Default to non-strict identity mode unless explicitly overridden
+                # via cfg.env. This allows dedicated tests to enable strict
+                # identity verification without affecting other suites.
+                "DRLMS_REQUIRE_IDENTITY_SIG": cfg.env.get(
+                    "DRLMS_REQUIRE_IDENTITY_SIG", "0"
+                ),
                 "DRLMS_JWT_SECRET": env.get("DRLMS_JWT_SECRET", "integration-secret"),
                 "DRLMS_LOG_LEVEL": "DEBUG",  # Enable debug logging
                 # Redirect stderr to stdout so we can see server errors

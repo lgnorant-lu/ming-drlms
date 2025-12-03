@@ -38,6 +38,8 @@ dependencies = [
 dev = [
     "pytest>=7.0",
     "pytest-cov",
+    "pytest-asyncio>=0.23.0",
+    "python-multipart",
     "nuitka>=2.0",
 ]
 
@@ -94,5 +96,4 @@ target-version = "py38"
 pep621_dev_dependency_groups = ["dev"]
 
 [tool.deptry.per_rule_ignores]
-DEP002 = ["fastapi", "uvicorn", "pydantic", "httpx", "pytest", "pytest-cov", "nuitka"]
 DEP001 = ["tomllib"]

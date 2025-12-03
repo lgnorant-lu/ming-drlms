@@ -392,3 +392,91 @@ def test_tui_relay_send_aborts_when_enforce_signed_and_no_sign(
     # Should not have posted because enforce_signed=true and no signature available
     assert posted == {}
     assert any("Relay signing required" in msg for msg in errors)
+
+
+def test_tui_relay_receive_drops_unverified_events(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Relay receive path must drop events that fail signature verification.
+
+    This exercises the `if not clear or not clear.get("verified", False): continue`
+    branch in ChatController._start_relay's poll loop.
+    """
+
+    # Arrange config and env
+    cfg_dir = _write_config(tmp_path)
+    monkeypatch.setenv("MING_DRLMS_CONFIG_DIR", str(cfg_dir))
+
+    from ming_drlms.tui.logic import ChatController
+    import ming_drlms.tui.logic as logic
+
+    # Decrypt+verify helper that always reports unverified
+    def fake_build_dec(engine_factory, identity_resolver, on_verified=None):
+        def _dec(item: dict) -> dict | None:
+            # Simulate a parsed envelope that fails signature verification.
+            return {"verified": False}
+
+        return _dec
+
+    monkeypatch.setattr(logic, "build_decrypt_and_verify", fake_build_dec)
+
+    # Dummy Relay client that yields one event once
+    class _DummyRelay:
+        def __init__(self, base_url: str, *, timeout: float = 10.0) -> None:
+            self._closed = False
+            env = {
+                "sender_id": "alice",
+                "device_id": 1,
+                "ts": int(time.time()),
+                "content_type": "text",
+                "content_bytes_b64": base64.b64encode(b"hello-relay").decode("ascii"),
+                "signature_hex": "",
+            }
+            self._items = [
+                {
+                    "room": "Town Square",
+                    "server_seq": 1,
+                    "server_ts": env["ts"] + 1,
+                    "ciphertext": base64.b64encode(
+                        json.dumps(env).encode("utf-8")
+                    ).decode("ascii"),
+                    "client_hash": None,
+                    "content_len": len(b"hello-relay"),
+                }
+            ]
+
+        def get_events(self, *, room: str, since_seq: int = 0, limit: int = 100):
+            if since_seq == 0:
+                data, self._items = self._items, []
+                return data
+            return []
+
+        def post_event(self, **kwargs):  # pragma: no cover - not used
+            return {"ok": True}
+
+        def close(self) -> None:
+            self._closed = True
+
+    monkeypatch.setattr(logic, "RelayHTTPClient", _DummyRelay)
+
+    received: list = []
+
+    def _on_event(evt):
+        received.append(evt)
+
+    ctrl = ChatController(
+        username="alice",
+        host="127.0.0.1",
+        port=15035,
+        on_event=_on_event,
+        on_error=lambda e: (_ for _ in ()).throw(e),
+        on_connection_state=lambda s: None,
+    )
+
+    # Act: connect and allow poller to run briefly
+    ctrl.connect("Town Square")
+    time.sleep(0.2)
+    ctrl.disconnect()
+
+    # Assert: unverified events should be silently dropped
+    assert received == []

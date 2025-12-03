@@ -553,12 +553,20 @@ export COVERAGE_FILE="${BUILD_DIR}/.coverage"
 # Enable MP2 debug logging for better coverage
 export DRLMS_MP2_DEBUG=1
 
-PYTHONPATH="${ROOT_DIR}/src" timeout_cmd 240s "${PYTHON_BIN[@]}" -m coverage run --branch -a -m pytest -q \
+PYTHONPATH="${ROOT_DIR}/src" timeout_cmd 480s "${PYTHON_BIN[@]}" -m coverage run --branch -a -m pytest -q \
   "${ROOT_DIR}/tests/python/test_mproto_v2_client.py" \
   "${ROOT_DIR}/tests/python/test_cli_mproto_commands.py" \
   "${ROOT_DIR}/tests/python/test_cli_room_space.py" \
   "${ROOT_DIR}/tests/python/test_pysignal_bridge.py" \
-  "${ROOT_DIR}/tests/test_e2ee_core.py" || true
+  "${ROOT_DIR}/tests/test_e2ee_core.py" \
+  "${ROOT_DIR}/tests/python/test_mp2_identity_strict.py" \
+  "${ROOT_DIR}/tests/python/test_mp2_presence.py" \
+  "${ROOT_DIR}/tests/python/test_mp2_e2ee_chat.py" \
+  "${ROOT_DIR}/tests/python/test_mp2_e2ee_keys.py" \
+  "${ROOT_DIR}/tests/python/test_e2ee_roundtrip.py" \
+  "${ROOT_DIR}/tests/python/test_e2ee_runtime_logic.py" \
+  "${ROOT_DIR}/tests/python/test_room_service.py" \
+  "${ROOT_DIR}/tests/python/test_tui_relay_backend.py" || true
 
 printf '%s\n' "--> Generating Python coverage report..."
 mkdir -p "${ROOT_DIR}/coverage/html/python"

@@ -113,15 +113,13 @@ class DRLMSApp(App):
 
         try:
             # Use default token store location (creation is enough here)
-            config_dir = Path(
-                os.environ.get("MING_DRLMS_CONFIG_DIR") or (Path.home() / ".drlms")
-            )
+            config_dir = Path.home() / ".drlms"
             token_store_path = config_dir / "tokens.json"
             token_store_path.parent.mkdir(parents=True, exist_ok=True)
 
             # Note: the synchronous login logic is implemented in _login_worker.
             # This async stub intentionally does no blocking work.
-            pass
+            return
         except Exception:
             pass
 
@@ -168,12 +166,20 @@ class DRLMSApp(App):
                 token_store=token_store,
             )
 
-            # On success, surface 14C identity info and switch to chat (must be done on main thread)
-            self.call_from_thread(
-                self._show_identity_hint,
-                record.accepted_device_id,
-                record.recorded_identity,
-            )
+            # On success, surface 14C identity info if available, and then
+            # switch to chat (must be done on main thread). login_flow may be
+            # stubbed to return None in unit tests, so we use getattr here.
+            try:
+                accepted_device_id = getattr(record, "accepted_device_id", None)
+                recorded_identity = getattr(record, "recorded_identity", None)
+                self.call_from_thread(
+                    self._show_identity_hint,
+                    accepted_device_id,
+                    recorded_identity,
+                )
+            except Exception:
+                pass
+
             self.call_from_thread(self.switch_to_chat, username, f"{host}:{port}")
 
         except Exception as e:

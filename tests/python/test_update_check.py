@@ -87,6 +87,9 @@ def test_maybe_notify_throttled_skips_request(monkeypatch: pytest.MonkeyPatch) -
 def test_maybe_notify_newer_version_logs_prints_and_writes_cache(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Ensure update checks are enabled for this test even if CI disables them globally
+    monkeypatch.delenv("DRLMS_UPDATE_CHECK", raising=False)
+
     # No cache / no throttle
     monkeypatch.setattr(uc, "_read_cache", lambda: {})
     monkeypatch.setattr(uc.time, "time", lambda: 1000.0)
@@ -147,6 +150,9 @@ def test_maybe_notify_newer_version_logs_prints_and_writes_cache(
 def test_maybe_notify_request_exception_writes_fallback_cache(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Ensure update checks are enabled for this test even if CI disables them globally
+    monkeypatch.delenv("DRLMS_UPDATE_CHECK", raising=False)
+
     monkeypatch.setattr(uc, "_read_cache", lambda: {})
     monkeypatch.setattr(uc.time, "time", lambda: 2000.0)
 

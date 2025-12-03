@@ -739,24 +739,22 @@ class ChatScreen(Screen):
         )
 
         self.app.run_worker(
-            lambda: self._download_worker(
-                self.current_room, use_id, out_path, filename, total_bytes
-            ),
+            lambda: self._download_worker(use_id, out_path, total_bytes),
             exclusive=False,
             thread=True,
         )
 
     def _download_worker(
         self,
-        room: str,
         event_id: int,
         out_path: Path,
-        filename: str,
         total_bytes: int | None = None,
     ) -> None:
         """Worker function to perform file download and report result."""
         try:
-            self.controller.download_file(room, event_id, out_path, total_bytes)
+            self.controller.download_file(
+                self.current_room, event_id, out_path, total_bytes
+            )
             # On success, show a concise system message
             self.app.call_from_thread(
                 lambda: self.query_one(MessageList).add_message(

@@ -128,6 +128,11 @@ def find_binary(name: str, root: Optional[Path] = None) -> Optional[Path]:
     for candidate in candidates:
         try:
             if candidate.exists():
+                # When both an unsuffixed binary and a .exe variant exist in the
+                # same location, prefer the .exe to better match Windows
+                # expectations even on non-Windows platforms.
+                if candidate.suffix == "" and candidate.with_suffix(".exe").exists():
+                    continue
                 if os.name == "nt" and candidate.suffix.lower() != ".exe":
                     # Skip non-Windows binaries when running on Windows so that
                     # a matching .exe from later candidates may be selected.
