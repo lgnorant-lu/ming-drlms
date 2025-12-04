@@ -121,6 +121,9 @@ def test_write_tui_template_toml_structure(tmp_path: Path) -> None:
     assert b"[general]" in data or b"general" in data
     assert b"logging" in data
     assert b"[tui]" in data or b"tui" in data
+    # New unified config sections for 14D
+    assert b"[security.p2p]" in data or b"security" in data
+    assert b"[update]" in data or b"update" in data
 
 
 def test_apply_local_config_copies_and_respects_overwrite(tmp_path: Path) -> None:

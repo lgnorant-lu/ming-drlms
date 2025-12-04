@@ -12,7 +12,22 @@ from ming_drlms.core.pysignal.store import SignalStore
 from ming_drlms.core.pysignal.signature import sign_bytes_with_store
 from ming_drlms.core.relay_crypto import build_decrypt_and_verify
 
+try:
+    # Probe whether the compiled libsignal-protocol-c bridge is available.
+    _ctx = create_signal_context()
+except Exception:
+    _HAS_SIGNAL_BRIDGE = False
+else:
+    _HAS_SIGNAL_BRIDGE = True
+    try:
+        _ctx.close()
+    except Exception:
+        pass
 
+
+@pytest.mark.skipif(
+    not _HAS_SIGNAL_BRIDGE, reason="libsignal-protocol-c bridge unavailable"
+)
 @pytest.mark.parametrize("content", [b"hello", b'relay-file:{"a":1}'])
 def test_relay_verify_accept_and_reject(content: bytes) -> None:
     room = "Town Square"

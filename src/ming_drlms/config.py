@@ -219,6 +219,17 @@ def write_tui_template_toml(path: Path) -> None:
     """Write an initial TUI/config.toml template with logging and TUI defaults."""
     tpl: Dict[str, Any] = {
         "general": {
+            "backend": "mp2",
+            "relay": {
+                "base_url": "http://127.0.0.1:8081",
+                "enforce_signed": True,
+                "enforce_verify": True,
+            },
+            "mp2": {
+                "host": "127.0.0.1",
+                "port": 15035,
+                "tls": False,
+            },
             "logging": {
                 "level": "INFO",  # DEBUG/INFO/WARNING/ERROR/CRITICAL
                 "console_enabled": True,
@@ -228,8 +239,20 @@ def write_tui_template_toml(path: Path) -> None:
                 "json_enabled": False,
                 # empty => default ~/.drlms/logs
                 "log_dir": "",
-            }
+            },
         },
+        "security": {
+            "p2p": {
+                "require_identity_sig": True,
+                "enforce_signed": True,
+                "strict_mode": True,
+                "identity_sig_max_skew": 300,
+                "emergency": {
+                    "disable_all_strict": False,
+                },
+            },
+        },
+        "update": {"enable": True},
         "tui": {
             "theme": "forest",
             "language": "en",

@@ -7,6 +7,7 @@ from textual.app import App
 from textual import on
 import os
 import platform
+from pathlib import Path
 
 from .login_screen import LoginScreen
 from .chat_screen import ChatScreen
@@ -16,6 +17,7 @@ from .logging_handler import TextualLogHandler
 from .log_screen import LogScreen
 from .settings_screen import SettingsScreen
 from .profiles_screen import ServerProfilesScreen
+from .logic import _state_dir
 import logging
 
 
@@ -109,12 +111,9 @@ class DRLMSApp(App):
         self, host: str, port: int, username: str, password: str
     ) -> None:
         """Perform login flow in background."""
-        from pathlib import Path
-
         try:
             # Use default token store location (creation is enough here)
-            config_dir = Path.home() / ".drlms"
-            token_store_path = config_dir / "tokens.json"
+            token_store_path = _state_dir() / "tokens.json"
             token_store_path.parent.mkdir(parents=True, exist_ok=True)
 
             # Note: the synchronous login logic is implemented in _login_worker.
@@ -127,13 +126,9 @@ class DRLMSApp(App):
         """Synchronous login worker."""
         from ..core.mproto_v2_client import login_flow
         from ..core.token_store import TokenStore
-        from pathlib import Path
 
         try:
-            config_dir = Path(
-                os.environ.get("MING_DRLMS_CONFIG_DIR") or (Path.home() / ".drlms")
-            )
-            token_store_path = config_dir / "tokens.json"
+            token_store_path = _state_dir() / "tokens.json"
             token_store_path.parent.mkdir(parents=True, exist_ok=True)
             token_store = TokenStore(token_store_path)
 

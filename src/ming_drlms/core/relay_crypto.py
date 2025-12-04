@@ -23,21 +23,18 @@ logger = log.get_logger("core.relay_crypto")
 
 def _relay_strict_flags() -> Dict[str, bool]:
     try:
-        # Read TUI config as single source of truth
-        from ming_drlms.tui.config import ConfigManager  # type: ignore
+        # Read unified app settings (config + ENV precedence)
+        from ming_drlms.app_settings import load_settings, get_relay_settings  # type: ignore
 
-        cfg = ConfigManager()
-        cfg.load()
-        general = cfg.config.general if hasattr(cfg, "config") else {}
-        relay_cfg = general.get("relay", {}) if isinstance(general, dict) else {}
-        if isinstance(relay_cfg, dict):
-            return {
-                "enforce_signed": bool(relay_cfg.get("enforce_signed", False)),
-                "enforce_verify": bool(relay_cfg.get("enforce_verify", False)),
-            }
+        s = load_settings()
+        rs = get_relay_settings(s)
+        return {
+            "enforce_signed": bool(getattr(rs, "enforce_signed", True)),
+            "enforce_verify": bool(getattr(rs, "enforce_verify", True)),
+        }
     except Exception:
-        pass
-    return {"enforce_signed": False, "enforce_verify": False}
+        # Default to strict behavior when settings are unavailable
+        return {"enforce_signed": True, "enforce_verify": True}
 
 
 def ed25519_sign_py(seed32: bytes, data: bytes) -> bytes:

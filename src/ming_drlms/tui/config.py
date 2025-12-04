@@ -4,7 +4,6 @@ Handles loading/saving user preferences and theme configuration.
 """
 
 import sys
-import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -15,14 +14,11 @@ else:
     import tomli
 
 import tomli_w
+from ..config_paths import get_config_file
 
-# Default configuration path (respect MING_DRLMS_CONFIG_DIR if set)
-_CFG_BASE = os.environ.get("MING_DRLMS_CONFIG_DIR")
-if _CFG_BASE:
-    CONFIG_DIR = Path(_CFG_BASE).expanduser()
-else:
-    CONFIG_DIR = Path.home() / ".drlms"
-CONFIG_FILE = CONFIG_DIR / "config.toml"
+# Default configuration path: reuse the unified app config.toml location
+CONFIG_FILE = get_config_file()
+CONFIG_DIR = CONFIG_FILE.parent
 
 
 @dataclass
@@ -47,14 +43,8 @@ class ConfigManager:
     """Manages application configuration."""
 
     def __init__(self, config_path: Optional[Path] = None):
-        if config_path is None:
-            cfg_base = os.environ.get("MING_DRLMS_CONFIG_DIR")
-            config_dir = (
-                Path(cfg_base).expanduser() if cfg_base else (Path.home() / ".drlms")
-            )
-            self.config_path = config_dir / "config.toml"
-        else:
-            self.config_path = config_path
+        # Default to the unified config file unless an explicit override is provided.
+        self.config_path = config_path or CONFIG_FILE
         self.config = AppConfig()
         # Don't create config directory or file on init - do it lazily on save
         self._loaded = False

@@ -24,7 +24,11 @@ from ..core.pysignal.store import SignalStore
 from ..core.pysignal.signature import sign_bytes_with_store, is_xeddsa_available
 from ..core._pysignal_errors import SignalBridgeError
 from ..core.e2ee_store import LocalKeyStore
-from .config import ConfigManager
+from ..app_settings import (
+    load_settings,
+    get_backend,
+    get_relay_settings,
+)
 from .. import log
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
@@ -181,19 +185,20 @@ class ChatController:
         # Decide whether to route via Relay: prefer explicit relay backend,
         # but also honor strict signing mode so we never fall back to MP2 when
         # Relay requires signatures.
+        # Determine strict signing requirement for Relay sends.
+        # Default False unless explicitly set via ENV or config.
         enforce = False
         try:
-            cfg_base = os.environ.get("MING_DRLMS_CONFIG_DIR")
-            if cfg_base:
-                cfg_file = Path(cfg_base).expanduser() / "config.toml"
-                text = cfg_file.read_text(encoding="utf-8")
-                for line in text.splitlines():
-                    if "enforce_signed" in line:
-                        lower = line.lower()
-                        compact = lower.replace(" ", "")
-                        if ("=true" in compact) or ("=1" in compact):
-                            enforce = True
-                            break
+            s = load_settings()
+            # ENV override takes precedence
+            v = s.env.get("DRLMS_RELAY_ENFORCE_SIGNED")
+            if v is not None:
+                enforce = str(v).lower() not in ("0", "false")
+            else:
+                g = s.raw.get("general", {}) if isinstance(s.raw, dict) else {}
+                r = g.get("relay", {}) if isinstance(g, dict) else {}
+                if isinstance(r, dict) and ("enforce_signed" in r):
+                    enforce = bool(r.get("enforce_signed"))
         except Exception:
             enforce = False
 
@@ -347,10 +352,7 @@ class ChatController:
 
         if self._progress_cb is None:
             service = RoomService()
-            config_dir = Path(
-                os.environ.get("MING_DRLMS_CONFIG_DIR") or (Path.home() / ".drlms")
-            )
-            token_path = config_dir / "tokens.json"
+            token_path = _state_dir() / "tokens.json"
             service.publish_file(
                 host=self.host,
                 port=self.port,
@@ -414,16 +416,23 @@ class ChatController:
                         content_type="file",
                         content_bytes=content_bytes,
                     )
+                    # Determine signing requirement for file envelope (same rule)
                     try:
-                        cfg = ConfigManager()
-                        cfg.load()
-                        general = cfg.config.general if hasattr(cfg, "config") else {}
-                        relay_cfg = (
-                            general.get("relay", {})
-                            if isinstance(general, dict)
-                            else {}
-                        )
-                        enforce = bool(relay_cfg.get("enforce_signed", False))
+                        s = load_settings()
+                        v = s.env.get("DRLMS_RELAY_ENFORCE_SIGNED")
+                        if v is not None:
+                            enforce = str(v).lower() not in ("0", "false")
+                        else:
+                            g = (
+                                s.raw.get("general", {})
+                                if isinstance(s.raw, dict)
+                                else {}
+                            )
+                            r = g.get("relay", {}) if isinstance(g, dict) else {}
+                            if isinstance(r, dict) and ("enforce_signed" in r):
+                                enforce = bool(r.get("enforce_signed"))
+                            else:
+                                enforce = False
                     except Exception:
                         enforce = False
                     if enforce:
@@ -545,10 +554,7 @@ class ChatController:
         """Download a file (blocking, run in worker)."""
         if self._progress_cb is None:
             service = RoomService()
-            config_dir = Path(
-                os.environ.get("MING_DRLMS_CONFIG_DIR") or (Path.home() / ".drlms")
-            )
-            token_path = config_dir / "tokens.json"
+            token_path = _state_dir() / "tokens.json"
             service.download_file(
                 host=self.host,
                 port=self.port,
@@ -675,10 +681,7 @@ class ChatController:
     def fetch_rooms(self) -> list:
         """Fetch list of rooms (blocking, run in worker)."""
         service = RoomService()
-        config_dir = Path(
-            os.environ.get("MING_DRLMS_CONFIG_DIR") or (Path.home() / ".drlms")
-        )
-        token_path = config_dir / "tokens.json"
+        token_path = _state_dir() / "tokens.json"
         rooms, _, _ = service.list_rooms(
             host=self.host,
             port=self.port,
@@ -690,10 +693,7 @@ class ChatController:
     def fetch_members(self, room_name: str) -> list:
         """Fetch list of members for a room."""
         service = RoomService()
-        config_dir = Path(
-            os.environ.get("MING_DRLMS_CONFIG_DIR") or (Path.home() / ".drlms")
-        )
-        token_path = config_dir / "tokens.json"
+        token_path = _state_dir() / "tokens.json"
         return service.get_room_members_mp2(
             host=self.host,
             port=self.port,
@@ -752,51 +752,19 @@ class ChatController:
     # ------------------------------------------------------------------
     def _load_backend(self) -> str:
         try:
-            cfg_base = os.environ.get("MING_DRLMS_CONFIG_DIR")
-            # When no explicit config dir is provided, default to MP2 to keep
-            # tests independent from any developer-local repo .drlms settings.
-            if not cfg_base:
-                return "mp2"
-
-            cfg_dir = Path(cfg_base).expanduser()
-            try:
-                # Detect repo-local dev config ("<repo>/.drlms"); for the TUI
-                # we treat this as a development default and do NOT auto-switch
-                # to relay mode, so unit tests are not affected by it.
-                repo_root = Path(__file__).resolve().parents[3]
-                dev_cfg_dir = repo_root / ".drlms"
-                if cfg_dir == dev_cfg_dir:
-                    return "mp2"
-            except Exception:
-                # If repo_root detection fails, fall back to runtime config.
-                pass
-
-            cfg = ConfigManager()
-            cfg.load()
-            general = cfg.config.general if hasattr(cfg, "config") else {}
-            backend = str(general.get("backend", "")).strip().lower()
-            if backend in ("mp2", "relay"):
-                return backend
-            # Fallback: if relay section is present, prefer relay
-            if isinstance(general, dict) and isinstance(general.get("relay"), dict):
-                return "relay"
-            return "mp2"
+            s = load_settings()
+            return get_backend(s)
         except Exception:
             return "mp2"
 
     def _resolve_relay_base_url(self) -> str:
         try:
-            # Priority: config.general.relay.base_url -> env -> default
-            cfg = ConfigManager()
-            cfg.load()
-            general = cfg.config.general if hasattr(cfg, "config") else {}
-            relay_cfg = general.get("relay", {}) if isinstance(general, dict) else {}
-            if isinstance(relay_cfg, dict) and relay_cfg.get("base_url"):
-                return str(relay_cfg["base_url"]).strip()
-            env = os.environ.get("DRLMS_RELAY_BASE_URL") or os.environ.get(
-                "RELAY_BASE_URL"
-            )
-            return env.strip() if env else "http://127.0.0.1:8081"
+            s = load_settings()
+            base = get_relay_settings(s).base_url
+            if base:
+                return base
+            # Final fallback if nothing configured
+            return "http://127.0.0.1:8081"
         except Exception:
             return "http://127.0.0.1:8081"
 

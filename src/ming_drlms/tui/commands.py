@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from typing import Callable, Dict
 from pathlib import Path
-import os
 
 from ..cli.services.room_service import RoomService
 from .. import log
 from .command_modules import register_all as _register_command_modules
+from .logic import _state_dir
 
 logger = log.get_logger("tui.commands")
 
@@ -117,7 +117,7 @@ Quick Tips:
         return RoomService()
 
     def _token_store_path(self) -> Path:
-        cfg_dir = Path(
-            os.environ.get("MING_DRLMS_CONFIG_DIR") or (Path.home() / ".drlms")
-        )
-        return cfg_dir / "tokens.json"
+        # Use the same state directory as ChatController/_state_dir so that
+        # tokens are stored consistently across TUI flows and tests can
+        # control the location via Path.home monkeypatching.
+        return _state_dir() / "tokens.json"

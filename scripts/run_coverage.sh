@@ -553,6 +553,11 @@ export COVERAGE_FILE="${BUILD_DIR}/.coverage"
 # Enable MP2 debug logging for better coverage
 export DRLMS_MP2_DEBUG=1
 
+# Exercise CLI config commands under coverage to validate unified config paths
+PYTHONPATH="${ROOT_DIR}/src" timeout_cmd 120s "${PYTHON_BIN[@]}" -m coverage run --branch -a -m ming_drlms.main config init-tui --target both || true
+PYTHONPATH="${ROOT_DIR}/src" timeout_cmd 120s "${PYTHON_BIN[@]}" -m coverage run --branch -a -m ming_drlms.main config show --raw || true
+PYTHONPATH="${ROOT_DIR}/src" timeout_cmd 120s "${PYTHON_BIN[@]}" -m coverage run --branch -a -m ming_drlms.main config validate || true
+
 PYTHONPATH="${ROOT_DIR}/src" timeout_cmd 480s "${PYTHON_BIN[@]}" -m coverage run --branch -a -m pytest -q \
   "${ROOT_DIR}/tests/python/test_mproto_v2_client.py" \
   "${ROOT_DIR}/tests/python/test_cli_mproto_commands.py" \

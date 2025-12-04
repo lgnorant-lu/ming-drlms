@@ -10,6 +10,7 @@ import requests
 from packaging import version as pkg_version
 from rich import print as rprint
 from . import log
+from .app_settings import load_settings, get_update_settings
 
 
 def _cache_dir() -> Path:
@@ -52,9 +53,18 @@ def maybe_notify_new_version(
     once per `throttle_seconds` by using a small cache file in the user's cache dir.
     """
 
-    # Allow disable via env variable
-    if os.environ.get("DRLMS_UPDATE_CHECK", "1") == "0":
-        return
+    # Allow disable via unified config/env settings.
+    # Prefer the central app_settings view so that config.toml and ENV
+    # overrides behave consistently across CLI/TUI.
+    try:
+        s = load_settings()
+        if not get_update_settings(s).enable:
+            return
+    except Exception:
+        # If settings cannot be loaded for any reason, fall back to the
+        # original env-only gate to avoid surprising users.
+        if os.environ.get("DRLMS_UPDATE_CHECK", "1") == "0":
+            return
     try:
         cache = _read_cache()
         last_ts = float(cache.get("ts", 0))

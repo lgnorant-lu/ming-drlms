@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 from pathlib import Path
-import os
 
 from ...cli.mproto_runtime import create_mp2_client
 from ...core.e2ee_store import LocalKeyStore
+from ...config_paths import get_config_dir
+from ..logic import _state_dir
 from ... import log
 
 logger = log.get_logger("tui.commands")
@@ -23,11 +24,9 @@ def register_e2ee_commands(handler: Any) -> None:
 
     def _e2ee_init(args: str) -> None:
         try:
-            config_dir = Path(
-                os.environ.get("MING_DRLMS_CONFIG_DIR") or (Path.home() / ".drlms")
-            )
-            e2ee_path = config_dir / "e2ee_keys.json"
-            token_path = config_dir / "tokens.json"
+            config_dir = get_config_dir()
+            e2ee_path = Path(config_dir) / "e2ee_keys.json"
+            token_path = _state_dir() / "tokens.json"
             try:
                 logger.debug(
                     "e2ee_init: config_dir=%s e2ee_path=%s token_path=%s exists=%s",
