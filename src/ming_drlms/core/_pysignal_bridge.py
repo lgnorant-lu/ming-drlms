@@ -387,14 +387,22 @@ def load_bridge() -> Tuple[FFI, object]:
                 ]
             )
         if repo_root is not None:
-            win_build = repo_root / "build_win"
-            bin_candidates.extend(
-                [
-                    win_build,
-                    win_build / "Release",
-                    win_build / "Release" / "Release",
-                ]
-            )
+            # Support multiple Windows build directory naming conventions
+            for win_build_name in [
+                "build_win_ninja_x64",
+                "build_win",
+                "build-win",
+                "build",
+            ]:
+                win_build = repo_root / win_build_name
+                bin_candidates.extend(
+                    [
+                        win_build,
+                        win_build / "Release",
+                        win_build / "Release" / "Release",
+                        win_build / "_deps" / "signal-install" / "bin",
+                    ]
+                )
             if repo_root is not None:
                 bin_candidates.extend(
                     [
@@ -558,11 +566,11 @@ def load_bridge() -> Tuple[FFI, object]:
         bridge_path = _find_dll_in_paths("drlms_signal_bridge.dll")
         if sig_path is None:
             raise SignalBridgeError(
-                "Windows: 未找到 signal-protocol-c.dll，请确认已构建并位于 build_win/Release。"
+                "Windows: 未找到 signal-protocol-c.dll，请确认已构建并位于 build_win*/Release 或 build_win*/_deps/signal-install/bin。"
             )
         if bridge_path is None:
             raise SignalBridgeError(
-                "Windows: 未找到 drlms_signal_bridge.dll，请确认已构建并位于 build_win/Release。"
+                "Windows: 未找到 drlms_signal_bridge.dll，请确认已构建并位于 build_win*/Release。"
             )
 
         logger.debug(f"Windows: ffi.dlopen signal from {sig_path}")
@@ -599,6 +607,102 @@ def load_bridge() -> Tuple[FFI, object]:
                 return getattr(self._sig, name)
 
         return ffi, _MuxLib(lib_signal, lib_bridge, lib_crt)
+
+    # Unix/WSL: Prefer dlopen over ffi.verify() to avoid FFI instance mismatch
+    if os.name != "nt":
+        # Search for libdrlms_signal_bridge.so in multiple locations
+        bridge_path_unix: Optional[Path] = None
+        bridge_search_paths: list[Path] = []
+        if signal_prefix is not None:
+            bridge_search_paths.append(
+                signal_prefix / "lib" / "libdrlms_signal_bridge.so"
+            )
+        if build_root is not None:
+            # CMake outputs .so directly in build root
+            bridge_search_paths.append(build_root / "libdrlms_signal_bridge.so")
+            # Also check src/server subdirectory (some CMake configurations)
+            bridge_search_paths.append(
+                build_root / "src" / "server" / "libdrlms_signal_bridge.so"
+            )
+        bridge_search_paths.append(Path(lib_path).parent / "libdrlms_signal_bridge.so")
+        # Check repo-relative paths for development
+        if repo_root is not None:
+            for bdir in ["build_wsl", "build-wsl", "build"]:
+                bridge_search_paths.append(
+                    repo_root / bdir / "libdrlms_signal_bridge.so"
+                )
+
+        for candidate in bridge_search_paths:
+            if candidate.exists():
+                bridge_path_unix = candidate
+                logger.debug("Unix: found bridge .so at %s", candidate)
+                break
+        if bridge_path_unix is None:
+            logger.debug(
+                "Unix: bridge .so NOT found in: %s",
+                [str(p) for p in bridge_search_paths],
+            )
+
+        # Search for libsignal-protocol-c.so
+        signal_so: Optional[Path] = None
+        signal_search_paths: list[Path] = []
+        lib_dir = Path(lib_path).parent
+        signal_search_paths.append(lib_dir / "libsignal-protocol-c.so")
+        if signal_prefix is not None:
+            signal_search_paths.append(
+                signal_prefix / "lib" / "libsignal-protocol-c.so"
+            )
+
+        for candidate in signal_search_paths:
+            if candidate.exists():
+                signal_so = candidate
+                logger.debug("Unix: found signal .so at %s", candidate)
+                break
+        if signal_so is None:
+            logger.debug(
+                "Unix: signal .so NOT found in: %s",
+                [str(p) for p in signal_search_paths],
+            )
+
+        # Prefer dlopen path to avoid FFI instance mismatch issues with ffi.verify()
+        # Case 1: Both .so files available (separate libs)
+        if bridge_path_unix is not None and signal_so is not None:
+            logger.debug("Unix: using dlopen path with separate libs")
+            logger.debug("Unix: ffi.dlopen signal from %s", signal_so)
+            logger.debug("Unix: ffi.dlopen bridge from %s", bridge_path_unix)
+            lib_signal = ffi.dlopen(str(signal_so))
+            lib_bridge = ffi.dlopen(str(bridge_path_unix))
+
+            class _UnixMuxLib:
+                __slots__ = ("_sig", "_bridge")
+
+                def __init__(self, sig, bridge):
+                    self._sig = sig
+                    self._bridge = bridge
+
+                def __getattr__(self, name: str):
+                    if name.startswith("drlms_"):
+                        return getattr(self._bridge, name)
+                    return getattr(self._sig, name)
+
+            return ffi, _UnixMuxLib(lib_signal, lib_bridge)
+
+        # Case 2: Only bridge .so available (signal statically linked into bridge)
+        # This is the common case when signal-protocol-c is built as static lib
+        if bridge_path_unix is not None:
+            logger.debug(
+                "Unix: using dlopen path with unified bridge lib (signal statically linked)"
+            )
+            logger.debug("Unix: ffi.dlopen bridge from %s", bridge_path_unix)
+            lib_unified = ffi.dlopen(str(bridge_path_unix))
+            # All symbols (signal_* and drlms_*) are in the same lib
+            return ffi, lib_unified
+
+        logger.warning(
+            "Unix: dlopen path unavailable (bridge=%s, signal=%s), falling back to ffi.verify()",
+            bridge_path_unix,
+            signal_so,
+        )
 
     # Linux/macOS: Use verify() to compile the CFFI module
     openssl_include, openssl_lib = _detect_openssl_prefix(lib_path)
@@ -731,30 +835,68 @@ def load_bridge() -> Tuple[FFI, object]:
         raise SignalBridgeError(
             "构建 libsignal CFFI 模块失败，请确认已安装 OpenSSL 开发包并完成 CMake 依赖构建"
         ) from exc
-    return ffi, module
+    # CRITICAL: ffi.verify() returns a module bound to its own internal FFI instance.
+    # We must return that internal FFI so that ffi.new() creates types compatible with
+    # the lib's function signatures. Using the original `ffi` causes TypeError due to
+    # "different ffi instances".
+    verify_ffi = getattr(module, "ffi", ffi)
+    return verify_ffi, module
 
 
 def _locate_signal_artifacts() -> Tuple[Optional[Path], Optional[Path]]:
+    """Locate libsignal-protocol-c artifacts with dual-platform auto-discovery.
+
+    Search priority:
+    1. DRLMS_SIGNAL_PREFIX environment variable (highest)
+    2. Platform-specific build directories (build_win* for Windows, build_wsl* for Linux)
+    3. Generic build directories (build*)
+    4. CI-specific paths
+    """
     prefixes: list[Path] = []
+
+    # 1. Highest priority: explicit ENV override
     env_prefix = os.environ.get("DRLMS_SIGNAL_PREFIX")
     if env_prefix:
         prefixes.append(Path(env_prefix))
 
     root = Path(__file__).resolve().parents[3]
-    build_root = root / "build"
 
-    # Add CI-specific paths
+    # 2. Platform-aware build directory patterns
+    if os.name == "nt":
+        # Windows: prioritize build_win*, then generic build*
+        platform_patterns = ["build_win*", "build*"]
+    else:
+        # Linux/WSL: prioritize build_wsl*, build-wsl*, then generic build*
+        platform_patterns = ["build_wsl*", "build-wsl*", "build*"]
+
+    # 3. Collect matching build directories, sorted by modification time (newest first)
+    search_dirs: list[Path] = []
+    seen_dirs: set[Path] = set()
+    for pattern in platform_patterns:
+        matched = [
+            d
+            for d in root.glob(pattern)
+            if d.is_dir() and not d.name.startswith(".venv") and d not in seen_dirs
+        ]
+        # Sort by modification time, newest first
+        try:
+            matched.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        except OSError:
+            pass  # Ignore stat errors
+        for d in matched:
+            seen_dirs.add(d)
+            search_dirs.append(d)
+
+    # 4. Add CI-specific paths for compatibility
     ci_paths = [
         Path("/home/runner/work") / root.name / root.name / "build",  # Linux/macOS CI
         Path("D:/a") / root.name / "build",  # Windows CI
     ]
+    for ci in ci_paths:
+        if ci.exists() and ci not in seen_dirs:
+            search_dirs.append(ci)
 
-    search_dirs = [build_root] + ci_paths
-    if build_root.is_dir():
-        for child in build_root.iterdir():
-            if child.is_dir():
-                search_dirs.append(child)
-
+    # 5. Search for signal-install in each build directory
     for base in search_dirs:
         if not base.exists():
             continue
@@ -766,13 +908,15 @@ def _locate_signal_artifacts() -> Tuple[Optional[Path], Optional[Path]]:
         if direct.is_dir():
             prefixes.append(direct)
 
-    seen: set[Path] = set()
+    # 6. Dedupe and validate each prefix
+    seen_prefixes: set[Path] = set()
     for prefix in prefixes:
-        if prefix in seen:
+        if prefix in seen_prefixes:
             continue
-        seen.add(prefix)
+        seen_prefixes.add(prefix)
         include_dir, lib_path = _validate_signal_prefix(prefix)
         if include_dir is not None and lib_path is not None:
+            logger.debug("Found valid signal-install at: %s", prefix)
             return include_dir, lib_path
 
     return None, None

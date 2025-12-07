@@ -234,11 +234,12 @@ class ChatScreen(Screen):
     }
     """
 
-    def __init__(self, username: str, server: str) -> None:
+    def __init__(self, username: str, server: str, *, test_sync=None) -> None:
         super().__init__()
         self.username = username
         self.server = server
         self.current_room = "Town Square"
+        self._test_sync = test_sync
 
         # Parse server
         parts = server.split(":")
@@ -265,6 +266,7 @@ class ChatScreen(Screen):
             on_event=self._handle_room_event,
             on_error=self._handle_client_error,
             on_connection_state=self._handle_connection_state,
+            test_sync_hook=self._test_sync,
         )
 
         # Command handler (initialized in on_mount after widgets are ready)
@@ -631,6 +633,13 @@ class ChatScreen(Screen):
 
         # Classify error type for better user feedback
         error_type, friendly_message = self._classify_error(exc)
+
+        try:
+            logger.error(
+                "ChatScreen client error [%s]: %s", error_type, exc, exc_info=True
+            )
+        except Exception:
+            pass
 
         # Only show errors if at least 5 seconds have passed since last error
         # or if error type changed

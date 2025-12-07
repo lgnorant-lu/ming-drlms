@@ -47,6 +47,11 @@ class DRLMSApp(App):
         self.config_manager = ConfigManager()
         self.theme_manager = ThemeManager(self.config_manager)
 
+        # Optional test synchronization hook for deterministic TUI tests.
+        # When running tests, callers may pass test_sync_hook=BlockingSyncHook()
+        # so that ChatScreen can notify specific events (e.g. HISTORY_LOADED).
+        self.test_sync_hook = kwargs.pop("test_sync_hook", None)
+
         # Register Textual logging handler early
         self._tui_handler = TextualLogHandler()
         try:
@@ -232,7 +237,7 @@ class DRLMSApp(App):
     def switch_to_chat(self, username: str, server: str) -> None:
         """Switch to chat screen after successful login."""
         # Remove login screen and show chat
-        chat_screen = ChatScreen(username, server)
+        chat_screen = ChatScreen(username, server, test_sync=self.test_sync_hook)
         self.switch_screen(chat_screen)
 
 

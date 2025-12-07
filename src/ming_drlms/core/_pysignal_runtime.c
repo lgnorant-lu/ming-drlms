@@ -2008,8 +2008,8 @@ signal_buffer *drlms_sender_key_distribution_message_get_serialized(
     }
 
     /* Use zero-initialization to avoid descriptor dependency */
-    Textsecure__SenderKeyDistributionMessage msg =
-        DRLMS_PROTOBUF_C_MESSAGE_ZERO_INIT;
+    Textsecure__SenderKeyDistributionMessage msg;
+    memset(&msg, 0, sizeof(msg));
 
     msg.has_id = 1;
     msg.id = sender_key_distribution_message_get_id(message);

@@ -17,17 +17,18 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: POSIX :: Linux",
 ]
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 dependencies = [
     "typer[all]",
     "pyyaml",
     "rich",
 
-    "argon2-cffi",
+    "argon2-cffi>=21.3,<24",
     "protobuf==6.33.1",
     "requests",
     "packaging>=24.2",
-    "cffi>=1.15.0",
+    "cffi>=1.15.0,<2.0",
+    "cryptography>=42,<44",
     "typing-extensions>=4.7.0",
     "textual>=0.47.0",
     "tomli>=2.0.0; python_version < '3.11'",

@@ -7,7 +7,9 @@ import threading
 import time
 import base64
 import hashlib
-from typing import Optional, Callable
+from typing import Optional, Callable, Union
+
+from .test_sync import TestSyncEvent, TestSyncHook, NullSyncHook
 
 from ..core.threaded_client import RobustThreadedRoomClient, ConnectionState
 from ..cli.services.room_service import RoomService
@@ -22,7 +24,6 @@ from ..core.clear_event import canonical_serialize, event_hash_hex
 from ..core.pysignal.context import create_signal_context
 from ..core.pysignal.store import SignalStore
 from ..core.pysignal.signature import sign_bytes_with_store, is_xeddsa_available
-from ..core._pysignal_errors import SignalBridgeError
 from ..core.e2ee_store import LocalKeyStore
 from ..app_settings import (
     load_settings,
@@ -59,6 +60,8 @@ class ChatController:
         on_event: Callable[[RoomEvent], None],
         on_error: Callable[[Exception], None],
         on_connection_state: Callable[[ConnectionState], None],
+        *,
+        test_sync_hook: Optional[Union[TestSyncHook, NullSyncHook]] = None,
     ) -> None:
         self.username = username
         self.host = host
@@ -71,6 +74,10 @@ class ChatController:
         self._ephemeral: bool = False
         # Backend selection: 'mp2' (default) or 'relay'
         self._backend: str = self._load_backend()
+        # Test synchronization hook (no-op in production)
+        self._test_sync: Union[TestSyncHook, NullSyncHook] = (
+            test_sync_hook or NullSyncHook()
+        )
         # Relay runtime fields (only used when backend=relay)
         self._relay_thread: Optional[threading.Thread] = None
         self._relay_stop: threading.Event = threading.Event()
@@ -215,78 +222,92 @@ class ChatController:
                         "No LocalKeyState found; initialize identity first"
                     )
                 did = int(getattr(st, "device_id", 1) or 1)
-                ctx = create_signal_context()
-                store = SignalStore(ctx)
-                try:
-                    store.set_identity(
-                        public_key=st.identity_key.public_key,
-                        private_key=st.identity_key.private_key,
-                        registration_id=st.registration_id,
-                        device_id=did,
-                    )
-                    env_ts = int(time.time())
-                    serialized = canonical_serialize(
-                        room=self._relay_room or "",
-                        ts=env_ts,
-                        sender_id=self.username,
-                        device_id=did,
-                        content_type="text",
-                        content_bytes=content_bytes,
-                    )
+                env_ts = int(time.time())
+                serialized = canonical_serialize(
+                    room=self._relay_room or "",
+                    ts=env_ts,
+                    sender_id=self.username,
+                    device_id=did,
+                    content_type="text",
+                    content_bytes=content_bytes,
+                )
+
+                # Robust signing: try CFFI first, fall back to Python Ed25519 in non-strict mode
+                sig_hex = ""
+                if enforce:
+                    # Strict mode: CFFI signing required, no fallback
                     try:
-                        avail = is_xeddsa_available(store)
-                        logger.debug("relay_sign: xeddsa symbols available=%s", avail)
-                    except Exception:
-                        pass
-                    if enforce:
+                        ctx = create_signal_context()
+                        store = SignalStore(ctx)
                         try:
+                            store.set_identity(
+                                public_key=st.identity_key.public_key,
+                                private_key=st.identity_key.private_key,
+                                registration_id=st.registration_id,
+                                device_id=did,
+                            )
                             sig = sign_bytes_with_store(store, serialized)
                             sig_hex = sig.hex()
-                        except SignalBridgeError as _se:
-                            try:
-                                logger.debug(
-                                    "relay_sign: cffi sign failed (strict): %s", _se
-                                )
-                            except Exception:
-                                pass
-                            raise RuntimeError("Relay signing required but unavailable")
-                        except Exception:
-                            raise RuntimeError("Relay signing required but unavailable")
-                    else:
+                        finally:
+                            store.close()
+                            ctx.close()
+                    except Exception as cffi_err:
+                        logger.debug("relay_sign: cffi failed (strict): %s", cffi_err)
+                        raise RuntimeError("Relay signing required but unavailable")
+                else:
+                    # Non-strict mode: try CFFI, silently fall back to Python Ed25519
+                    cffi_ok = False
+                    try:
+                        ctx = create_signal_context()
+                        store = SignalStore(ctx)
                         try:
+                            store.set_identity(
+                                public_key=st.identity_key.public_key,
+                                private_key=st.identity_key.private_key,
+                                registration_id=st.registration_id,
+                                device_id=did,
+                            )
                             sig = sign_bytes_with_store(store, serialized)
                             sig_hex = sig.hex()
-                        except Exception:
-                            try:
-                                priv = st.identity_key.private_key
-                                sig = ed25519_sign_py(
-                                    priv
-                                    if isinstance(priv, (bytes, bytearray))
-                                    else bytes(priv),
-                                    serialized,
-                                )
-                                sig_hex = sig.hex()
-                                try:
-                                    logger.debug("relay_sign: py_ed25519_fallback used")
-                                except Exception:
-                                    pass
-                            except Exception:
-                                sig_hex = ""
-                    envelope = {
-                        "sender_id": self.username,
-                        "device_id": did,
-                        "ts": env_ts,
-                        "content_type": "text",
-                        "content_bytes_b64": base64.b64encode(content_bytes).decode(
-                            "ascii"
-                        ),
-                        "signature_hex": sig_hex,
-                    }
-                    env_bytes = json.dumps(envelope).encode("utf-8")
-                    ciphertext = base64.b64encode(env_bytes).decode("ascii")
-                finally:
-                    store.close()
-                    ctx.close()
+                            cffi_ok = True
+                        finally:
+                            store.close()
+                            ctx.close()
+                    except Exception as cffi_err:
+                        logger.debug(
+                            "relay_sign: cffi failed, will use fallback: %s", cffi_err
+                        )
+                        cffi_ok = False
+
+                    if not cffi_ok:
+                        try:
+                            priv = st.identity_key.private_key
+                            sig = ed25519_sign_py(
+                                priv
+                                if isinstance(priv, (bytes, bytearray))
+                                else bytes(priv),
+                                serialized,
+                            )
+                            sig_hex = sig.hex()
+                            logger.debug("relay_sign: py_ed25519_fallback used")
+                        except Exception as py_err:
+                            logger.debug(
+                                "relay_sign: python fallback also failed: %s", py_err
+                            )
+                            sig_hex = ""
+
+                envelope = {
+                    "sender_id": self.username,
+                    "device_id": did,
+                    "ts": env_ts,
+                    "content_type": "text",
+                    "content_bytes_b64": base64.b64encode(content_bytes).decode(
+                        "ascii"
+                    ),
+                    "signature_hex": sig_hex,
+                }
+                env_bytes = json.dumps(envelope).encode("utf-8")
+                ciphertext = base64.b64encode(env_bytes).decode("ascii")
                 client = RelayHTTPClient(self._relay_base_url)
                 try:
                     client.post_event(
@@ -296,6 +317,7 @@ class ChatController:
                         client_event_hash=event_hash_hex(serialized),
                         client_ts=env_ts,
                     )
+                    self._test_sync.notify_sync(TestSyncEvent.MESSAGE_SENT)
                 finally:
                     client.close()
             except Exception as exc:
@@ -317,6 +339,7 @@ class ChatController:
                 pass
             try:
                 self.client.publish(message.encode("utf-8"), ephemeral=use_ephemeral)
+                self._test_sync.notify_sync(TestSyncEvent.MESSAGE_SENT)
             except Exception as exc:
                 # In strict relay mode, treat any send failure as a hard signing
                 # requirement error rather than leaking low-level MP2 issues.
@@ -383,64 +406,96 @@ class ChatController:
                         "No LocalKeyState found; initialize identity first"
                     )
                 did = int(getattr(st, "device_id", 1) or 1)
-                ctx = create_signal_context()
-                store = SignalStore(ctx)
+                env_ts = int(meta.get("ts") or time.time())
+                content = {
+                    "file_id": int(meta.get("file_id") or 0),
+                    "filename": str(meta.get("filename") or filepath.name),
+                    "size_bytes": int(
+                        meta.get("size_bytes") or filepath.stat().st_size
+                    ),
+                    "sha256_hex": str(meta.get("sha256_hex") or ""),
+                    "ephemeral": bool(
+                        ephemeral if ephemeral is not None else self._ephemeral
+                    ),
+                    "timestamp": str(env_ts),
+                }
+                content_bytes = json.dumps(content, ensure_ascii=False).encode("utf-8")
+                serialized = canonical_serialize(
+                    room=room,
+                    ts=env_ts,
+                    sender_id=self.username,
+                    device_id=did,
+                    content_type="file",
+                    content_bytes=content_bytes,
+                )
+
+                # Determine signing requirement for file envelope
+                enforce_file = False
                 try:
-                    store.set_identity(
-                        public_key=st.identity_key.public_key,
-                        private_key=st.identity_key.private_key,
-                        registration_id=st.registration_id,
-                        device_id=did,
-                    )
-                    env_ts = int(meta.get("ts") or time.time())
-                    content = {
-                        "file_id": int(meta.get("file_id") or 0),
-                        "filename": str(meta.get("filename") or filepath.name),
-                        "size_bytes": int(
-                            meta.get("size_bytes") or filepath.stat().st_size
-                        ),
-                        "sha256_hex": str(meta.get("sha256_hex") or ""),
-                        "ephemeral": bool(
-                            ephemeral if ephemeral is not None else self._ephemeral
-                        ),
-                        "timestamp": str(env_ts),
-                    }
-                    content_bytes = json.dumps(content, ensure_ascii=False).encode(
-                        "utf-8"
-                    )
-                    serialized = canonical_serialize(
-                        room=room,
-                        ts=env_ts,
-                        sender_id=self.username,
-                        device_id=did,
-                        content_type="file",
-                        content_bytes=content_bytes,
-                    )
-                    # Determine signing requirement for file envelope (same rule)
-                    try:
-                        s = load_settings()
-                        v = s.env.get("DRLMS_RELAY_ENFORCE_SIGNED")
-                        if v is not None:
-                            enforce = str(v).lower() not in ("0", "false")
-                        else:
-                            g = (
-                                s.raw.get("general", {})
-                                if isinstance(s.raw, dict)
-                                else {}
-                            )
-                            r = g.get("relay", {}) if isinstance(g, dict) else {}
-                            if isinstance(r, dict) and ("enforce_signed" in r):
-                                enforce = bool(r.get("enforce_signed"))
-                            else:
-                                enforce = False
-                    except Exception:
-                        enforce = False
-                    if enforce:
-                        sig = sign_bytes_with_store(store, serialized)
+                    s = load_settings()
+                    v = s.env.get("DRLMS_RELAY_ENFORCE_SIGNED")
+                    if v is not None:
+                        enforce_file = str(v).lower() not in ("0", "false")
                     else:
+                        g = s.raw.get("general", {}) if isinstance(s.raw, dict) else {}
+                        r = g.get("relay", {}) if isinstance(g, dict) else {}
+                        if isinstance(r, dict) and ("enforce_signed" in r):
+                            enforce_file = bool(r.get("enforce_signed"))
+                except Exception:
+                    enforce_file = False
+
+                # Robust signing: try CFFI first, fall back to Python Ed25519 in non-strict mode
+                sig_hex = ""
+                if enforce_file:
+                    # Strict mode: CFFI signing required
+                    try:
+                        ctx = create_signal_context()
+                        store = SignalStore(ctx)
                         try:
+                            store.set_identity(
+                                public_key=st.identity_key.public_key,
+                                private_key=st.identity_key.private_key,
+                                registration_id=st.registration_id,
+                                device_id=did,
+                            )
                             sig = sign_bytes_with_store(store, serialized)
-                        except Exception:
+                            sig_hex = sig.hex()
+                        finally:
+                            store.close()
+                            ctx.close()
+                    except Exception as cffi_err:
+                        logger.debug(
+                            "relay_sign (file): cffi failed (strict): %s", cffi_err
+                        )
+                        raise RuntimeError("Relay signing required but unavailable")
+                else:
+                    # Non-strict mode: try CFFI, silently fall back to Python Ed25519
+                    cffi_ok = False
+                    try:
+                        ctx = create_signal_context()
+                        store = SignalStore(ctx)
+                        try:
+                            store.set_identity(
+                                public_key=st.identity_key.public_key,
+                                private_key=st.identity_key.private_key,
+                                registration_id=st.registration_id,
+                                device_id=did,
+                            )
+                            sig = sign_bytes_with_store(store, serialized)
+                            sig_hex = sig.hex()
+                            cffi_ok = True
+                        finally:
+                            store.close()
+                            ctx.close()
+                    except Exception as cffi_err:
+                        logger.debug(
+                            "relay_sign (file): cffi failed, will use fallback: %s",
+                            cffi_err,
+                        )
+                        cffi_ok = False
+
+                    if not cffi_ok:
+                        try:
                             priv = st.identity_key.private_key
                             sig = ed25519_sign_py(
                                 priv
@@ -448,21 +503,27 @@ class ChatController:
                                 else bytes(priv),
                                 serialized,
                             )
-                    envelope = {
-                        "sender_id": self.username,
-                        "device_id": did,
-                        "ts": env_ts,
-                        "content_type": "file",
-                        "content_bytes_b64": base64.b64encode(content_bytes).decode(
-                            "ascii"
-                        ),
-                        "signature_hex": sig.hex(),
-                    }
-                    env_bytes = json.dumps(envelope).encode("utf-8")
-                    ciphertext = base64.b64encode(env_bytes).decode("ascii")
-                finally:
-                    store.close()
-                    ctx.close()
+                            sig_hex = sig.hex()
+                            logger.debug("relay_sign (file): py_ed25519_fallback used")
+                        except Exception as py_err:
+                            logger.debug(
+                                "relay_sign (file): python fallback also failed: %s",
+                                py_err,
+                            )
+                            sig_hex = ""
+
+                envelope = {
+                    "sender_id": self.username,
+                    "device_id": did,
+                    "ts": env_ts,
+                    "content_type": "file",
+                    "content_bytes_b64": base64.b64encode(content_bytes).decode(
+                        "ascii"
+                    ),
+                    "signature_hex": sig_hex,
+                }
+                env_bytes = json.dumps(envelope).encode("utf-8")
+                ciphertext = base64.b64encode(env_bytes).decode("ascii")
                 http.post_event(
                     room=room,
                     ciphertext=ciphertext,
@@ -477,6 +538,7 @@ class ChatController:
                         )
                     except Exception:
                         pass
+                self._test_sync.notify_sync(TestSyncEvent.FILE_UPLOAD_COMPLETE)
                 return
             finally:
                 http.close()
@@ -538,6 +600,7 @@ class ChatController:
                 )
             except Exception:
                 pass
+            self._test_sync.notify_sync(TestSyncEvent.FILE_UPLOAD_COMPLETE)
         finally:
             try:
                 client.close()
@@ -623,6 +686,7 @@ class ChatController:
                         )
                 except Exception:
                     pass
+                self._test_sync.notify_sync(TestSyncEvent.FILE_DOWNLOAD_COMPLETE)
             finally:
                 http.close()
             return
@@ -670,6 +734,7 @@ class ChatController:
                     )
             except Exception:
                 pass
+            self._test_sync.notify_sync(TestSyncEvent.FILE_DOWNLOAD_COMPLETE)
         except Exception as e:
             raise RuntimeError(str(e))
         finally:
@@ -841,6 +906,7 @@ class ChatController:
             try:
                 try:
                     self._on_connection_state(ConnectionState.CONNECTED)
+                    self._test_sync.notify_sync(TestSyncEvent.CONNECTION_READY)
                 except Exception:
                     pass
                 while not self._relay_stop.is_set():
@@ -922,6 +988,9 @@ class ChatController:
                                         ),
                                     )
                                 self._on_event(evt)
+                                self._test_sync.notify_sync(
+                                    TestSyncEvent.MESSAGE_RECEIVED
+                                )
                                 if item.get("server_seq"):
                                     seq = int(item["server_seq"])
                                     if seq > max_seq:

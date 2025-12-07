@@ -29,7 +29,6 @@ static int g_inited = 0;
 static clog_level_t g_level = CLOG_INFO;
 static int g_console = 1;
 static int g_json_enabled = 0;
-static int g_win_dbg = 0;
 static int g_rotate_time = 0; /* 0=size, 1=time */
 static int g_keep = 5;
 static size_t g_max_bytes = 10 * 1024 * 1024; /* 10MB */
@@ -42,6 +41,7 @@ static int g_cur_day = -1; /* for time-rotation */
 
 #ifdef _WIN32
 static CRITICAL_SECTION g_mu;
+static int g_win_dbg = 0;
 #else
 static pthread_mutex_t g_mu = PTHREAD_MUTEX_INITIALIZER;
 #endif
@@ -118,16 +118,32 @@ static int str_ieq(const char *a, const char *b) {
 }
 
 static void path_join2(char *dst, size_t cap, const char *a, const char *b) {
+    size_t len = 0;
     if (!dst || cap == 0)
         return;
     dst[0] = '\0';
-    if (!a) {
-        a = "";
+
+    if (a && *a) {
+        size_t la = strlen(a);
+        if (la >= cap)
+            la = cap - 1;
+        memcpy(dst, a, la);
+        len = la;
     }
-    if (!b) {
-        b = "";
+
+    if (len + 1 < cap) {
+        dst[len++] = PATH_SEP;
     }
-    snprintf(dst, cap, "%s%c%s", a, PATH_SEP, b);
+
+    if (b && *b && len < cap) {
+        size_t lb = strlen(b);
+        if (lb > cap - 1 - len)
+            lb = cap - 1 - len;
+        memcpy(dst + len, b, lb);
+        len += lb;
+    }
+
+    dst[len] = '\0';
 }
 
 static void rotate_files_if_needed_by_size(void) {
@@ -152,14 +168,33 @@ static void rotate_files_if_needed_by_size(void) {
     /* rotate: log -> log.(keep-1) ... log.1 */
     for (int i = g_keep - 1; i >= 1; --i) {
         char from[CLOG_PATH_MAX], to[CLOG_PATH_MAX];
-        snprintf(from, sizeof from, "%s.%d", g_log_path, i);
-        snprintf(to, sizeof to, "%s.%d", g_log_path, i + 1);
+        size_t len_from, len_to;
+
+        snprintf(from, sizeof from, "%s", g_log_path);
+        len_from = strlen(from);
+        if (len_from < sizeof from) {
+            snprintf(from + len_from, sizeof from - len_from, ".%d", i);
+        }
+
+        snprintf(to, sizeof to, "%s", g_log_path);
+        len_to = strlen(to);
+        if (len_to < sizeof to) {
+            snprintf(to + len_to, sizeof to - len_to, ".%d", i + 1);
+        }
+
         (void)remove(to);
         (void)rename(from, to);
     }
     {
         char to[CLOG_PATH_MAX];
-        snprintf(to, sizeof to, "%s.%d", g_log_path, 1);
+        size_t len_to;
+
+        snprintf(to, sizeof to, "%s", g_log_path);
+        len_to = strlen(to);
+        if (len_to < sizeof to) {
+            snprintf(to + len_to, sizeof to - len_to, ".%d", 1);
+        }
+
         (void)remove(to);
         (void)rename(g_log_path, to);
     }
@@ -182,14 +217,33 @@ static void rotate_files_if_needed_by_time(const struct tm *lt) {
     g_fp = NULL;
     for (int i = g_keep - 1; i >= 1; --i) {
         char from[CLOG_PATH_MAX], to[CLOG_PATH_MAX];
-        snprintf(from, sizeof from, "%s.%d", g_log_path, i);
-        snprintf(to, sizeof to, "%s.%d", g_log_path, i + 1);
+        size_t len_from, len_to;
+
+        snprintf(from, sizeof from, "%s", g_log_path);
+        len_from = strlen(from);
+        if (len_from < sizeof from) {
+            snprintf(from + len_from, sizeof from - len_from, ".%d", i);
+        }
+
+        snprintf(to, sizeof to, "%s", g_log_path);
+        len_to = strlen(to);
+        if (len_to < sizeof to) {
+            snprintf(to + len_to, sizeof to - len_to, ".%d", i + 1);
+        }
+
         (void)remove(to);
         (void)rename(from, to);
     }
     {
         char to[CLOG_PATH_MAX];
-        snprintf(to, sizeof to, "%s.%d", g_log_path, 1);
+        size_t len_to;
+
+        snprintf(to, sizeof to, "%s", g_log_path);
+        len_to = strlen(to);
+        if (len_to < sizeof to) {
+            snprintf(to + len_to, sizeof to - len_to, ".%d", 1);
+        }
+
         (void)remove(to);
         (void)rename(g_log_path, to);
     }

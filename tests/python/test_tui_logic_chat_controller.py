@@ -109,7 +109,18 @@ def test_connect_uses_last_seen_and_e2ee_keys(
     assert callable(start_kwargs["on_connection_state"])
 
 
-def test_send_message_respects_ephemeral_default_and_override() -> None:
+def test_send_message_respects_ephemeral_default_and_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Ensure MP2 backend is used (not Relay) and no enforce_signed
+    monkeypatch.setattr(ChatController, "_load_backend", lambda self: "mp2")
+    # Mock load_settings to avoid hitting real config that may set enforce_signed
+    monkeypatch.setattr(
+        logic_mod,
+        "load_settings",
+        lambda: SimpleNamespace(env={}, raw={}),
+    )
+
     controller = ChatController(
         username="alice",
         host="127.0.0.1",

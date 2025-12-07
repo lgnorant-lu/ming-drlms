@@ -100,9 +100,11 @@ relay_files/
 *.db-shm
 *.db-wal
 
-# Env files
+# Env files (keep .env.example as template)
 .env
 .env.local
+.env.wsl
+.env.win
 
 # Miscellaneous
 lgn/

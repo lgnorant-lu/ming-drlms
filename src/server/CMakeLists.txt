@@ -397,6 +397,43 @@ if(WIN32)
     endif()
 endif()
 
+# --- Linux/macOS: Build libdrlms_signal_bridge.so ---
+if(NOT WIN32)
+    message(STATUS "Configuring drlms_signal_bridge shared library for Python client (Linux/macOS)...")
+    add_library(drlms_signal_bridge SHARED
+        ${PROJECT_SOURCE_DIR}/src/ming_drlms/core/_pysignal_runtime.c
+        ${PROJECT_SOURCE_DIR}/src/ming_drlms/core/drlms_xeddsa.c
+        ${PROJECT_SOURCE_DIR}/src/server/c_logging.c
+    )
+    
+    target_include_directories(drlms_signal_bridge PRIVATE
+        ${PROJECT_SOURCE_DIR}/src
+        ${PROJECT_SOURCE_DIR}/src/server
+        ${PROJECT_SOURCE_DIR}/src/platform/include
+    )
+    
+    target_link_libraries(drlms_signal_bridge PRIVATE
+        Signal::protocol
+        OpenSSL::Crypto
+    )
+    
+    # Output to signal-install/lib for easy discovery by Python
+    set_target_properties(drlms_signal_bridge PROPERTIES
+        LIBRARY_OUTPUT_DIRECTORY ${SIGNAL_INSTALL_PREFIX}/lib
+        INSTALL_RPATH "$ORIGIN"
+    )
+    
+    # Also copy to build root for convenience
+    add_custom_command(TARGET drlms_signal_bridge POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:drlms_signal_bridge>"
+            "${CMAKE_BINARY_DIR}/libdrlms_signal_bridge.so"
+        COMMENT "Copying libdrlms_signal_bridge.so to build root"
+    )
+    
+    message(STATUS "drlms_signal_bridge target added for Linux/macOS.")
+endif()
+
 # Add build info logging
 if(PROTOC_C_EXECUTABLE AND NOT PROTOBUF_C_USE_PREGENSETS AND GENERATED_SRC)
     add_custom_target(proto_gen DEPENDS ${GENERATED_SRC} ${GENERATED_HDR} ${GENERATED_PY})
