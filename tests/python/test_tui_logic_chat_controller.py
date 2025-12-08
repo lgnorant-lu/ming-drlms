@@ -71,6 +71,8 @@ def test_connect_uses_last_seen_and_e2ee_keys(
 
     # Patch client implementation
     monkeypatch.setattr(logic_mod, "RobustThreadedRoomClient", _DummyClient)
+    # Ensure backend is mp2 for this test (avoid relay/httpx paths)
+    monkeypatch.setenv("DRLMS_BACKEND", "mp2")
 
     events: list[object] = []
     errors: list[Exception] = []
@@ -192,6 +194,8 @@ def test_upload_file_with_progress_uses_mp2_client_and_reports_progress(
     # Minimal file
     file_path = tmp_path / "big.bin"
     file_path.write_bytes(b"x" * 100)
+    # Force MP2 backend so upload_file uses MP2Client path, not relay
+    monkeypatch.setenv("DRLMS_BACKEND", "mp2")
 
     progress_events: list[dict] = []
 
@@ -295,6 +299,8 @@ def test_download_file_with_progress_uses_mp2_client_and_reports_percent(
 ) -> None:
     chunks = [b"abc", b"defg"]
     total = sum(len(c) for c in chunks)
+    # Force MP2 backend so download_file uses MP2Client path, not relay
+    monkeypatch.setenv("DRLMS_BACKEND", "mp2")
 
     progress_events: list[dict] = []
 

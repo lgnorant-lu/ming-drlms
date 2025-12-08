@@ -236,13 +236,19 @@ async def test_history_flow_text_and_binary_fallback(
         submitted = TextualInput.Submitted(input_widget, input_widget.value)
         chat.handle_message_submit(submitted)
 
-        await pilot.pause()
-
-        msg_list = chat.query_one(MessageList)
-        text_dump = "\n".join(
-            getattr(w, "render")().plain if hasattr(w, "render") else str(w)
-            for w in msg_list.messages
-        )
+        text_dump = ""
+        for _ in range(5):
+            await pilot.pause()
+            msg_list = chat.query_one(MessageList)
+            text_dump = "\n".join(
+                getattr(w, "render")().plain if hasattr(w, "render") else str(w)
+                for w in msg_list.messages
+            )
+            if (
+                "[1] alice: hello" in text_dump
+                and "[2] alice: [Encrypted or binary payload]" in text_dump
+            ):
+                break
 
         # First event should decode as text
         assert "[1] alice: hello" in text_dump

@@ -123,6 +123,8 @@ def test_tui_relay_send_posts_envelope(
     # Arrange config and env
     cfg_dir = _write_config(tmp_path)
     monkeypatch.setenv("MING_DRLMS_CONFIG_DIR", str(cfg_dir))
+    # Force relay backend for this test so ChatController routes via Relay
+    monkeypatch.setenv("DRLMS_BACKEND", "relay")
 
     from ming_drlms.tui.logic import ChatController
     import ming_drlms.tui.logic as logic
@@ -212,6 +214,8 @@ def test_tui_relay_send_uses_py_fallback_when_cffi_sign_fails(
     # Arrange config and env
     cfg_dir = _write_config(tmp_path)
     monkeypatch.setenv("MING_DRLMS_CONFIG_DIR", str(cfg_dir))
+    # Force relay backend so send_message uses Relay path even if global env
+    monkeypatch.setenv("DRLMS_BACKEND", "relay")
 
     from ming_drlms.tui.logic import ChatController
     import ming_drlms.tui.logic as logic

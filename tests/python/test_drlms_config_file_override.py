@@ -66,6 +66,9 @@ base_url = "http://custom.example.com:9999"
         )
 
         monkeypatch.setenv("DRLMS_CONFIG_FILE", str(custom_config))
+        # Ensure env vars do not override backend/base_url for this test
+        monkeypatch.delenv("DRLMS_RELAY_BASE_URL", raising=False)
+        monkeypatch.delenv("DRLMS_BACKEND", raising=False)
 
         settings = load_settings()
         assert get_backend(settings) == "relay"

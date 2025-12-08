@@ -354,10 +354,9 @@ class ChatScreen(Screen):
         """Fetch room list from server."""
         try:
             rooms = self.controller.fetch_rooms()
-            self.app.call_from_thread(self._update_room_list, rooms)
+            self._safe_call_from_thread(self._update_room_list, rooms)
         except Exception as e:
-            # Fallback to default list if fetch fails
-            self.app.call_from_thread(
+            self._safe_call_from_thread(
                 lambda e=e: self.query_one(MessageList).add_message(
                     f"Failed to fetch rooms: {e}", "system"
                 )
@@ -366,9 +365,9 @@ class ChatScreen(Screen):
     def _refresh_members(self, room_name: str) -> None:
         try:
             members = self.controller.fetch_members(room_name)
-            self.app.call_from_thread(self._update_member_list, members)
+            self._safe_call_from_thread(self._update_member_list, members)
         except Exception as e:
-            self.app.call_from_thread(
+            self._safe_call_from_thread(
                 lambda e=e: self.query_one(MessageList).add_message(
                     f"Failed to fetch members: {e}", "system"
                 )
@@ -402,6 +401,13 @@ class ChatScreen(Screen):
             else:
                 room_name = str(room)
             list_view.append(ListItem(Label(f"{icon_room} {room_name}")))
+
+    def _safe_call_from_thread(self, func, *args, **kwargs) -> None:
+        try:
+            self.app.call_from_thread(func, *args, **kwargs)
+        except Exception:
+            # App may already be shut down (e.g. during tests); ignore UI update.
+            pass
 
     def _animate_in(self) -> None:
         """Trigger entrance animations."""

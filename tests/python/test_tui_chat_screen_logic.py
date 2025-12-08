@@ -42,6 +42,7 @@ class DummyController:
         on_event,
         on_error,
         on_connection_state,
+        test_sync_hook=None,
     ):  # type: ignore[override]
         self.username = username
         self.host = host

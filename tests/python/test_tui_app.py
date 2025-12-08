@@ -293,7 +293,7 @@ def test_switch_to_chat_constructs_chat_screen(monkeypatch: pytest.MonkeyPatch) 
     created: list[tuple[str, str]] = []
 
     class DummyChatScreen:
-        def __init__(self, username: str, server: str) -> None:  # type: ignore[override]
+        def __init__(self, username: str, server: str, *args, **kwargs) -> None:  # type: ignore[override]
             created.append((username, server))
 
     monkeypatch.setattr(app_mod, "ChatScreen", DummyChatScreen)
