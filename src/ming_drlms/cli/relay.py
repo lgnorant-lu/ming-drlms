@@ -19,6 +19,10 @@ from ..core.pysignal.signature import sign_bytes_with_store
 from ..core.e2ee_runtime import E2EEngine
 from ..core.mproto_v2_client import MP2Client
 
+# Phase 15C: IdentityManager integration
+from ..core.identity_manager import IdentityManager
+from ..core.relay_signer import RelaySigner
+
 relay_app = typer.Typer(help="Relay PoC commands")
 
 
@@ -41,6 +45,21 @@ def relay_post(
     peer_bundle_file: Optional[str] = typer.Option(None, "--peer-bundle-file"),
     encrypt: bool = typer.Option(False, "--encrypt/--no-encrypt"),
 ):
+    """[LEGACY] Post event using LocalKeyStore + CFFI signing.
+
+    WARNING: This command uses the legacy signing path (Signal XEdDSA via CFFI).
+    For Phase 15+ projects, use 'relay post-simple' instead, which uses
+    IdentityManager + Ed25519 signing.
+
+    This command is retained for backward compatibility with existing E2EE
+    encryption workflows that require Signal protocol integration.
+    """
+    # Legacy deprecation notice
+    typer.echo(
+        "Note: 'relay post' uses legacy CFFI signing. "
+        "Consider using 'relay post-simple' for Phase 15 IdentityManager signing.",
+        err=True,
+    )
     client = RelayHTTPClient(base_url)
     try:
         if ciphertext is None:
@@ -274,3 +293,107 @@ def relay_sync(
         typer.echo({"room": room, "synced": wrote})
     finally:
         client.close()
+
+
+# Phase 15C: Simplified post using IdentityManager
+@relay_app.command("post-simple")
+def relay_post_simple(
+    room: str = typer.Option(..., "--room", "-r", help="Target room"),
+    content: str = typer.Option(..., "--content", "-c", help="Message content"),
+    base_url: str = typer.Option("http://127.0.0.1:8081", "--base-url"),
+    content_type: str = typer.Option("text", "--content-type"),
+):
+    """Post event using IdentityManager (Phase 15 simplified signing).
+
+    Uses client-side identity from identity.json instead of LocalKeyStore/CFFI.
+    """
+    # Load IdentityManager
+    im = IdentityManager(auto_load=True)
+    if not im.has_identity():
+        typer.echo(
+            "Error: No identity found. Run 'drlms identity create' first.", err=True
+        )
+        raise typer.Exit(1)
+
+    username = os.environ.get("DRLMS_USER", "cli-user")
+
+    # Create signer
+    signer = RelaySigner(
+        identity_manager=im,
+        username=username,
+        device_id=1,
+    )
+
+    content_bytes = content.encode("utf-8")
+
+    try:
+        # Sign event
+        envelope = signer.sign_event(
+            room=room,
+            content=content_bytes,
+            content_type=content_type,
+        )
+
+        # POST to Relay
+        client = RelayHTTPClient(base_url)
+        try:
+            result = client.post_event(
+                room=room,
+                ciphertext=envelope.to_ciphertext_b64(),
+                content_len=len(content_bytes),
+                client_event_hash=envelope.client_hash,
+                client_ts=envelope.timestamp,
+            )
+            typer.echo(
+                {
+                    "status": "ok",
+                    "event_id": envelope.event_id,
+                    "pubkey": envelope.sender_pubkey_hex[:16] + "...",
+                    "server_response": result,
+                }
+            )
+        finally:
+            client.close()
+    except Exception as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+
+@relay_app.command("identity")
+def relay_identity(
+    action: str = typer.Argument("show", help="Action: show, create, export"),
+    alias: Optional[str] = typer.Option(None, "--alias", help="Alias for new identity"),
+):
+    """Manage client identity (Phase 15).
+
+    Actions:
+      show   - Show current identity
+      create - Create new identity
+      export - Export seed for backup
+    """
+    im = IdentityManager(auto_load=True)
+
+    if action == "show":
+        if not im.has_identity():
+            typer.echo("No identity found. Use 'relay identity create'")
+            raise typer.Exit(1)
+        typer.echo(f"Pubkey:  {im.get_pubkey_hex()}")
+        typer.echo(f"Alias:   {im.get_alias() or '(none)'}")
+        typer.echo(f"Path:    {im.path}")
+
+    elif action == "create":
+        if im.has_identity():
+            typer.echo("Identity already exists. Delete first if you want to recreate.")
+            raise typer.Exit(1)
+        identity = im.create_identity(alias=alias or "")
+        typer.echo(f"Created identity: {identity.public_key.hex()}")
+
+    elif action == "export":
+        if not im.has_identity():
+            typer.echo("No identity to export.")
+            raise typer.Exit(1)
+        typer.echo(f"Seed (KEEP SECRET): {im.export_identity().hex()}")
+
+    else:
+        typer.echo(f"Unknown action: {action}")
+        raise typer.Exit(1)

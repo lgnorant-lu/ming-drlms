@@ -65,10 +65,27 @@ class CommandHandler:
                   📥 Download a file by event id (output optional)
                    
 /e2ee-init       🔐 Generate E2EE keys (Enable Encryption)
-/e2ee-init       🔐 Generate E2EE keys (Enable Encryption)
 /fingerprint     🔑 Show E2EE identity key fingerprint
 /e2ee-prekey [user]
                   🔑 Fetch target user's prekey bundle summary
+
+Identity (Phase 15 - Client signing):
+/identity        🪪  Show current identity status
+/identity create [alias]
+                  🪪  Create new Ed25519 identity
+/identity export 🪪  Export seed for backup
+/identity import <seed>
+                  🪪  Import identity from 64-char hex seed
+
+Contacts (Phase 15 - Pubkey trust):
+/contacts        📇  List all contacts
+/contacts add <pk> [alias]
+                  📇  Add contact by pubkey
+/contacts trust <pk>
+                  📇  Mark contact as verified
+/contacts block <pk>
+                  📇  Block a contact
+
 /ephemeral [on|off|toggle]
                   🌫  Toggle default ephemeral send mode
 /send <text>     💬 Send a text message (respects ephemeral mode)

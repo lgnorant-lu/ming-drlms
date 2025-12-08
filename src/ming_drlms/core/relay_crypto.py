@@ -184,45 +184,79 @@ def build_decrypt_and_verify(
         )
         client_hash = event_hash_hex(serialized)
 
-        pub = identity_resolver(sender_id, device_id)
-        if not pub:
-            return None
         ok = False
-        try:
-            ctx = create_signal_context()
+        pub: bytes = b""
+
+        # Phase 15: first try Ed25519 verification using sender_pubkey_hex
+        env_pub: bytes = b""
+        if sender_pubkey_hex and len(sender_pubkey_hex) == 64:
             try:
-                ok = verify_bytes(
-                    ctx, public_key=pub, data=serialized, signature=signature
-                )
-            finally:
-                ctx.close()
-        except Exception:
-            ok = False
+                env_pub = bytes.fromhex(sender_pubkey_hex)
+            except Exception:
+                env_pub = b""
+            if len(env_pub) >= 32:
+                if _ed25519_verify_py(env_pub, serialized, signature):
+                    ok = True
+                    pub = env_pub
+                    try:
+                        logger.debug(
+                            "verify: python ed25519 succeeded via sender_pubkey_hex"
+                        )
+                    except Exception:
+                        pass
+
+        # Legacy / fallback path: use identity_resolver (XEdDSA + optional Ed25519)
+        if not ok:
+            pub = identity_resolver(sender_id, device_id)
+            if not pub:
+                flags = _relay_strict_flags()
+                enforce_verify = bool(flags.get("enforce_verify", False))
+                if enforce_verify:
+                    try:
+                        logger.debug(
+                            "verify strict: no identity available from resolver; rejecting"
+                        )
+                    except Exception:
+                        pass
+                    return None
+            else:
+                try:
+                    ctx = create_signal_context()
+                    try:
+                        ok = verify_bytes(
+                            ctx, public_key=pub, data=serialized, signature=signature
+                        )
+                    finally:
+                        ctx.close()
+                except Exception:
+                    ok = False
+                if not ok:
+                    # Try Python Ed25519 with resolver pubkey as last resort
+                    pb = bytes(pub)
+                    ok = (
+                        _ed25519_verify_py(pb, serialized, signature)
+                        if len(pb) >= 32
+                        else False
+                    )
+                    if ok:
+                        try:
+                            logger.debug(
+                                "verify: python ed25519 succeeded via identity_resolver"
+                            )
+                        except Exception:
+                            pass
+
         if not ok:
             flags = _relay_strict_flags()
             enforce_verify = bool(flags.get("enforce_verify", False))
             if enforce_verify:
                 try:
                     logger.debug(
-                        "verify strict: enforce_verify active; skipping python fallback"
+                        "verify strict: unable to verify with sender_pubkey_hex or resolver; rejecting"
                     )
                 except Exception:
                     pass
                 return None
-            pb = bytes(pub)
-            ok = (
-                _ed25519_verify_py(pb, serialized, signature)
-                if len(pb) >= 32
-                else False
-            )
-            if ok:
-                try:
-                    logger.debug(
-                        "verify fallback: python ed25519 used (no payload/keys logged)"
-                    )
-                except Exception:
-                    pass
-        if not ok:
             return None
         try:
             if (

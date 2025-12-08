@@ -5,24 +5,25 @@ from pathlib import Path
 import os
 import threading
 import time
-import base64
 import hashlib
 from typing import Optional, Callable, Union
 
 from .test_sync import TestSyncEvent, TestSyncHook, NullSyncHook
 from ..core.event_store import LocalEventStore, VerificationStatus, LocalEvent
 from ..core.event_hash import compute_event_id
+from ..core.identity_manager import IdentityManager
+from ..core.relay_signer import RelaySigner
+from ..core.contact_manager import ContactManager, TrustLevel
+from ..core.room_manager import RoomManager
 
 from ..core.threaded_client import RobustThreadedRoomClient, ConnectionState
 from ..cli.services.room_service import RoomService
 from ..core.mproto_v2_client import RoomEvent, MP2Client
 from ..proto.schema.v2 import room_pb2
 from ..core.relay_client import RelayHTTPClient
-from ..core.relay_crypto import (
-    build_decrypt_and_verify,
-    ed25519_sign_py,
-)
-from ..core.clear_event import canonical_serialize, event_hash_hex
+from ..core.relay_crypto import build_decrypt_and_verify
+
+# Note: canonical_serialize, event_hash_hex now handled internally by RelaySigner
 from ..core.pysignal.context import create_signal_context
 from ..core.pysignal.store import SignalStore
 from ..core.pysignal.signature import sign_bytes_with_store, is_xeddsa_available
@@ -92,6 +93,38 @@ class ChatController:
             self._event_store = LocalEventStore()
         except Exception as e:
             logger.warning("Failed to initialize event store: %s", e)
+
+        # Phase 15A: IdentityManager for client-side signing
+        self._identity_manager: Optional[IdentityManager] = None
+        try:
+            self._identity_manager = IdentityManager(auto_load=True)
+            if self._identity_manager.has_identity():
+                logger.debug(
+                    "IdentityManager loaded: pubkey=%s",
+                    self._identity_manager.get_pubkey_hex()[:16] + "...",
+                )
+            else:
+                logger.debug("IdentityManager initialized but no identity yet")
+        except Exception as e:
+            logger.warning("Failed to initialize IdentityManager: %s", e)
+
+        # Phase 15B: ContactManager for tracking sender pubkeys
+        self._contact_manager: Optional[ContactManager] = None
+        try:
+            self._contact_manager = ContactManager(auto_load=True)
+            logger.debug(
+                "ContactManager loaded: %d contacts", self._contact_manager.count()
+            )
+        except Exception as e:
+            logger.warning("Failed to initialize ContactManager: %s", e)
+
+        # Phase 15B: RoomManager for local room state
+        self._room_manager: Optional[RoomManager] = None
+        try:
+            self._room_manager = RoomManager(auto_load=True)
+            logger.debug("RoomManager loaded: %d rooms", self._room_manager.count())
+        except Exception as e:
+            logger.warning("Failed to initialize RoomManager: %s", e)
 
     def connect(self, room_name: str) -> None:
         """Connect to a room."""
@@ -282,123 +315,54 @@ class ChatController:
         backend = self._load_backend()
         use_relay = backend == "relay" or enforce
         if use_relay:
-            # Sign JSON envelope and POST to Relay
+            # Phase 15A: Use RelaySigner for unified signing
             try:
                 content_bytes = message.encode("utf-8")
-                ks = LocalKeyStore()
-                st = ks.load_state(self.username)
-                if st is None:
-                    raise RuntimeError(
-                        "No LocalKeyState found; initialize identity first"
-                    )
-                did = int(getattr(st, "device_id", 1) or 1)
-                env_ts = int(time.time())
-                serialized = canonical_serialize(
-                    room=self._relay_room or "",
-                    ts=env_ts,
-                    sender_id=self.username,
-                    device_id=did,
-                    content_type="text",
-                    content_bytes=content_bytes,
+
+                # Create RelaySigner: prefer IdentityManager, fallback to LocalKeyStore
+                signer = RelaySigner(
+                    identity_manager=self._identity_manager,
+                    username=self.username,
+                    device_id=1,
                 )
 
-                # Robust signing: try CFFI first, fall back to Python Ed25519 in non-strict mode
-                sig_hex = ""
-                if enforce:
-                    # Strict mode: CFFI signing required, no fallback
-                    try:
-                        ctx = create_signal_context()
-                        store = SignalStore(ctx)
-                        try:
-                            store.set_identity(
-                                public_key=st.identity_key.public_key,
-                                private_key=st.identity_key.private_key,
-                                registration_id=st.registration_id,
-                                device_id=did,
-                            )
-                            sig = sign_bytes_with_store(store, serialized)
-                            sig_hex = sig.hex()
-                        finally:
-                            store.close()
-                            ctx.close()
-                    except Exception as cffi_err:
-                        logger.debug("relay_sign: cffi failed (strict): %s", cffi_err)
-                        raise RuntimeError("Relay signing required but unavailable")
-                else:
-                    # Non-strict mode: try CFFI, silently fall back to Python Ed25519
-                    cffi_ok = False
-                    try:
-                        ctx = create_signal_context()
-                        store = SignalStore(ctx)
-                        try:
-                            store.set_identity(
-                                public_key=st.identity_key.public_key,
-                                private_key=st.identity_key.private_key,
-                                registration_id=st.registration_id,
-                                device_id=did,
-                            )
-                            sig = sign_bytes_with_store(store, serialized)
-                            sig_hex = sig.hex()
-                            cffi_ok = True
-                        finally:
-                            store.close()
-                            ctx.close()
-                    except Exception as cffi_err:
-                        logger.debug(
-                            "relay_sign: cffi failed, will use fallback: %s", cffi_err
+                # Check signing capability
+                if not signer.can_sign():
+                    if enforce:
+                        raise RuntimeError(
+                            "Relay signing required but no identity available. "
+                            "Use /identity create to initialize."
                         )
-                        cffi_ok = False
+                    else:
+                        logger.warning(
+                            "No signing identity available, sending unsigned"
+                        )
 
-                    if not cffi_ok:
-                        try:
-                            priv = st.identity_key.private_key
-                            sig = ed25519_sign_py(
-                                priv
-                                if isinstance(priv, (bytes, bytearray))
-                                else bytes(priv),
-                                serialized,
-                            )
-                            sig_hex = sig.hex()
-                            logger.debug("relay_sign: py_ed25519_fallback used")
-                        except Exception as py_err:
-                            logger.debug(
-                                "relay_sign: python fallback also failed: %s", py_err
-                            )
-                            sig_hex = ""
+                # Create signed event envelope
+                envelope = signer.sign_event(
+                    room=self._relay_room or "",
+                    content=content_bytes,
+                    content_type="text",
+                )
 
-                # 14F: Compute Nostr-style Hash ID for content-addressable events
-                sender_pubkey = st.identity_key.public_key
-                if sender_pubkey and len(sender_pubkey) == 32:
-                    event_id = compute_event_id(
-                        sender_pubkey, content_bytes, env_ts * 1000
-                    )
-                    sender_pubkey_hex = sender_pubkey.hex()
-                else:
-                    event_id = ""
-                    sender_pubkey_hex = ""
+                logger.debug(
+                    "RelaySigner: event_id=%s pubkey=%s",
+                    envelope.event_id[:16] + "..." if envelope.event_id else "none",
+                    envelope.sender_pubkey_hex[:16] + "..."
+                    if envelope.sender_pubkey_hex
+                    else "none",
+                )
 
-                envelope = {
-                    "sender_id": self.username,
-                    "device_id": did,
-                    "ts": env_ts,
-                    "content_type": "text",
-                    "content_bytes_b64": base64.b64encode(content_bytes).decode(
-                        "ascii"
-                    ),
-                    "signature_hex": sig_hex,
-                    "event_id": event_id,  # 14F: Nostr-style Hash ID
-                    "sender_pubkey_hex": sender_pubkey_hex,  # 14F: For verification
-                }
-                env_bytes = json.dumps(envelope).encode("utf-8")
-                ciphertext = base64.b64encode(env_bytes).decode("ascii")
+                # POST to Relay
+                ciphertext = envelope.to_ciphertext_b64()
                 client = RelayHTTPClient(self._relay_base_url)
                 try:
                     client.post_event(
                         room=self._relay_room or "",
                         ciphertext=ciphertext,
                         content_len=len(content_bytes),
-                        client_event_hash=event_hash_hex(serialized),
-                        client_ts=env_ts,
+                        client_event_hash=envelope.client_hash,
+                        client_ts=envelope.timestamp,
                     )
                     self._test_sync.notify_sync(TestSyncEvent.MESSAGE_SENT)
                 finally:
@@ -474,6 +438,7 @@ class ChatController:
         if backend == "relay":
             http = RelayHTTPClient(self._relay_base_url)
             try:
+                # Step 1: Upload file to Relay storage
                 meta = http.upload_file(file_path=str(filepath), room=room)
                 if self._progress_cb:
                     try:
@@ -482,13 +447,8 @@ class ChatController:
                         )
                     except Exception:
                         pass
-                ks = LocalKeyStore()
-                st = ks.load_state(self.username)
-                if st is None:
-                    raise RuntimeError(
-                        "No LocalKeyState found; initialize identity first"
-                    )
-                did = int(getattr(st, "device_id", 1) or 1)
+
+                # Step 2: Build file metadata content
                 env_ts = int(meta.get("ts") or time.time())
                 content = {
                     "file_id": int(meta.get("file_id") or 0),
@@ -503,130 +463,45 @@ class ChatController:
                     "timestamp": str(env_ts),
                 }
                 content_bytes = json.dumps(content, ensure_ascii=False).encode("utf-8")
-                serialized = canonical_serialize(
-                    room=room,
-                    ts=env_ts,
-                    sender_id=self.username,
-                    device_id=did,
-                    content_type="file",
-                    content_bytes=content_bytes,
+
+                # Step 3: Use RelaySigner for unified signing (Phase 15 refactor)
+                signer = RelaySigner(
+                    identity_manager=self._identity_manager,
+                    username=self.username,
+                    device_id=1,
                 )
 
-                # Determine signing requirement for file envelope
-                enforce_file = False
-                try:
-                    s = load_settings()
-                    v = s.env.get("DRLMS_RELAY_ENFORCE_SIGNED")
-                    if v is not None:
-                        enforce_file = str(v).lower() not in ("0", "false")
-                    else:
-                        g = s.raw.get("general", {}) if isinstance(s.raw, dict) else {}
-                        r = g.get("relay", {}) if isinstance(g, dict) else {}
-                        if isinstance(r, dict) and ("enforce_signed" in r):
-                            enforce_file = bool(r.get("enforce_signed"))
-                except Exception:
-                    enforce_file = False
-
-                # Robust signing: try CFFI first, fall back to Python Ed25519 in non-strict mode
-                sig_hex = ""
-                if enforce_file:
-                    # Strict mode: CFFI signing required
-                    try:
-                        ctx = create_signal_context()
-                        store = SignalStore(ctx)
-                        try:
-                            store.set_identity(
-                                public_key=st.identity_key.public_key,
-                                private_key=st.identity_key.private_key,
-                                registration_id=st.registration_id,
-                                device_id=did,
-                            )
-                            sig = sign_bytes_with_store(store, serialized)
-                            sig_hex = sig.hex()
-                        finally:
-                            store.close()
-                            ctx.close()
-                    except Exception as cffi_err:
-                        logger.debug(
-                            "relay_sign (file): cffi failed (strict): %s", cffi_err
-                        )
-                        raise RuntimeError("Relay signing required but unavailable")
-                else:
-                    # Non-strict mode: try CFFI, silently fall back to Python Ed25519
-                    cffi_ok = False
-                    try:
-                        ctx = create_signal_context()
-                        store = SignalStore(ctx)
-                        try:
-                            store.set_identity(
-                                public_key=st.identity_key.public_key,
-                                private_key=st.identity_key.private_key,
-                                registration_id=st.registration_id,
-                                device_id=did,
-                            )
-                            sig = sign_bytes_with_store(store, serialized)
-                            sig_hex = sig.hex()
-                            cffi_ok = True
-                        finally:
-                            store.close()
-                            ctx.close()
-                    except Exception as cffi_err:
-                        logger.debug(
-                            "relay_sign (file): cffi failed, will use fallback: %s",
-                            cffi_err,
-                        )
-                        cffi_ok = False
-
-                    if not cffi_ok:
-                        try:
-                            priv = st.identity_key.private_key
-                            sig = ed25519_sign_py(
-                                priv
-                                if isinstance(priv, (bytes, bytearray))
-                                else bytes(priv),
-                                serialized,
-                            )
-                            sig_hex = sig.hex()
-                            logger.debug("relay_sign (file): py_ed25519_fallback used")
-                        except Exception as py_err:
-                            logger.debug(
-                                "relay_sign (file): python fallback also failed: %s",
-                                py_err,
-                            )
-                            sig_hex = ""
-
-                # 14F: Compute Nostr-style Hash ID for file events
-                sender_pubkey = st.identity_key.public_key
-                if sender_pubkey and len(sender_pubkey) == 32:
-                    file_event_id = compute_event_id(
-                        sender_pubkey, content_bytes, env_ts * 1000
+                if not signer.can_sign():
+                    raise RuntimeError(
+                        "No signing identity available for file upload. "
+                        "Use /identity create to initialize."
                     )
-                    sender_pubkey_hex = sender_pubkey.hex()
-                else:
-                    file_event_id = ""
-                    sender_pubkey_hex = ""
 
-                envelope = {
-                    "sender_id": self.username,
-                    "device_id": did,
-                    "ts": env_ts,
-                    "content_type": "file",
-                    "content_bytes_b64": base64.b64encode(content_bytes).decode(
-                        "ascii"
-                    ),
-                    "signature_hex": sig_hex,
-                    "event_id": file_event_id,  # 14F: Nostr-style Hash ID
-                    "sender_pubkey_hex": sender_pubkey_hex,  # 14F: For verification
-                }
-                env_bytes = json.dumps(envelope).encode("utf-8")
-                ciphertext = base64.b64encode(env_bytes).decode("ascii")
+                # Sign file event using RelaySigner
+                envelope = signer.sign_event(
+                    room=room,
+                    content=content_bytes,
+                    content_type="file",
+                    timestamp=env_ts,
+                )
+
+                logger.debug(
+                    "RelaySigner (file): event_id=%s pubkey=%s",
+                    envelope.event_id[:16] + "..." if envelope.event_id else "none",
+                    envelope.sender_pubkey_hex[:16] + "..."
+                    if envelope.sender_pubkey_hex
+                    else "none",
+                )
+
+                # Step 4: POST to Relay
                 http.post_event(
                     room=room,
-                    ciphertext=ciphertext,
+                    ciphertext=envelope.to_ciphertext_b64(),
                     content_len=len(content_bytes),
-                    client_event_hash=event_hash_hex(serialized),
-                    client_ts=env_ts,
+                    client_event_hash=envelope.client_hash,
+                    client_ts=envelope.timestamp,
                 )
+
                 if self._progress_cb:
                     try:
                         self._progress_cb(
@@ -1133,6 +1008,33 @@ class ChatController:
                                         self._event_store.update_sync_state(
                                             self._relay_room or "", server_seq
                                         )
+                                        # Phase 15B: Record sender pubkey to ContactManager
+                                        if (
+                                            self._contact_manager
+                                            and sender_pubkey_hex
+                                            and len(sender_pubkey_hex) == 64
+                                        ):
+                                            try:
+                                                pubkey_bytes = bytes.fromhex(
+                                                    sender_pubkey_hex
+                                                )
+                                                if not self._contact_manager.is_known(
+                                                    pubkey_bytes
+                                                ):
+                                                    self._contact_manager.add_contact(
+                                                        pubkey_bytes,
+                                                        alias=sender or "",
+                                                        trust=TrustLevel.UNVERIFIED,
+                                                    )
+                                                    logger.debug(
+                                                        "ContactManager: added new contact %s",
+                                                        sender_pubkey_hex[:16] + "...",
+                                                    )
+                                            except Exception as cm_err:
+                                                logger.debug(
+                                                    "ContactManager add failed: %s",
+                                                    cm_err,
+                                                )
                                     except Exception as store_err:
                                         logger.debug(
                                             "Failed to save event to local store: %s",
