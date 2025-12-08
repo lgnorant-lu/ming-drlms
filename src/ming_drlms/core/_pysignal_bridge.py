@@ -326,11 +326,24 @@ _CDEF = """
             const session_signed_pre_key *pre_key);
         void session_signed_pre_key_destroy(signal_type_base *pre_key);
 
+        /* Get signal_context from store for XEdDSA operations */
+        signal_context *drlms_signal_store_get_context(
+            const drlms_signal_store *store);
+
+        /* Get identity private key bytes from store */
+        int drlms_signal_store_get_identity_private(
+            const drlms_signal_store *store,
+            const uint8_t **priv, size_t *priv_len);
+
+        /* XEdDSA sign using Signal Protocol's curve_calculate_signature
+         * (true XEdDSA with Montgomery <-> Edwards curve conversion) */
         int drlms_xeddsa_sign_detached(
             drlms_signal_store *store,
             const uint8_t *msg, size_t msg_len,
             uint8_t **sig_out, size_t *sig_len);
 
+        /* XEdDSA verify using Signal Protocol's curve_verify_signature
+         * (true XEdDSA with Montgomery <-> Edwards curve conversion) */
         int drlms_xeddsa_verify_detached(
             signal_context *ctx,
             const uint8_t *pub_key, size_t pub_len,

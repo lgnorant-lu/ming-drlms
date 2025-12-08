@@ -302,25 +302,32 @@ def relay_post_simple(
     content: str = typer.Option(..., "--content", "-c", help="Message content"),
     base_url: str = typer.Option("http://127.0.0.1:8081", "--base-url"),
     content_type: str = typer.Option("text", "--content-type"),
+    username: Optional[str] = typer.Option(
+        None, "--user", "-u", help="Username for identity lookup"
+    ),
 ):
-    """Post event using IdentityManager (Phase 15 simplified signing).
+    """Post event using IdentityManager (Phase 15.5 XEdDSA signing).
 
-    Uses client-side identity from identity.json instead of LocalKeyStore/CFFI.
+    Uses X25519 identity from LocalKeyStore for XEdDSA signing.
     """
-    # Load IdentityManager
-    im = IdentityManager(auto_load=True)
-    if not im.has_identity():
-        typer.echo(
-            "Error: No identity found. Run 'drlms identity create' first.", err=True
-        )
+    # Resolve username
+    user = username or os.environ.get("DRLMS_USER")
+    if not user:
+        typer.echo("Error: username required. Use --user or set DRLMS_USER.", err=True)
         raise typer.Exit(1)
 
-    username = os.environ.get("DRLMS_USER", "cli-user")
+    # Load IdentityManager (Phase 15.5)
+    im = IdentityManager(user)
+    if not im.has_identity():
+        typer.echo(
+            f"Error: No identity found for '{user}'. Generate keys first.", err=True
+        )
+        raise typer.Exit(1)
 
     # Create signer
     signer = RelaySigner(
         identity_manager=im,
-        username=username,
+        username=user,
         device_id=1,
     )
 
@@ -362,37 +369,76 @@ def relay_post_simple(
 @relay_app.command("identity")
 def relay_identity(
     action: str = typer.Argument("show", help="Action: show, create, export"),
-    alias: Optional[str] = typer.Option(None, "--alias", help="Alias for new identity"),
+    username: Optional[str] = typer.Option(
+        None, "--user", "-u", help="Username for identity lookup"
+    ),
 ):
-    """Manage client identity (Phase 15).
+    """Manage client identity (Phase 15.5 XEdDSA).
 
     Actions:
       show   - Show current identity
-      create - Create new identity
-      export - Export seed for backup
+      create - Create new X25519 identity in LocalKeyStore
+      export - Export private key for backup
     """
-    im = IdentityManager(auto_load=True)
+    user = username or os.environ.get("DRLMS_USER")
+    if not user:
+        typer.echo("Error: username required. Use --user or set DRLMS_USER.", err=True)
+        raise typer.Exit(1)
 
     if action == "show":
+        im = IdentityManager(user)
         if not im.has_identity():
-            typer.echo("No identity found. Use 'relay identity create'")
+            typer.echo(
+                f"No identity found for '{user}'. Use 'relay identity create --user {user}'"
+            )
             raise typer.Exit(1)
+        typer.echo(f"User:    {user}")
         typer.echo(f"Pubkey:  {im.get_pubkey_hex()}")
-        typer.echo(f"Alias:   {im.get_alias() or '(none)'}")
-        typer.echo(f"Path:    {im.path}")
+        typer.echo("Storage: LocalKeyStore (e2ee_keys.json)")
 
     elif action == "create":
+        # Check if identity already exists
+        im = IdentityManager(user)
         if im.has_identity():
-            typer.echo("Identity already exists. Delete first if you want to recreate.")
+            typer.echo(f"Identity already exists for '{user}'.")
             raise typer.Exit(1)
-        identity = im.create_identity(alias=alias or "")
-        typer.echo(f"Created identity: {identity.public_key.hex()}")
+
+        # Generate new X25519 identity via Signal Protocol
+        from ..core.e2ee_store import LocalKeyStore
+        from ..core.pysignal.context import create_signal_context
+        from ..core.pysignal.keys import generate_device_keys
+
+        ctx = create_signal_context()
+        keys = generate_device_keys(ctx)
+
+        ks = LocalKeyStore()
+        ks.store_keys(
+            user,
+            registration_id=keys.registration_id,
+            device_id=keys.device_id,
+            identity=keys.identity,
+            signed_pre_key=keys.signed_pre_key,
+            pre_keys=keys.pre_keys,
+        )
+
+        # Get the new public key
+        state = ks.load_state(user)
+        if state and state.identity_key:
+            pub = state.identity_key.public_key
+            if len(pub) == 33:
+                pub = pub[1:]
+            typer.echo(f"Created X25519 identity for '{user}'")
+            typer.echo(f"Pubkey: {pub.hex()}")
+        else:
+            typer.echo("Error: Failed to verify created identity", err=True)
+            raise typer.Exit(1)
 
     elif action == "export":
+        im = IdentityManager(user)
         if not im.has_identity():
-            typer.echo("No identity to export.")
+            typer.echo(f"No identity to export for '{user}'.")
             raise typer.Exit(1)
-        typer.echo(f"Seed (KEEP SECRET): {im.export_identity().hex()}")
+        typer.echo(f"Private key (KEEP SECRET): {im.export_identity().hex()}")
 
     else:
         typer.echo(f"Unknown action: {action}")

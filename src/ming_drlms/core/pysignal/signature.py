@@ -1,3 +1,18 @@
+"""XEdDSA signature operations using Signal Protocol C library.
+
+Phase 15.5: This module provides true XEdDSA (X25519 + EdDSA) signing and
+verification using the Signal Protocol C library's curve25519 functions.
+
+The underlying C implementation uses:
+  - curve_calculate_signature: Signs using X25519 private key with
+    automatic Montgomery -> Edwards curve conversion
+  - curve_verify_signature: Verifies using X25519 public key with
+    automatic Montgomery -> Edwards curve conversion
+
+This is the proper XEdDSA as specified by Signal, where a single X25519
+key can be used for both ECDH (encryption) and EdDSA-style signatures.
+"""
+
 from __future__ import annotations
 
 from typing import Final
@@ -7,7 +22,7 @@ from .._pysignal_utils import check_rc, c_bytes_copy
 from .context import SignalContext
 from .store import SignalStore
 
-# Planned C bridge function names (to be provided by drlms_signal_bridge)
+# C bridge function names for true XEdDSA (drlms_signal_bridge)
 _FN_SIGN: Final[str] = "drlms_xeddsa_sign_detached"
 _FN_VERIFY: Final[str] = "drlms_xeddsa_verify_detached"
 
@@ -93,8 +108,31 @@ def verify_bytes(
     return ok == 1
 
 
+def _derive_public_from_private(context: SignalContext, private_key: bytes) -> bytes:
+    """Derive X25519 public key from private key.
+
+    Args:
+        context: SignalContext (unused, for API consistency)
+        private_key: 32-byte X25519 private key
+
+    Returns:
+        32-byte X25519 public key (without type prefix)
+    """
+    from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
+
+    if len(private_key) != 32:
+        raise ValueError(f"Private key must be 32 bytes, got {len(private_key)}")
+
+    priv = X25519PrivateKey.from_private_bytes(private_key)
+    pub = priv.public_key()
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+
+    return pub.public_bytes(Encoding.Raw, PublicFormat.Raw)
+
+
 __all__ = [
     "is_xeddsa_available",
     "sign_bytes_with_store",
     "verify_bytes",
+    "_derive_public_from_private",
 ]

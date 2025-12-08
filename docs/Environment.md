@@ -95,6 +95,21 @@ export DRLMS_LOG_CONSOLE=1
   - WSL：`rm -rf .venv`
 - 重新按上面的步骤创建各自环境。
 
+## Phase 15.5 身份与签名环境变量
+
+### 身份管理
+- `DRLMS_USER` - 当前用户名（用于 LocalKeyStore 身份查找）
+- `DRLMS_DATA_DIR` - 数据目录（默认 `~/.drlms`）
+
+### 服务端签名验证
+- `DRLMS_REQUIRE_IDENTITY_SIG=1` - 强制要求登录签名
+- `DRLMS_IDENTITY_SIG_MAX_SKEW=300` - 签名时间戳最大偏差（秒）
+
+### 注意事项
+- **Phase 15.5+** 默认使用 **XEdDSA** 签名（X25519 + EdDSA）
+- 已移除 `DRLMS_MP2_USE_XEDDSA` 环境变量（XEdDSA 现为默认）
+- 服务端同时支持 XEdDSA 和 Ed25519 验证（向后兼容）
+
 ## 常见问题
 - 依赖不一致：`uv pip check`。
 - 运行时报导入缺失：`deptry src` 静态核对；确认 `pyproject.toml` 的依赖是否包含。

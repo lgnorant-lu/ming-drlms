@@ -165,9 +165,12 @@ class LocalKeyStore:
     """面向多账号的本地密钥仓库。"""
 
     def __init__(self, path: Optional[Path] = None) -> None:
+        import threading
+
         self._path = Path(path) if path else _default_store_path()
         self._data: Dict[str, object] = {}
         self._loaded = False
+        self._lock = threading.Lock()
 
     # ------------------------------------------------------------------
     # 公共读取接口
@@ -340,6 +343,23 @@ class LocalKeyStore:
                 "key": _encode_key_pair(signed_pre_key.key),
             }
         self._store_user_payload(username, payload)
+
+    def delete_user_state(self, username: str) -> bool:
+        """Delete all stored state for a user.
+
+        Args:
+            username: User identifier
+
+        Returns:
+            True if user was deleted, False if user didn't exist
+        """
+        self._ensure_loaded()
+        users = self._data.get("users", {})
+        if not isinstance(users, dict) or username not in users:
+            return False
+        del users[username]
+        self._persist()
+        return True
 
     def record_remote_identity(
         self, username: str, peer: str, device_id: int, identity: bytes

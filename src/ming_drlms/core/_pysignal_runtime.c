@@ -904,6 +904,15 @@ DRLMS_EXPORT int drlms_signal_store_get_identity_private(
     return 0;
 }
 
+/* Get signal_context from store for XEdDSA operations */
+DRLMS_EXPORT signal_context *
+drlms_signal_store_get_context(const drlms_signal_store *store) {
+    if (!store) {
+        return NULL;
+    }
+    return store->ctx;
+}
+
 static int aes_process(signal_buffer **output, int cipher, const uint8_t *key,
                        size_t key_len, const uint8_t *iv, size_t iv_len,
                        const uint8_t *input, size_t input_len, int encrypt) {

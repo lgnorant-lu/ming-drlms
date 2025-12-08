@@ -215,17 +215,34 @@ class TestP2PSecuritySettings:
 
 
 class TestModeCoexistence:
-    """Tests for MP2 and Relay mode coexistence."""
+    """Tests for MP2 and Relay mode coexistence (Phase 15.5)."""
 
     def test_identity_manager_works_regardless_of_backend(self, tmp_path: Path) -> None:
-        """IdentityManager works regardless of configured backend."""
+        """IdentityManager works regardless of configured backend (Phase 15.5)."""
         from ming_drlms.core.identity_manager import IdentityManager
+        from ming_drlms.core.e2ee_store import LocalKeyStore
+        from ming_drlms.core.pysignal.context import create_signal_context
+        from ming_drlms.core.pysignal.keys import generate_device_keys
 
-        im = IdentityManager(tmp_path / "identity.json")
-        identity = im.create_identity(alias="coexist-test")
+        # Phase 15.5: Generate keys via Signal Protocol and store in LocalKeyStore
+        ks = LocalKeyStore(tmp_path / "e2ee_keys.json")
+        ctx = create_signal_context()
+        keys = generate_device_keys(ctx)
+        ks.store_keys(
+            "coexist-test",
+            registration_id=keys.registration_id,
+            device_id=keys.device_id,
+            identity=keys.identity,
+            signed_pre_key=keys.signed_pre_key,
+            pre_keys=keys.pre_keys,
+        )
 
-        # Identity works regardless of backend
-        assert len(identity.public_key) == 32
+        # IdentityManager proxies to LocalKeyStore
+        im = IdentityManager("coexist-test", keystore=ks)
+
+        # Identity works regardless of backend (32-byte X25519 pubkey)
+        pubkey = im.get_pubkey()
+        assert len(pubkey) == 32
         signature = im.sign(b"test")
         assert len(signature) == 64
 
@@ -252,24 +269,36 @@ class TestModeCoexistence:
     def test_local_keystore_and_identity_manager_can_coexist(
         self, tmp_path: Path
     ) -> None:
-        """LocalKeyStore (MP2) and IdentityManager (Relay) can coexist."""
+        """LocalKeyStore and IdentityManager share the same identity (Phase 15.5)."""
         from ming_drlms.core.identity_manager import IdentityManager
         from ming_drlms.core.e2ee_store import LocalKeyStore
+        from ming_drlms.core.pysignal.context import create_signal_context
+        from ming_drlms.core.pysignal.keys import generate_device_keys
 
-        # IdentityManager for Relay signing
-        im = IdentityManager(tmp_path / "identity.json")
-        im.create_identity()
-
-        # LocalKeyStore for E2EE (MP2 mode)
+        # Phase 15.5: LocalKeyStore is the single source of truth
         ks = LocalKeyStore(tmp_path / "e2ee_keys.json")
+        ctx = create_signal_context()
+        keys = generate_device_keys(ctx)
+        ks.store_keys(
+            "testuser",
+            registration_id=keys.registration_id,
+            device_id=keys.device_id,
+            identity=keys.identity,
+            signed_pre_key=keys.signed_pre_key,
+            pre_keys=keys.pre_keys,
+        )
 
-        # Sync identity to keystore
-        im.sync_to_local_keystore(ks, "testuser")
+        # IdentityManager proxies to LocalKeyStore (same identity)
+        im = IdentityManager("testuser", keystore=ks)
 
         # Both should have the same identity
         state = ks.load_state("testuser")
         assert state is not None
-        assert state.identity_key.public_key == im.get_pubkey()
+        # Compare 32-byte pubkey (strip type prefix if present)
+        ks_pub = state.identity_key.public_key
+        if len(ks_pub) == 33:
+            ks_pub = ks_pub[1:]
+        assert ks_pub == im.get_pubkey()
 
 
 class TestBackwardCompatibility:

@@ -34,8 +34,7 @@ from ..app_settings import (
     get_relay_settings,
 )
 from .. import log
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+# Phase 15.5: Ed25519 imports removed - XEdDSA uses X25519 public key directly
 
 logger = log.get_logger("tui.logic")
 
@@ -94,17 +93,17 @@ class ChatController:
         except Exception as e:
             logger.warning("Failed to initialize event store: %s", e)
 
-        # Phase 15A: IdentityManager for client-side signing
+        # Phase 15.5: IdentityManager backed by LocalKeyStore (XEdDSA)
         self._identity_manager: Optional[IdentityManager] = None
         try:
-            self._identity_manager = IdentityManager(auto_load=True)
+            self._identity_manager = IdentityManager(self.username)
             if self._identity_manager.has_identity():
                 logger.debug(
                     "IdentityManager loaded: pubkey=%s",
                     self._identity_manager.get_pubkey_hex()[:16] + "...",
                 )
             else:
-                logger.debug("IdentityManager initialized but no identity yet")
+                logger.debug("IdentityManager initialized but no identity in keystore")
         except Exception as e:
             logger.warning("Failed to initialize IdentityManager: %s", e)
 
@@ -835,22 +834,17 @@ class ChatController:
                 ks = LocalKeyStore()
                 if sender_id == self.username:
                     st = ks.load_state(self.username)
-                    if st and st.identity_key and st.identity_key.private_key:
-                        try:
-                            seed = st.identity_key.private_key
-                            seed_b = (
-                                seed
-                                if isinstance(seed, (bytes, bytearray))
-                                else bytes(seed)
-                            )
-                            priv = Ed25519PrivateKey.from_private_bytes(seed_b[:32])
-                            pub = priv.public_key().public_bytes(
-                                Encoding.Raw, PublicFormat.Raw
-                            )
-                            return pub
-                        except Exception:
-                            if st.identity_key.public_key:
-                                return st.identity_key.public_key
+                    if st and st.identity_key and st.identity_key.public_key:
+                        # Phase 15.5: Use X25519 public key directly from LocalKeyStore
+                        # (NOT Ed25519 derived from private key - XEdDSA uses X25519)
+                        pub = st.identity_key.public_key
+                        pub_bytes = (
+                            pub if isinstance(pub, (bytes, bytearray)) else bytes(pub)
+                        )
+                        # Strip type prefix if present (33 bytes -> 32 bytes)
+                        if len(pub_bytes) == 33:
+                            pub_bytes = pub_bytes[1:]
+                        return pub_bytes
                 data = ks.get_remote_signing_identity(
                     self.username, sender_id, int(device_id)
                 )
@@ -1098,33 +1092,17 @@ class ChatController:
                     ok = True
                 except Exception:
                     ok = False
-                if not ok:
+                # Phase 15.5: XEdDSA is the only signing path
+                if ok:
                     try:
-                        priv = st.identity_key.private_key
-                        from ..core.relay_crypto import ed25519_sign_py as _s
-
-                        _ = _s(
-                            priv
-                            if isinstance(priv, (bytes, bytearray))
-                            else bytes(priv),
-                            msg,
-                        )
-                        try:
-                            logger.debug(
-                                "xeddsa selftest: cffi failed, python ed25519 available"
-                            )
-                        except Exception:
-                            pass
+                        logger.debug("xeddsa selftest: XEdDSA sign ok")
                     except Exception:
-                        try:
-                            logger.debug(
-                                "xeddsa selftest: both cffi and python ed25519 unavailable"
-                            )
-                        except Exception:
-                            pass
+                        pass
                 else:
                     try:
-                        logger.debug("xeddsa selftest: cffi sign ok")
+                        logger.debug(
+                            "xeddsa selftest: XEdDSA sign failed (C bridge issue)"
+                        )
                     except Exception:
                         pass
             finally:

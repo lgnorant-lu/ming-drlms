@@ -1,12 +1,12 @@
-"""Phase 15C: Unified Relay event signing using IdentityManager.
+"""Phase 15.5: Unified Relay event signing using XEdDSA.
 
 This module provides a simplified signing interface for Relay events,
-using the new IdentityManager from Phase 15A. It serves as an alternative
-to the complex CFFI/fallback logic in the existing code path.
+using IdentityManager backed by LocalKeyStore and XEdDSA signatures.
 
 Design principles:
-- Pure Python signing via IdentityManager (no C bridge required)
-- Falls back to LocalKeyStore if IdentityManager not initialized
+- XEdDSA signing via Signal Protocol C library
+- Single X25519 identity for both E2EE and Relay signing
+- LocalKeyStore is the single source of truth
 - Simple API: sign_relay_event() returns signed envelope ready for POST
 """
 
@@ -69,12 +69,12 @@ class RelayEventEnvelope:
 
 
 class RelaySigner:
-    """Handles signing of Relay events using IdentityManager or LocalKeyStore.
+    """Phase 15.5: Handles signing of Relay events using XEdDSA.
 
     This class provides a unified signing interface that:
-    1. Prefers IdentityManager if available
-    2. Falls back to LocalKeyStore (existing E2EE keys) if needed
-    3. Raises clear errors if no signing capability is available
+    1. Uses IdentityManager backed by LocalKeyStore
+    2. Signs with XEdDSA (Signal Protocol C library)
+    3. Uses X25519 public keys in envelopes (same as E2EE identity)
     """
 
     def __init__(
@@ -88,93 +88,66 @@ class RelaySigner:
 
         Args:
             identity_manager: Optional IdentityManager instance.
-            username: Username for LocalKeyStore fallback.
+            username: Username for LocalKeyStore lookup.
             device_id: Device ID for the sender.
         """
         self._identity_manager = identity_manager
         self._username = username
         self._device_id = device_id
 
+    def _get_identity_manager(self) -> "IdentityManager":
+        """Get or create IdentityManager."""
+        if self._identity_manager is not None:
+            return self._identity_manager
+
+        if self._username:
+            from .identity_manager import IdentityManager
+
+            self._identity_manager = IdentityManager(self._username)
+            return self._identity_manager
+
+        raise RuntimeError("No username provided for identity lookup")
+
     def can_sign(self) -> bool:
         """Check if signing is available."""
-        if self._identity_manager is not None and self._identity_manager.has_identity():
-            return True
-
-        # Try LocalKeyStore fallback
-        if self._username:
-            try:
-                from .e2ee_store import LocalKeyStore
-
-                ks = LocalKeyStore()
-                state = ks.load_state(self._username)
-                return state is not None and state.identity_key is not None
-            except Exception:
-                pass
-        return False
+        try:
+            mgr = self._get_identity_manager()
+            return mgr.has_identity()
+        except Exception:
+            return False
 
     def get_pubkey(self) -> bytes:
-        """Get the signing public key.
+        """Get the X25519 signing public key (32 bytes).
 
         Returns:
-            32-byte Ed25519 public key.
+            32-byte X25519 public key (without type prefix).
 
         Raises:
             RuntimeError: If no signing identity is available.
         """
-        if self._identity_manager is not None and self._identity_manager.has_identity():
-            return self._identity_manager.get_pubkey()
-
-        if self._username:
-            try:
-                from .e2ee_store import LocalKeyStore
-                from cryptography.hazmat.primitives.asymmetric.ed25519 import (
-                    Ed25519PrivateKey,
-                )
-
-                ks = LocalKeyStore()
-                state = ks.load_state(self._username)
-                if state is not None and state.identity_key is not None:
-                    # Derive Ed25519 public key from seed (private key)
-                    # LocalKeyStore stores X25519 pubkey, but we need Ed25519 pubkey
-                    priv_bytes = bytes(state.identity_key.private_key)[:32]
-                    priv = Ed25519PrivateKey.from_private_bytes(priv_bytes)
-                    return priv.public_key().public_bytes_raw()
-            except Exception:
-                pass
-
-        raise RuntimeError("No signing identity available")
+        try:
+            mgr = self._get_identity_manager()
+            return mgr.get_pubkey()
+        except Exception as e:
+            raise RuntimeError(f"No signing identity available: {e}") from e
 
     def sign(self, data: bytes) -> bytes:
-        """Sign data with the identity key.
+        """Sign data with XEdDSA using the X25519 identity key.
 
         Args:
             data: Data to sign.
 
         Returns:
-            64-byte Ed25519 signature.
+            64-byte XEdDSA signature.
 
         Raises:
-            RuntimeError: If no signing capability is available.
+            RuntimeError: If signing fails.
         """
-        # Prefer IdentityManager
-        if self._identity_manager is not None and self._identity_manager.has_identity():
-            return self._identity_manager.sign(data)
-
-        # Fallback to LocalKeyStore + Python Ed25519
-        if self._username:
-            try:
-                from .e2ee_store import LocalKeyStore
-                from .relay_crypto import ed25519_sign_py
-
-                ks = LocalKeyStore()
-                state = ks.load_state(self._username)
-                if state is not None and state.identity_key is not None:
-                    priv = state.identity_key.private_key
-                    return ed25519_sign_py(bytes(priv)[:32], data)
-            except Exception as e:
-                raise RuntimeError(f"Signing failed: {e}")
-
-        raise RuntimeError("No signing identity available")
+        try:
+            mgr = self._get_identity_manager()
+            return mgr.sign(data)
+        except Exception as e:
+            raise RuntimeError(f"XEdDSA signing failed: {e}") from e
 
     def sign_event(
         self,

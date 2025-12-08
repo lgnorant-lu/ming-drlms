@@ -50,7 +50,7 @@ class Contact:
     """Represents a known contact with their public key.
 
     Attributes:
-        pubkey: 32-byte Ed25519 public key (stored as hex internally)
+        pubkey: 32-byte public key (X25519 for Phase 15.5+, stored as hex internally)
         alias: Human-readable name for this contact
         trust: Trust level for this contact
         added_at: Unix timestamp when contact was added

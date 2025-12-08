@@ -333,16 +333,12 @@ def test_tui_relay_send_aborts_when_enforce_signed_and_no_sign(
 
     monkeypatch.setattr(logic, "SignalStore", _DummyStore)
 
-    # Both CFFI sign and Python fallback raise
+    # Phase 15.5: Make XEdDSA sign fail by stubbing sign_bytes_with_store
+    # The ed25519_sign_py fallback is no longer used in Phase 15.5
     monkeypatch.setattr(
         logic,
         "sign_bytes_with_store",
-        lambda s, d: (_ for _ in ()).throw(RuntimeError("cffi sign failed")),
-    )
-    monkeypatch.setattr(
-        logic,
-        "ed25519_sign_py",
-        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("py sign failed")),
+        lambda s, d: (_ for _ in ()).throw(RuntimeError("xeddsa sign failed")),
     )
 
     class _DummyKS:

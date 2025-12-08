@@ -213,8 +213,7 @@ def cli_xeddsa_selftest(
     from ..core.pysignal.context import create_signal_context
     from ..core.pysignal.store import SignalStore
     from ..core.pysignal.signature import sign_bytes_with_store, verify_bytes
-    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+    # Phase 15.5: Ed25519 imports removed - XEdDSA uses X25519 public key directly
 
     user = username or os.environ.get("DRLMS_USER")
     if not user:
@@ -236,11 +235,14 @@ def cli_xeddsa_selftest(
         )
         msg = b"drlms-xeddsa-selftest"
         sig = sign_bytes_with_store(store, msg)
-        seed = st.identity_key.private_key
-        seed_b = seed if isinstance(seed, (bytes, bytearray)) else bytes(seed)
-        priv = Ed25519PrivateKey.from_private_bytes(seed_b[:32])
-        pub = priv.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
-        ok = verify_bytes(ctx, public_key=pub, data=msg, signature=sig)
+        # Phase 15.5: Use X25519 public key from LocalKeyStore for XEdDSA verification
+        # (NOT Ed25519 derived from private key - that's a different curve!)
+        pub = st.identity_key.public_key
+        pub_bytes = pub if isinstance(pub, (bytes, bytearray)) else bytes(pub)
+        # Strip type prefix if present (33 bytes -> 32 bytes)
+        if len(pub_bytes) == 33:
+            pub_bytes = pub_bytes[1:]
+        ok = verify_bytes(ctx, public_key=pub_bytes, data=msg, signature=sig)
         if ok:
             print("[green]xeddsa self-test ok[/green]")
             raise typer.Exit(code=0)

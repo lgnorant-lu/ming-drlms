@@ -31,13 +31,8 @@ msg_types = cast(Any, _msg_types)
 from .mp2_transport import MP2Frame, read_frame, write_frame  # noqa: E402
 from .token_store import TokenRecord, TokenStore  # noqa: E402
 from ..users import parse_users  # noqa: E402
-from cryptography.hazmat.primitives.asymmetric.ed25519 import (  # noqa: E402
-    Ed25519PrivateKey,
-)
-from cryptography.hazmat.primitives.serialization import (  # noqa: E402
-    Encoding,
-    PublicFormat,
-)
+
+# Phase 15.5: Ed25519 imports removed - using XEdDSA exclusively via IdentityManager
 
 logger = log.get_logger("core.mproto_v2_client")
 
@@ -274,48 +269,51 @@ class MP2Client:
         except Exception:
             st = None
 
-        if (
-            st
-            and getattr(st, "identity_key", None)
-            and getattr(st.identity_key, "private_key", None)
-        ):
+        # Phase 15.5: Use XEdDSA exclusively for MP2 login signature
+        # X25519 public key + XEdDSA signature (no Ed25519 fallback)
+        if st and getattr(st, "identity_key", None):
             try:
-                seed = st.identity_key.private_key
-                seed_b = seed if isinstance(seed, (bytes, bytearray)) else bytes(seed)
-                priv = Ed25519PrivateKey.from_private_bytes(seed_b[:32])
-                pub = priv.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
-                ts = int(time.time())
-                binding_parts = [
-                    b"MP2-LOGIN-V1",
-                    username.encode("utf-8"),
-                    str(int(getattr(st, "device_id", 0))).encode("ascii"),
-                    str(int(getattr(st, "registration_id", 0))).encode("ascii"),
-                    (nonce or "").encode("ascii"),
-                    (server_salt or "").encode("utf-8"),
-                    str(ts).encode("ascii"),
-                ]
-                binding = b"|".join(binding_parts)
-                sig = priv.sign(binding)
+                from .identity_manager import IdentityManager
 
-                client = auth_pb2.ClientInfo()
-                client.device_id = int(getattr(st, "device_id", 0))
-                client.registration_id = int(getattr(st, "registration_id", 0))
-                client.identity_pubkey = pub
-                client.identity_sig = sig
-                client.sig_ts = ts
-                try:
-                    client.platform = os.name
-                except Exception:
-                    pass
-                # app_version and device_guid left empty unless externally provided
-                try:
-                    # Prefer CopyFrom to ensure correct message assignment when field exists
-                    if hasattr(auth_req, "client"):
-                        auth_req.client.CopyFrom(client)  # type: ignore[attr-defined]
-                except Exception:
-                    pass
+                im = IdentityManager(username)
+
+                if im.has_identity():
+                    ts = int(time.time())
+                    binding_parts = [
+                        b"MP2-LOGIN-V1",
+                        username.encode("utf-8"),
+                        str(int(getattr(st, "device_id", 0))).encode("ascii"),
+                        str(int(getattr(st, "registration_id", 0))).encode("ascii"),
+                        (nonce or "").encode("ascii"),
+                        (server_salt or "").encode("utf-8"),
+                        str(ts).encode("ascii"),
+                    ]
+                    binding = b"|".join(binding_parts)
+
+                    pub = im.get_pubkey()  # 32-byte X25519 public key
+                    sig = im.sign(binding)  # XEdDSA signature (64 bytes)
+
+                    client = auth_pb2.ClientInfo()
+                    client.device_id = int(getattr(st, "device_id", 0))
+                    client.registration_id = int(getattr(st, "registration_id", 0))
+                    client.identity_pubkey = pub
+                    client.identity_sig = sig
+                    client.sig_ts = ts
+                    # signature_type: 1 = XEdDSA (Phase 15.5+), 0 = Ed25519 (legacy)
+                    if hasattr(client, "signature_type"):
+                        client.signature_type = 1
+                    try:
+                        client.platform = os.name
+                    except Exception:
+                        pass
+                    # app_version and device_guid left empty unless externally provided
+                    try:
+                        if hasattr(auth_req, "client"):
+                            auth_req.client.CopyFrom(client)  # type: ignore[attr-defined]
+                    except Exception:
+                        pass
             except Exception:
-                # Non-fatal: proceed without ClientInfo
+                # Non-fatal: proceed without ClientInfo if XEdDSA unavailable
                 pass
 
         write_frame(

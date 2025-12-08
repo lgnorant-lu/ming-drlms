@@ -33,6 +33,10 @@
 #include <openssl/hmac.h>
 #include <openssl/sha.h>
 
+/* Phase 15.5: Signal Protocol for XEdDSA verification */
+#include <signal/signal_protocol.h>
+#include <signal/curve.h>
+
 #define AUTH_CHALLENGE_RESPONSE__INIT                                          \
     MINGDRLMS__V2__AUTH_CHALLENGE_RESPONSE__INIT
 #define AUTH_RESPONSE__INIT MINGDRLMS__V2__AUTH_RESPONSE__INIT
@@ -549,24 +553,29 @@ int mp2_auth_handle_auth_request(platform_socket_t fd,
                                         "MP2-LOGIN-V1|%s|%s|%s|%s|%s|%s", uname,
                                         devbuf, regbuf, nonce, salt, tsbuf);
                     if (blen > 0) {
-                        EVP_PKEY *pkey = EVP_PKEY_new_raw_public_key(
-                            EVP_PKEY_ED25519, NULL, ci->identity_pubkey.data,
-                            32);
-                        if (pkey) {
-                            EVP_MD_CTX *md = EVP_MD_CTX_new();
-                            if (md && EVP_DigestVerifyInit(md, NULL, NULL, NULL,
-                                                           pkey) == 1) {
-                                int vrc = EVP_DigestVerify(
-                                    md, ci->identity_sig.data,
-                                    (size_t)ci->identity_sig.len, binding,
-                                    (size_t)blen);
+                        /* Phase 15.5: XEdDSA only (Ed25519 legacy removed) */
+                        signal_context *ctx = NULL;
+                        if (signal_context_create(&ctx, NULL) == 0 && ctx) {
+                            ec_public_key *pub_key = NULL;
+                            /* X25519 public key with 0x05 type prefix */
+                            uint8_t prefixed_key[33];
+                            prefixed_key[0] = 0x05; /* DJB type */
+                            memcpy(prefixed_key + 1, ci->identity_pubkey.data,
+                                   32);
+
+                            if (curve_decode_point(&pub_key, prefixed_key, 33,
+                                                   ctx) == 0 &&
+                                pub_key) {
+                                int vrc = curve_verify_signature(
+                                    pub_key, binding, (size_t)blen,
+                                    ci->identity_sig.data,
+                                    ci->identity_sig.len);
                                 if (vrc == 1) {
                                     sig_ok = 1;
                                 }
+                                SIGNAL_UNREF(pub_key);
                             }
-                            if (md)
-                                EVP_MD_CTX_free(md);
-                            EVP_PKEY_free(pkey);
+                            signal_context_destroy(ctx);
                         }
                     }
                     free(binding);

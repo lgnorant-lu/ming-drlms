@@ -26,12 +26,19 @@ message AuthResponse {
   bool recorded_identity = 5;   // 可选：服务端是否已记录/更新签名身份
 }
 
+// 签名类型枚举 (Phase 15.5+)
+// 注意：数值 0 保留给历史 Ed25519，当前实现仅接受 XEdDSA。
+enum SignatureType {
+  SIG_TYPE_ED25519 = 0;   // legacy/reserved: Phase 15.5+ 不应再使用
+  SIG_TYPE_XEDDSA = 1;    // 现行：XEdDSA 签名 (X25519 + EdDSA, Phase 15.5+)
+}
+
 // 客户端设备与签名身份提示（可选）
 message ClientInfo {
   int32 device_id = 1;                // 设备ID（本地生成/持久化）
   int32 registration_id = 2;          // Signal Registration ID
-  bytes identity_pubkey = 3;          // Ed25519 公钥（32字节）
-  bytes identity_sig = 4;             // 对签名绑定消息的Ed25519签名
+  bytes identity_pubkey = 3;          // 公钥（32字节）：XEdDSA=X25519（Phase 15.5+）
+  bytes identity_sig = 4;             // 签名（64字节）
   int64 sig_ts = 5;                   // 客户端签名时间戳（秒）
   string device_guid = 6;             // 可选：设备GUID/硬件指纹
   string platform = 7;                // 可选：平台标识（windows/linux/darwin等）
@@ -39,6 +46,7 @@ message ClientInfo {
   uint64 capabilities = 9;            // 可选：能力位
   bytes prev_identity_pubkey = 10;    // 可选：轮换前公钥
   bytes rotation_proof = 11;          // 可选：轮换证明（前后密钥相互签名）
+  SignatureType signature_type = 12;  // 签名类型：0=Ed25519(legacy, reserved), 1=XEdDSA
 }
 
 // 阶段 4: 刷新

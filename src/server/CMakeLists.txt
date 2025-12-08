@@ -236,6 +236,8 @@ target_include_directories(log_collector_server
     ${PROJECT_SOURCE_DIR}/src/external/protobuf-c
         ${ARGON2_INCLUDE_DIRS}
     ${PROTOBUF_C_INCLUDE_DIRS}
+    # Phase 15.5: Signal Protocol headers for XEdDSA verification
+    ${SIGNAL_INSTALL_PREFIX}/include
 )
 
 set(SERVER_LIBS

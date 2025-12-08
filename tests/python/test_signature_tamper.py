@@ -1,4 +1,4 @@
-"""Phase 15 签名篡改验证测试
+"""Phase 15.5 签名篡改验证测试
 
 验证 relay_crypto._verify_envelope 正确拒绝：
 1. 签名被篡改的消息
@@ -6,6 +6,8 @@
 3. 签名缺失的消息
 
 同时确保正常签名的消息能通过验证。
+
+Phase 15.5 更新：使用 LocalKeyStore + XEdDSA 签名
 """
 
 from __future__ import annotations
@@ -19,13 +21,34 @@ import pytest
 
 
 @pytest.fixture
-def test_identity(tmp_path: Path):
-    """创建测试用 IdentityManager"""
+def test_keystore(tmp_path: Path):
+    """创建测试用 LocalKeyStore 并生成密钥"""
+    from ming_drlms.core.e2ee_store import LocalKeyStore
+    from ming_drlms.core.pysignal.context import create_signal_context
+    from ming_drlms.core.pysignal.keys import generate_device_keys
+
+    ks_path = tmp_path / "e2ee_keys.json"
+    ks = LocalKeyStore(ks_path)
+
+    ctx = create_signal_context()
+    keys = generate_device_keys(ctx)
+    ks.store_keys(
+        "tamper-test",
+        registration_id=keys.registration_id,
+        device_id=keys.device_id,
+        identity=keys.identity,
+        signed_pre_key=keys.signed_pre_key,
+        pre_keys=keys.pre_keys,
+    )
+    return ks
+
+
+@pytest.fixture
+def test_identity(test_keystore):
+    """创建测试用 IdentityManager (Phase 15.5)"""
     from ming_drlms.core.identity_manager import IdentityManager
 
-    im = IdentityManager(tmp_path / "test_identity.json")
-    im.create_identity(alias="tamper-test")
-    return im
+    return IdentityManager("tamper-test", keystore=test_keystore)
 
 
 @pytest.fixture

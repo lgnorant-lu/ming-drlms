@@ -1,33 +1,29 @@
-"""Phase 15A: Client-side identity management for Nostr-style signing.
+"""Phase 15.5: Unified identity management using XEdDSA.
 
-This module provides a unified interface for:
-- Creating new Ed25519 identity key pairs (client-side, no server dependency)
-- Importing/exporting identity seeds for backup and migration
-- Signing arbitrary data with the identity key
-- Optionally syncing with LocalKeyStore for E2EE integration
+This module provides a unified identity interface that:
+- Proxies to LocalKeyStore for X25519 identity key storage
+- Uses true XEdDSA signing via Signal Protocol C library
+- Supports both E2EE (ECDH) and Relay event signing with the same key
 
 Design principles:
-- Pure Python implementation (cryptography library, no C bridge required)
-- Simple API for Relay event signing
-- Compatible with existing LocalKeyStore structure
+- Single X25519 identity for both encryption and signing (XEdDSA)
+- LocalKeyStore is the single source of truth for identity
+- No separate identity.json storage (Phase 15.5 unification)
+
+Migration from Phase 15:
+- The old Ed25519-based IdentityManager stored identity in identity.json
+- Phase 15.5 unifies to LocalKeyStore (e2ee_keys.json) with XEdDSA signing
+- Legacy create_identity/import_identity APIs are deprecated
 """
 
 from __future__ import annotations
 
-import json
-import os
-import secrets
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Optional, TYPE_CHECKING
 
-from cryptography.hazmat.primitives.asymmetric.ed25519 import (
-    Ed25519PrivateKey,
-    Ed25519PublicKey,
-)
-
 if TYPE_CHECKING:  # pragma: no cover
-    from .e2ee_store import LocalKeyStore
+    from .e2ee_store import LocalKeyStore, LocalKeyState
+    from .pysignal.store import SignalStore
 
 __all__ = [
     "Identity",
@@ -44,403 +40,270 @@ class IdentityError(Exception):
 
 @dataclass(slots=True, frozen=True)
 class Identity:
-    """Represents a client identity with Ed25519 key pair.
+    """Represents a client identity with X25519 key pair (Phase 15.5).
 
     Attributes:
-        seed: 32-byte private key seed (Ed25519 private key material)
-        public_key: 32-byte Ed25519 public key
+        private_key: 32-byte X25519 private key
+        public_key: 32/33-byte X25519 public key (may include type prefix)
         alias: Optional human-readable alias for this identity
     """
 
-    seed: bytes
+    private_key: bytes
     public_key: bytes
     alias: str = ""
 
-    def __post_init__(self) -> None:
-        if len(self.seed) != 32:
-            raise ValueError("seed must be exactly 32 bytes")
-        if len(self.public_key) != 32:
-            raise ValueError("public_key must be exactly 32 bytes")
+    @property
+    def seed(self) -> bytes:
+        """Backward compatibility: return private_key as seed."""
+        return self.private_key
 
-
-def _default_identity_dir() -> Path:
-    """Get the default directory for identity storage."""
-    env_path = os.environ.get("MING_DRLMS_CONFIG_DIR")
-    if env_path:
-        return Path(env_path).expanduser()
-    if os.name == "nt":
-        base = os.environ.get("APPDATA") or os.environ.get("LOCALAPPDATA")
-        if base:
-            return Path(base) / "DRLMS"
-    return Path.home() / ".config" / "drlms"
-
-
-def _default_identity_path() -> Path:
-    """Get the default path for identity.json."""
-    return _default_identity_dir() / "identity.json"
+    @property
+    def public_key_raw(self) -> bytes:
+        """Get 32-byte public key without type prefix."""
+        if len(self.public_key) == 33:
+            return self.public_key[1:]
+        return self.public_key
 
 
 class IdentityManager:
-    """Manages client identity for Nostr-style event signing.
+    """Phase 15.5: Unified identity manager backed by LocalKeyStore.
 
     This class provides:
-    - Creation of new Ed25519 identity key pairs (pure Python)
-    - Import/export of identity seeds for backup and migration
-    - Signing arbitrary data with the identity key
-    - Persistence to a simple JSON file
+    - Access to X25519 identity from LocalKeyStore
+    - XEdDSA signing using Signal Protocol C library
+    - Unified API for both E2EE and Relay event signing
+
+    The identity is stored in LocalKeyStore (e2ee_keys.json), not a separate
+    identity.json file. This ensures a single X25519 key is used for both
+    ECDH key exchange (E2EE) and XEdDSA signatures (Relay events).
 
     Example usage:
-        >>> manager = IdentityManager()
-        >>> if not manager.has_identity():
-        ...     manager.create_identity(alias="my-identity")
-        >>> signature = manager.sign(b"hello world")
-        >>> pubkey = manager.get_pubkey()
+        >>> manager = IdentityManager(username="alice")
+        >>> if manager.has_identity():
+        ...     signature = manager.sign(b"hello world")
+        ...     pubkey = manager.get_pubkey()
     """
 
     def __init__(
         self,
-        path: Optional[Path] = None,
+        username: str,
         *,
-        auto_load: bool = True,
+        keystore: Optional["LocalKeyStore"] = None,
     ) -> None:
         """Initialize the identity manager.
 
         Args:
-            path: Path to the identity.json file. If None, uses default location.
-            auto_load: If True, automatically load existing identity on init.
+            username: User identifier for key lookup in LocalKeyStore.
+            keystore: Optional LocalKeyStore instance. If None, creates default.
         """
-        self._path = Path(path) if path else _default_identity_path()
+        self._username = username
+        self._keystore: Optional["LocalKeyStore"] = keystore
+        self._signal_store: Optional["SignalStore"] = None
         self._identity: Optional[Identity] = None
-        self._private_key: Optional[Ed25519PrivateKey] = None
+        self._state: Optional["LocalKeyState"] = None
 
-        if auto_load:
-            self._try_load()
+    def _ensure_keystore(self) -> "LocalKeyStore":
+        """Lazily initialize and return the keystore."""
+        if self._keystore is None:
+            from .e2ee_store import LocalKeyStore
+
+            self._keystore = LocalKeyStore()
+        return self._keystore
+
+    def _load_state(self) -> Optional["LocalKeyState"]:
+        """Load user state from keystore (cached)."""
+        if self._state is not None:
+            return self._state
+        ks = self._ensure_keystore()
+        self._state = ks.load_state(self._username)
+        return self._state
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
     def has_identity(self) -> bool:
-        """Check if an identity is loaded."""
-        return self._identity is not None
+        """Check if an identity exists in LocalKeyStore for this user."""
+        state = self._load_state()
+        return state is not None and state.identity_key is not None
 
-    def create_identity(self, *, alias: str = "", force: bool = False) -> Identity:
-        """Create a new Ed25519 identity key pair.
-
-        Args:
-            alias: Optional human-readable alias for this identity.
-            force: If True, overwrite existing identity. If False and identity
-                   exists, raise IdentityError.
+    def get_identity(self) -> Identity:
+        """Get the current Identity object.
 
         Returns:
-            The newly created Identity.
+            Identity with X25519 key pair.
 
         Raises:
-            IdentityError: If identity already exists and force=False.
+            IdentityError: If no identity exists.
         """
-        if self._identity is not None and not force:
-            raise IdentityError("Identity already exists. Use force=True to overwrite.")
+        state = self._load_state()
+        if state is None or state.identity_key is None:
+            raise IdentityError(f"No identity for user: {self._username}")
 
-        # Generate new Ed25519 key pair using cryptographically secure random
-        seed = secrets.token_bytes(32)
-        private_key = Ed25519PrivateKey.from_private_bytes(seed)
-        public_key = private_key.public_key().public_bytes_raw()
-
-        identity = Identity(seed=seed, public_key=public_key, alias=alias)
-
-        self._identity = identity
-        self._private_key = private_key
-        self._persist()
-
-        return identity
-
-    def import_identity(
-        self,
-        seed: bytes,
-        *,
-        alias: str = "",
-        force: bool = False,
-    ) -> Identity:
-        """Import an identity from a 32-byte seed.
-
-        Args:
-            seed: 32-byte Ed25519 private key seed.
-            alias: Optional human-readable alias.
-            force: If True, overwrite existing identity.
-
-        Returns:
-            The imported Identity.
-
-        Raises:
-            IdentityError: If identity exists and force=False.
-            ValueError: If seed is not 32 bytes.
-        """
-        if self._identity is not None and not force:
-            raise IdentityError("Identity already exists. Use force=True to overwrite.")
-
-        if len(seed) != 32:
-            raise ValueError("seed must be exactly 32 bytes")
-
-        private_key = Ed25519PrivateKey.from_private_bytes(seed)
-        public_key = private_key.public_key().public_bytes_raw()
-
-        identity = Identity(seed=seed, public_key=public_key, alias=alias)
-
-        self._identity = identity
-        self._private_key = private_key
-        self._persist()
-
-        return identity
-
-    def export_identity(self) -> bytes:
-        """Export the current identity seed for backup.
-
-        Returns:
-            32-byte seed that can be used with import_identity().
-
-        Raises:
-            IdentityError: If no identity is loaded.
-        """
-        if self._identity is None:
-            raise IdentityError("No identity loaded")
-        return self._identity.seed
+        return Identity(
+            private_key=bytes(state.identity_key.private_key),
+            public_key=bytes(state.identity_key.public_key),
+            alias="",  # Alias not stored in LocalKeyStore
+        )
 
     def get_pubkey(self) -> bytes:
-        """Get the 32-byte Ed25519 public key.
+        """Get the X25519 public key (32 bytes without type prefix).
 
         Returns:
-            32-byte public key.
+            32-byte X25519 public key.
 
         Raises:
-            IdentityError: If no identity is loaded.
+            IdentityError: If no identity exists.
         """
-        if self._identity is None:
-            raise IdentityError("No identity loaded")
-        return self._identity.public_key
+        identity = self.get_identity()
+        return identity.public_key_raw
 
     def get_pubkey_hex(self) -> str:
         """Get the public key as a hex string.
 
         Returns:
             64-character hex string.
-
-        Raises:
-            IdentityError: If no identity is loaded.
         """
         return self.get_pubkey().hex()
 
-    def get_alias(self) -> str:
-        """Get the identity alias.
-
-        Returns:
-            Alias string, or empty string if not set.
-
-        Raises:
-            IdentityError: If no identity is loaded.
-        """
-        if self._identity is None:
-            raise IdentityError("No identity loaded")
-        return self._identity.alias
-
-    def set_alias(self, alias: str) -> None:
-        """Update the identity alias.
-
-        Args:
-            alias: New alias string.
-
-        Raises:
-            IdentityError: If no identity is loaded.
-        """
-        if self._identity is None:
-            raise IdentityError("No identity loaded")
-
-        # Create new Identity with updated alias (Identity is frozen)
-        self._identity = Identity(
-            seed=self._identity.seed,
-            public_key=self._identity.public_key,
-            alias=alias,
-        )
-        self._persist()
-
     def sign(self, data: bytes) -> bytes:
-        """Sign arbitrary data with the identity key.
+        """Sign data using XEdDSA with the X25519 identity key.
+
+        This uses the Signal Protocol C library's curve_calculate_signature
+        which performs true XEdDSA (Montgomery <-> Edwards curve conversion).
 
         Args:
             data: Bytes to sign.
 
         Returns:
-            64-byte Ed25519 signature.
+            64-byte XEdDSA signature.
 
         Raises:
-            IdentityError: If no identity is loaded.
+            IdentityError: If no identity exists or signing fails.
         """
-        if self._identity is None or self._private_key is None:
-            raise IdentityError("No identity loaded")
+        store = self._get_signal_store()
+        from .pysignal.signature import sign_bytes_with_store
 
-        return self._private_key.sign(data)
+        try:
+            return sign_bytes_with_store(store, data)
+        except Exception as e:
+            raise IdentityError(f"XEdDSA signing failed: {e}") from e
 
     def verify(self, data: bytes, signature: bytes, public_key: bytes) -> bool:
-        """Verify a signature against a public key.
+        """Verify XEdDSA signature against an X25519 public key.
 
-        This is a static verification method that doesn't require the manager
-        to have an identity loaded.
+        This uses the Signal Protocol C library's curve_verify_signature
+        which performs true XEdDSA verification.
 
         Args:
             data: Original data that was signed.
-            signature: 64-byte Ed25519 signature.
-            public_key: 32-byte Ed25519 public key.
+            signature: 64-byte XEdDSA signature.
+            public_key: 32-byte X25519 public key (without type prefix).
 
         Returns:
             True if signature is valid, False otherwise.
         """
         try:
-            pk = Ed25519PublicKey.from_public_bytes(public_key)
-            pk.verify(signature, data)
-            return True
+            from .pysignal.context import create_signal_context
+            from .pysignal.signature import verify_bytes
+
+            ctx = create_signal_context()
+            return verify_bytes(
+                ctx, public_key=public_key, data=data, signature=signature
+            )
         except Exception:
             return False
 
-    def delete_identity(self) -> None:
-        """Delete the current identity and remove the storage file.
+    # ------------------------------------------------------------------
+    # Signal Store Management
+    # ------------------------------------------------------------------
 
-        This is a destructive operation. Make sure to export_identity() first
-        if you need to preserve the seed.
-        """
+    def _get_signal_store(self) -> "SignalStore":
+        """Get or create SignalStore for XEdDSA signing."""
+        if self._signal_store is not None:
+            return self._signal_store
+
+        state = self._load_state()
+        if state is None or state.identity_key is None:
+            raise IdentityError(f"No identity for user: {self._username}")
+
+        from .pysignal.context import create_signal_context
+        from .pysignal.store import SignalStore
+
+        ctx = create_signal_context()
+        store = SignalStore(ctx)
+        store.set_identity(
+            public_key=bytes(state.identity_key.public_key),
+            private_key=bytes(state.identity_key.private_key),
+            registration_id=state.registration_id,
+            device_id=state.device_id,
+        )
+
+        self._signal_store = store
+        return store
+
+    def invalidate_cache(self) -> None:
+        """Invalidate cached state (call after keystore changes)."""
+        self._state = None
+        self._signal_store = None
         self._identity = None
-        self._private_key = None
-
-        if self._path.exists():
-            try:
-                self._path.unlink()
-            except Exception:
-                pass
-
-    # ------------------------------------------------------------------
-    # LocalKeyStore Integration
-    # ------------------------------------------------------------------
-
-    def sync_to_local_keystore(
-        self,
-        keystore: "LocalKeyStore",
-        username: str,
-        *,
-        device_id: int = 1,
-        registration_id: Optional[int] = None,
-    ) -> None:
-        """Sync identity to LocalKeyStore for E2EE integration.
-
-        This allows the identity created by IdentityManager to be used
-        with the existing E2EE infrastructure (E2EEngine, etc.).
-
-        Args:
-            keystore: LocalKeyStore instance.
-            username: Username to store the identity under.
-            device_id: Device ID (default 1).
-            registration_id: Registration ID. If None, generates a random one.
-
-        Raises:
-            IdentityError: If no identity is loaded.
-        """
-        if self._identity is None:
-            raise IdentityError("No identity loaded")
-
-        from .mproto_v2_client import SignalKeyPair
-
-        # Generate a random registration_id if not provided
-        if registration_id is None:
-            registration_id = secrets.randbelow(0x3FFF) + 1  # 1 to 16383
-
-        identity_pair = SignalKeyPair(
-            public_key=self._identity.public_key,
-            private_key=self._identity.seed,
-        )
-
-        keystore.store_keys(
-            username,
-            registration_id=registration_id,
-            device_id=device_id,
-            identity=identity_pair,
-            signed_pre_key=None,
-            pre_keys=[],
-        )
-
-    # ------------------------------------------------------------------
-    # Internal methods
-    # ------------------------------------------------------------------
-
-    def _try_load(self) -> None:
-        """Try to load identity from file, silently ignore if not found."""
-        if not self._path.exists():
-            return
-
-        try:
-            raw = self._path.read_text(encoding="utf-8")
-            data = json.loads(raw)
-        except Exception:
-            return
-
-        seed_hex = data.get("seed")
-        pubkey_hex = data.get("public_key")
-        alias = data.get("alias", "")
-
-        if not isinstance(seed_hex, str) or not isinstance(pubkey_hex, str):
-            return
-
-        try:
-            seed = bytes.fromhex(seed_hex)
-            public_key = bytes.fromhex(pubkey_hex)
-        except Exception:
-            return
-
-        if len(seed) != 32 or len(public_key) != 32:
-            return
-
-        try:
-            private_key = Ed25519PrivateKey.from_private_bytes(seed)
-            # Verify the public key matches
-            derived_pubkey = private_key.public_key().public_bytes_raw()
-            if derived_pubkey != public_key:
-                return
-        except Exception:
-            return
-
-        self._identity = Identity(
-            seed=seed,
-            public_key=public_key,
-            alias=str(alias) if alias else "",
-        )
-        self._private_key = private_key
-
-    def _persist(self) -> None:
-        """Persist the current identity to file."""
-        if self._identity is None:
-            return
-
-        directory = self._path.parent
-        directory.mkdir(parents=True, exist_ok=True)
-
-        data = {
-            "seed": self._identity.seed.hex(),
-            "public_key": self._identity.public_key.hex(),
-            "alias": self._identity.alias,
-        }
-
-        # Write atomically via temp file
-        tmp = self._path.with_suffix(self._path.suffix + ".tmp")
-        tmp.write_text(
-            json.dumps(data, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        tmp.replace(self._path)
-
-        # Set restrictive permissions on POSIX systems
-        if os.name != "nt":
-            try:
-                os.chmod(self._path, 0o600)
-            except Exception:
-                pass
 
     @property
-    def path(self) -> Path:
-        """Get the path to the identity file."""
-        return self._path
+    def username(self) -> str:
+        """Get the username this manager is associated with."""
+        return self._username
+
+    # ------------------------------------------------------------------
+    # Deprecated APIs (for backward compatibility during migration)
+    # ------------------------------------------------------------------
+
+    def create_identity(self, *, alias: str = "", force: bool = False) -> Identity:
+        """DEPRECATED: Identity creation should use LocalKeyStore directly.
+
+        This method is kept for backward compatibility but will raise
+        an error directing users to use the proper key generation flow.
+        """
+        raise IdentityError(
+            "create_identity() is deprecated in Phase 15.5. "
+            "Use LocalKeyStore.store_keys() or generate_device_keys() instead. "
+            "The X25519 identity should be generated via Signal Protocol."
+        )
+
+    def import_identity(
+        self, seed: bytes, *, alias: str = "", force: bool = False
+    ) -> Identity:
+        """DEPRECATED: Identity import should use LocalKeyStore directly."""
+        raise IdentityError(
+            "import_identity() is deprecated in Phase 15.5. "
+            "Use LocalKeyStore.store_keys() to import X25519 identity."
+        )
+
+    def export_identity(self) -> bytes:
+        """Export the current identity private key for backup.
+
+        Returns:
+            32-byte X25519 private key.
+        """
+        return self.get_identity().private_key
+
+    def get_alias(self) -> str:
+        """Get alias (always empty in Phase 15.5, alias not stored in LocalKeyStore)."""
+        return ""
+
+    def set_alias(self, alias: str) -> None:
+        """DEPRECATED: Alias is not stored in Phase 15.5."""
+        pass  # No-op
+
+    def delete_identity(self) -> None:
+        """DEPRECATED: Use LocalKeyStore methods to manage identity."""
+        raise IdentityError(
+            "delete_identity() is deprecated. "
+            "Manage identity through LocalKeyStore directly."
+        )
+
+    def sync_to_local_keystore(self, *args, **kwargs) -> None:
+        """DEPRECATED: Not needed in Phase 15.5 as LocalKeyStore is primary."""
+        raise IdentityError(
+            "sync_to_local_keystore() is deprecated in Phase 15.5. "
+            "LocalKeyStore is now the primary identity storage."
+        )

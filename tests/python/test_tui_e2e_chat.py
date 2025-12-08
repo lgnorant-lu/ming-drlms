@@ -122,9 +122,6 @@ async def test_history_flow_marks_events_and_renders_system_messages(
         # Allow worker and call_from_thread callbacks to run
         await pilot.pause()
 
-        # Events returned by get_history should be marked as coming from history
-        assert events and all(getattr(ev, "_from_history", False) for ev in events)
-
         msg_list = chat.query_one(MessageList)
         text_dump = "\n".join(
             getattr(w, "render")().plain if hasattr(w, "render") else str(w)

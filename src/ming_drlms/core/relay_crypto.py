@@ -37,21 +37,27 @@ def _relay_strict_flags() -> Dict[str, bool]:
         return {"enforce_signed": True, "enforce_verify": True}
 
 
-def ed25519_sign_py(seed32: bytes, data: bytes) -> bytes:
+def _xeddsa_verify(pub_key: bytes, data: bytes, sig: bytes) -> bool:
+    """Verify XEdDSA signature using Signal Protocol C library (Phase 15.5).
+
+    Args:
+        pub_key: 32-byte X25519 public key (without type prefix)
+        data: Original data that was signed
+        sig: 64-byte XEdDSA signature
+
+    Returns:
+        True if valid, False otherwise
+    """
+    if len(pub_key) < 32 or len(sig) != 64:
+        return False
     try:
-        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey  # type: ignore
-    except Exception as _imp_err:  # pragma: no cover - runtime optional dependency
-        raise _imp_err
-    key = Ed25519PrivateKey.from_private_bytes(seed32[:32])
-    return key.sign(data)
-
-
-def _ed25519_verify_py(pub32: bytes, data: bytes, sig: bytes) -> bool:
-    try:
-        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey  # type: ignore
-
-        Ed25519PublicKey.from_public_bytes(pub32[:32]).verify(sig, data)
-        return True
+        ctx = create_signal_context()
+        try:
+            # Use 32 bytes of public key (strip type prefix if present)
+            pub32 = pub_key[-32:] if len(pub_key) > 32 else pub_key
+            return verify_bytes(ctx, public_key=pub32, data=data, signature=sig)
+        finally:
+            ctx.close()
     except Exception:
         return False
 
@@ -187,7 +193,7 @@ def build_decrypt_and_verify(
         ok = False
         pub: bytes = b""
 
-        # Phase 15: first try Ed25519 verification using sender_pubkey_hex
+        # Phase 15.5: Primary path - XEdDSA verification using sender_pubkey_hex
         env_pub: bytes = b""
         if sender_pubkey_hex and len(sender_pubkey_hex) == 64:
             try:
@@ -195,17 +201,16 @@ def build_decrypt_and_verify(
             except Exception:
                 env_pub = b""
             if len(env_pub) >= 32:
-                if _ed25519_verify_py(env_pub, serialized, signature):
+                # Try XEdDSA first (Phase 15.5 primary path)
+                if _xeddsa_verify(env_pub, serialized, signature):
                     ok = True
                     pub = env_pub
                     try:
-                        logger.debug(
-                            "verify: python ed25519 succeeded via sender_pubkey_hex"
-                        )
+                        logger.debug("verify: XEdDSA succeeded via sender_pubkey_hex")
                     except Exception:
                         pass
 
-        # Legacy / fallback path: use identity_resolver (XEdDSA + optional Ed25519)
+        # Fallback path: use identity_resolver (for events without sender_pubkey_hex)
         if not ok:
             pub = identity_resolver(sender_id, device_id)
             if not pub:
@@ -220,31 +225,13 @@ def build_decrypt_and_verify(
                         pass
                     return None
             else:
-                try:
-                    ctx = create_signal_context()
+                # Try XEdDSA with resolver pubkey
+                if _xeddsa_verify(bytes(pub), serialized, signature):
+                    ok = True
                     try:
-                        ok = verify_bytes(
-                            ctx, public_key=pub, data=serialized, signature=signature
-                        )
-                    finally:
-                        ctx.close()
-                except Exception:
-                    ok = False
-                if not ok:
-                    # Try Python Ed25519 with resolver pubkey as last resort
-                    pb = bytes(pub)
-                    ok = (
-                        _ed25519_verify_py(pb, serialized, signature)
-                        if len(pb) >= 32
-                        else False
-                    )
-                    if ok:
-                        try:
-                            logger.debug(
-                                "verify: python ed25519 succeeded via identity_resolver"
-                            )
-                        except Exception:
-                            pass
+                        logger.debug("verify: XEdDSA succeeded via identity_resolver")
+                    except Exception:
+                        pass
 
         if not ok:
             flags = _relay_strict_flags()
@@ -345,5 +332,4 @@ __all__ = [
     "DecryptAndVerify",
     "poc_decrypt_and_trust",
     "build_decrypt_and_verify",
-    "ed25519_sign_py",
 ]

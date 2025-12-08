@@ -50,8 +50,8 @@ cmake -G "Ninja" ^
 cmake --build . --target log_collector_server drlms_signal_bridge
 
 # WSL/Linux
-cmake -S . -B build-wsl -DCMAKE_BUILD_TYPE=Release
-cmake --build build-wsl -j $(nproc)
+cmake -S . -B build_wsl -DCMAKE_BUILD_TYPE=Release
+cmake --build build_wsl -j $(nproc)
 ```
 
 ### 1.3 依赖检查
@@ -64,7 +64,7 @@ pip list | grep ming-drlms
 # Windows:
 ls build_win_ninja_x64/log_collector_server.exe
 # WSL:
-ls build-wsl/log_collector_server
+ls build_wsl/log_collector_server
 ```
 
 ---
@@ -145,7 +145,7 @@ export MING_DRLMS_CONFIG_DIR=$(pwd)/.drlms
 .\build_win_ninja_x64\log_collector_server.exe
 
 # WSL
-./build-wsl/log_collector_server
+./build_wsl/log_collector_server
 
 # 验证启动
 netstat -ano | findstr :15034   # Windows
@@ -455,7 +455,7 @@ rm -rf coverage/
 rm -f drlms.db
 
 # 清理构建产物
-rm -rf build/ build-wsl/ build_win_ninja_x64/
+rm -rf build/ build_wsl/ build_win_ninja_x64/
 
 # 清理 Python 缓存
 find . -type d -name __pycache__ -exec rm -rf {} +
