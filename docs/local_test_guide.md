@@ -43,7 +43,7 @@ cd build_win_ninja_x64
 
 cmake -G "Ninja" ^
   -DCMAKE_BUILD_TYPE=RelWithDebInfo ^
-  -DOPENSSL_ROOT_DIR=%CD%\..\vcpkg_installed\x64-windows ^
+  -DOPENSSL_ROOT_DIR=D:/dogepy/pythonProject1/schoolworks/DRLMS/vcpkg_installed/x64-windows ^
   -DPROTOBUF_C_USE_PREGENSETS=OFF ^
   -DPROTOC_C_EXECUTABLE=C:/msys64/mingw64/bin/protoc-c.exe ^
   ..
@@ -349,6 +349,51 @@ python -m ming_drlms.main e2ee export-bundle --user bob > bob_bundle.json
 # 3. 运行 E2E 测试
 pytest tests/python/test_e2e_relay_signal_encrypt_sync.py -v
 ```
+
+### 5.6 场景 F: 14F 本地历史验证（Relay + LocalEventStore）
+
+> 目标：验证 Relay 模式下事件会写入本地 SQLite（LocalEventStore），并可通过
+> `/local-history` 与 `room local-history` 在离线场景下读取。
+
+**Windows / PowerShell 示例（推荐在 .venv.win 中）：**
+
+```powershell
+# 1. 激活虚拟环境并加载环境变量（推荐使用脚本）
+& .\.venv.win\Scripts\Activate.ps1
+. .\scripts\load-env.ps1
+
+# 确认关键变量（应为 Relay 模式）
+echo $env:DRLMS_BACKEND          # relay
+echo $env:DRLMS_RELAY_BASE_URL   # http://127.0.0.1:8081
+echo $env:MING_DRLMS_CONFIG_DIR  # 指向仓库下 .drlms
+
+# 2. 一键启动 Relay + TUI
+python scripts\start_relay_and_tui.py
+
+# 3. 在 TUI 中：
+#   - 使用 /join 进入某个房间（例如 "Town Square"）
+#   - 发送若干条文本消息
+#   - 然后执行：
+#       /local-history
+#       /local-history 10 0
+#   - 预期：看到本地历史列表，带有 sync_state 与最近若干条消息
+
+# 4. 关闭脚本后，仅启动 TUI（模拟离线）：
+python -m ming_drlms.main tui
+# 再次 /join 同一房间后执行：
+#   /local-history
+# 预期：即使 Relay 未连接，仍能看到之前的本地历史记录
+
+# 5. 使用 CLI 交叉验证本地历史：
+ming-drlms room local-history --room "Town Square"
+ming-drlms room local-history --room "Town Square" --json
+```
+
+**说明：**
+
+- 本地事件存储位于 `$(MING_DRLMS_CONFIG_DIR)/events.db`（由 `LocalEventStore` 自动管理）。
+- TUI `/local-history` 与 CLI `room local-history` 共享同一 SQLite 数据源，
+  便于在 UI 与命令行之间交叉验证 14F 行为。
 
 ---
 

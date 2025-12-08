@@ -170,6 +170,10 @@ def build_decrypt_and_verify(
         except Exception:
             return None
 
+        # 14F: Parse Nostr-style Hash ID and sender pubkey
+        event_id_from_envelope = str(obj.get("event_id") or "")
+        sender_pubkey_hex = str(obj.get("sender_pubkey_hex") or "")
+
         serialized = canonical_serialize(
             room=room,
             ts=ts,
@@ -236,8 +240,11 @@ def build_decrypt_and_verify(
             "content_type": content_type,
             "content_bytes": content_bytes,
             "signature": signature,
+            "signature_hex": sig_hex,  # 14F: Keep hex for storage
             "verified": True,
             "client_hash": client_hash,
+            "event_id": event_id_from_envelope,  # 14F: Nostr-style Hash ID
+            "sender_pubkey_hex": sender_pubkey_hex,  # 14F: For local store
         }
 
     def _dec(evt: Dict[str, Any]) -> Optional[Dict[str, Any]]:

@@ -10,6 +10,8 @@ import hashlib
 from typing import Optional, Callable, Union
 
 from .test_sync import TestSyncEvent, TestSyncHook, NullSyncHook
+from ..core.event_store import LocalEventStore, VerificationStatus, LocalEvent
+from ..core.event_hash import compute_event_id
 
 from ..core.threaded_client import RobustThreadedRoomClient, ConnectionState
 from ..cli.services.room_service import RoomService
@@ -84,6 +86,12 @@ class ChatController:
         self._relay_base_url: str = self._resolve_relay_base_url()
         self._relay_room: Optional[str] = None
         self._relay_since_seq: int = 0
+        # Local event store for offline access (14F)
+        self._event_store: Optional[LocalEventStore] = None
+        try:
+            self._event_store = LocalEventStore()
+        except Exception as e:
+            logger.warning("Failed to initialize event store: %s", e)
 
     def connect(self, room_name: str) -> None:
         """Connect to a room."""
@@ -186,6 +194,68 @@ class ChatController:
             except Exception:
                 pass
             self._relay_thread = None
+
+    def get_local_events(
+        self, room: str, since_seq: int = 0, limit: int = 50
+    ) -> list[LocalEvent]:
+        """Get raw LocalEvent objects from local storage (14F offline history)."""
+        if not self._event_store:
+            return []
+        try:
+            return self._event_store.get_events(room, since_seq, limit)
+        except Exception as e:
+            logger.debug("Failed to get local events: %s", e)
+            return []
+
+    def get_local_history(
+        self, room: str, since_seq: int = 0, limit: int = 50
+    ) -> list[RoomEvent]:
+        """Get events from local storage (14F offline history).
+
+        Args:
+            room: Room name
+            since_seq: Return events with server_seq > since_seq
+            limit: Maximum number of events
+
+        Returns:
+            List of RoomEvent objects from local storage
+        """
+        if not self._event_store:
+            return []
+        try:
+            local_events = self._event_store.get_events(room, since_seq, limit)
+            result = []
+            for le in local_events:
+                # Convert LocalEvent to RoomEvent
+                kind = (
+                    room_pb2.RoomEventKind.ROOM_EVENT_KIND_FILE
+                    if le.content_type == "file"
+                    else room_pb2.RoomEventKind.ROOM_EVENT_KIND_TEXT
+                )
+                evt = RoomEvent(
+                    room_name=le.room,
+                    event_id=le.server_seq,
+                    payload=le.content,
+                    display_token=le.sender_id,
+                    kind=kind,
+                    sender=le.sender_id,
+                    sender_device_id=le.device_id,
+                    timestamp=str(le.timestamp_ms // 1000) if le.timestamp_ms else None,
+                )
+                result.append(evt)
+            return result
+        except Exception as e:
+            logger.debug("Failed to get local history: %s", e)
+            return []
+
+    def get_local_sync_state(self, room: str) -> int:
+        """Get last synced sequence number for a room."""
+        if not self._event_store:
+            return 0
+        try:
+            return self._event_store.get_sync_state(room)
+        except Exception:
+            return 0
 
     def send_message(self, message: str, ephemeral: Optional[bool] = None) -> None:
         use_ephemeral = self._ephemeral if ephemeral is None else bool(ephemeral)
@@ -296,6 +366,17 @@ class ChatController:
                             )
                             sig_hex = ""
 
+                # 14F: Compute Nostr-style Hash ID for content-addressable events
+                sender_pubkey = st.identity_key.public_key
+                if sender_pubkey and len(sender_pubkey) == 32:
+                    event_id = compute_event_id(
+                        sender_pubkey, content_bytes, env_ts * 1000
+                    )
+                    sender_pubkey_hex = sender_pubkey.hex()
+                else:
+                    event_id = ""
+                    sender_pubkey_hex = ""
+
                 envelope = {
                     "sender_id": self.username,
                     "device_id": did,
@@ -305,6 +386,8 @@ class ChatController:
                         "ascii"
                     ),
                     "signature_hex": sig_hex,
+                    "event_id": event_id,  # 14F: Nostr-style Hash ID
+                    "sender_pubkey_hex": sender_pubkey_hex,  # 14F: For verification
                 }
                 env_bytes = json.dumps(envelope).encode("utf-8")
                 ciphertext = base64.b64encode(env_bytes).decode("ascii")
@@ -512,6 +595,17 @@ class ChatController:
                             )
                             sig_hex = ""
 
+                # 14F: Compute Nostr-style Hash ID for file events
+                sender_pubkey = st.identity_key.public_key
+                if sender_pubkey and len(sender_pubkey) == 32:
+                    file_event_id = compute_event_id(
+                        sender_pubkey, content_bytes, env_ts * 1000
+                    )
+                    sender_pubkey_hex = sender_pubkey.hex()
+                else:
+                    file_event_id = ""
+                    sender_pubkey_hex = ""
+
                 envelope = {
                     "sender_id": self.username,
                     "device_id": did,
@@ -521,6 +615,8 @@ class ChatController:
                         "ascii"
                     ),
                     "signature_hex": sig_hex,
+                    "event_id": file_event_id,  # 14F: Nostr-style Hash ID
+                    "sender_pubkey_hex": sender_pubkey_hex,  # 14F: For verification
                 }
                 env_bytes = json.dumps(envelope).encode("utf-8")
                 ciphertext = base64.b64encode(env_bytes).decode("ascii")
@@ -991,6 +1087,57 @@ class ChatController:
                                 self._test_sync.notify_sync(
                                     TestSyncEvent.MESSAGE_RECEIVED
                                 )
+                                # 14F: Save event to local store
+                                if self._event_store:
+                                    try:
+                                        server_seq = int(item.get("server_seq") or 0)
+                                        ts_ms = int(clear.get("ts") or 0) * 1000
+                                        sender_pubkey_hex = clear.get(
+                                            "sender_pubkey_hex", ""
+                                        )
+                                        sig_hex = clear.get("signature_hex", "")
+                                        sig_bytes = (
+                                            bytes.fromhex(sig_hex) if sig_hex else None
+                                        )
+                                        # Compute Hash ID for content-addressable storage
+                                        pubkey_bytes = (
+                                            bytes.fromhex(sender_pubkey_hex)
+                                            if sender_pubkey_hex
+                                            and len(sender_pubkey_hex) == 64
+                                            else b"\x00" * 32
+                                        )
+                                        hash_id = compute_event_id(
+                                            pubkey_bytes, payload, ts_ms
+                                        )
+                                        # Determine verification status
+                                        v_status = (
+                                            VerificationStatus.VERIFIED
+                                            if clear.get("verified")
+                                            else VerificationStatus.UNKNOWN
+                                        )
+                                        if not sig_bytes:
+                                            v_status = VerificationStatus.NO_SIGNATURE
+                                        self._event_store.save_event(
+                                            event_id=hash_id,
+                                            room=self._relay_room or "",
+                                            server_seq=server_seq,
+                                            timestamp_ms=ts_ms,
+                                            sender_pubkey=sender_pubkey_hex,
+                                            sender_id=sender,
+                                            device_id=did,
+                                            content_type=ct,
+                                            content=payload,
+                                            signature=sig_bytes,
+                                            verified=v_status,
+                                        )
+                                        self._event_store.update_sync_state(
+                                            self._relay_room or "", server_seq
+                                        )
+                                    except Exception as store_err:
+                                        logger.debug(
+                                            "Failed to save event to local store: %s",
+                                            store_err,
+                                        )
                                 if item.get("server_seq"):
                                     seq = int(item["server_seq"])
                                     if seq > max_seq:

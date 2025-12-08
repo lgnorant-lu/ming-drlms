@@ -600,6 +600,86 @@ def room_clear_owner(
         raise typer.Exit(code=1)
 
 
+@room_app.command("local-history", help="显示本地存储的历史消息（离线可用）")
+def room_local_history(
+    room: str = typer.Option(..., "--room", "-r", help="房间名"),
+    limit: int = typer.Option(50, "--limit", "-n", help="最大返回数量"),
+    since_seq: int = typer.Option(
+        0, "--since-seq", "-s", help="从指定 server_seq 之后开始"
+    ),
+    json_out: bool = typer.Option(False, "--json", "-j", help="以 JSON 输出"),
+):
+    """14F: 从本地 SQLite 存储读取历史消息（无需网络连接）。"""
+    from ming_drlms.core.event_store import LocalEventStore, VerificationStatus
+
+    try:
+        store = LocalEventStore()
+    except Exception as e:
+        print(f"[red]✗ 无法打开本地存储: {e}[/red]")
+        raise typer.Exit(code=1)
+
+    events = store.get_events(room, since_seq=since_seq, limit=limit)
+    sync_state = store.get_sync_state(room)
+
+    if not events:
+        if json_out:
+            print(json.dumps({"room": room, "events": [], "sync_state": sync_state}))
+        else:
+            print(
+                f"[yellow](本地无 '{room}' 的历史记录, sync_state={sync_state})[/yellow]"
+            )
+        return
+
+    if json_out:
+        out = {
+            "room": room,
+            "sync_state": sync_state,
+            "events": [
+                {
+                    "event_id": e.event_id,
+                    "server_seq": e.server_seq,
+                    "timestamp_ms": e.timestamp_ms,
+                    "sender_id": e.sender_id,
+                    "content_type": e.content_type,
+                    "content_b64": base64.b64encode(e.content).decode("ascii")
+                    if e.content
+                    else "",
+                    "verified": e.verified.name,
+                }
+                for e in events
+            ],
+        }
+        print(json.dumps(out, ensure_ascii=False))
+        return
+
+    # Rich table output
+    table = Table(title=f"本地历史: {room} (sync={sync_state})")
+    table.add_column("Seq", style="dim")
+    table.add_column("验签", justify="center")
+    table.add_column("发送者", style="cyan")
+    table.add_column("内容")
+
+    for e in events:
+        if e.verified == VerificationStatus.VERIFIED:
+            status = "[green]✓[/green]"
+        elif e.verified == VerificationStatus.FAILED:
+            status = "[red]✗[/red]"
+        elif e.verified == VerificationStatus.NO_SIGNATURE:
+            status = "[yellow]?[/yellow]"
+        else:
+            status = "[dim]·[/dim]"
+
+        try:
+            content = e.content.decode("utf-8")[:60] if e.content else ""
+        except Exception:
+            content = f"[binary {len(e.content)} bytes]"
+
+        table.add_row(str(e.server_seq), status, e.sender_id, content)
+
+    print(table)
+    store.close()
+
+
 __all__ = [
     "room_app",
     "room_sub",
@@ -612,4 +692,5 @@ __all__ = [
     "room_members",
     "room_download",
     "room_clear_owner",
+    "room_local_history",
 ]

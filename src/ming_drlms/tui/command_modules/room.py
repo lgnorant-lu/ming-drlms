@@ -400,6 +400,76 @@ def register_room_commands(handler: Any) -> None:
 
         handler.screen.app.run_worker(_worker, thread=True)
 
+    def _local_history(args: str) -> None:
+        """Display history from local storage (14F offline access)."""
+        parts = args.split()
+        limit = 50
+        since = 0
+        try:
+            if len(parts) >= 1 and parts[0]:
+                limit = int(parts[0])
+            if len(parts) >= 2 and parts[1]:
+                since = int(parts[1])
+        except Exception:
+            handler.screen.show_system_message(
+                "Usage: /local-history [limit] [since_seq]"
+            )
+            return
+
+        room = handler.screen.current_room
+        if not room:
+            handler.screen.show_system_message("Not connected to a room")
+            return
+
+        # Get raw LocalEvent objects from local store for robust offline rendering
+        events = handler.controller.get_local_events(room, since_seq=since, limit=limit)
+        sync_state = handler.controller.get_local_sync_state(room)
+
+        if not events:
+            handler.screen.show_system_message(
+                f"(no local history for '{room}', sync_state={sync_state})"
+            )
+            return
+
+        handler.screen.show_system_message(
+            f"── Local History (limit={limit}, since_seq={since}, sync={sync_state}) ──"
+        )
+
+        # Import VerificationStatus for display symbols
+        from ming_drlms.core.event_store import VerificationStatus
+
+        for ev in events:
+            # Determine verification status indicator
+            if ev.verified == VerificationStatus.VERIFIED:
+                status = "✓"
+            elif ev.verified == VerificationStatus.FAILED:
+                status = "✗"
+            elif ev.verified == VerificationStatus.NO_SIGNATURE:
+                status = "?"
+            else:
+                status = "·"
+
+            # Decode content as UTF-8 when possible
+            text = ""
+            if ev.content:
+                if isinstance(ev.content, (bytes, bytearray)):
+                    try:
+                        text = ev.content.decode("utf-8")
+                    except Exception:
+                        text = f"[binary {len(ev.content)} bytes]"
+                else:
+                    text = str(ev.content)
+
+            # Render one line per event, independent of ChatScreen._process_event
+            # Use server_seq as the primary sequence, and prefix with verification mark
+            prefix = f"[{status}][seq={ev.server_seq}]"
+            # Show a short hash prefix for the event_id to help cross-checking
+            hash_prefix = ev.event_id[:8] if ev.event_id else "?"
+            line = f"{prefix}[{hash_prefix}] {ev.sender_id}: {text}"
+            handler.screen.show_system_message(line)
+
+        handler.screen.show_system_message("── End of local history ──")
+
     handler.commands.update(
         {
             "/rooms": _rooms,
@@ -414,5 +484,6 @@ def register_room_commands(handler: Any) -> None:
             "/clear-owner": _clear_owner,
             "/destroy-room": _destroy_room,
             "/history": _history,
+            "/local-history": _local_history,
         }
     )

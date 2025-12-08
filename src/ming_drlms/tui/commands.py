@@ -94,6 +94,8 @@ Room management (MP2):
                   Clear owner (system-owned)
 /destroy-room <name>
                   Alias to set-policy teardown
+/local-history [limit] [since_seq]
+                  Show local history from client store (Relay, offline)
 
 /help            Show this help message
 
