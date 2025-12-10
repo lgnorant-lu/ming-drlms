@@ -158,6 +158,9 @@ from . import room as _room  # noqa: E402
 from . import e2ee as _e2ee  # noqa: E402
 from . import relay as _relay  # noqa: E402
 from . import dev as _dev  # noqa: E402
+from . import identity as _identity  # noqa: E402
+from . import trust as _trust  # noqa: E402
+from . import relay_room as _relay_room  # noqa: E402
 
 app.add_typer(_client.client_app, name="client")
 app.add_typer(_config.config_app, name="config")
@@ -171,6 +174,9 @@ app.add_typer(_server.server_app, name="server")
 app.add_typer(_e2ee.e2ee_app, name="e2ee")
 app.add_typer(_relay.relay_app, name="relay")
 app.add_typer(_dev.dev_app, name="dev")
+app.add_typer(_identity.identity_app, name="identity")
+app.add_typer(_trust.trust_app, name="trust")
+app.add_typer(_relay_room.relay_room_app, name="relay-room")
 _server.register_top_level_aliases(app)
 
 

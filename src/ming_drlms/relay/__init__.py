@@ -5,6 +5,8 @@ Phase 16A: Multi-relay discovery, health checking, and management
 Phase 16B: Event deduplication, validation, and Merkle tree consistency
 Phase 16C: Synchronization protocol with cursor persistence
 Phase 16D: Offline queue and network monitoring
+Phase 18B: Keyserver for PreKey Bundle distribution
+Phase 18C: Relay-native room management
 """
 
 from .server import app as app
@@ -76,6 +78,32 @@ from .network import (
     NetworkMonitor,
 )
 
+# Phase 18B: Keyserver
+from .keyserver import (
+    PreKeyBundle,
+    OneTimePreKey,
+    BundleEvent,
+    BundleCache,
+    OPKManager,
+    KeyserverClient,
+    KEYSERVER_ROOM_PREFIX,
+)
+
+# Phase 18C: Rooms
+from .rooms import (
+    Visibility,
+    RoomConfig,
+    RoomInvite,
+    RoomAnnouncement,
+    RoomStore,
+    InviteLinkGenerator,
+    RoomDiscovery,
+    ROOMS_ANNOUNCEMENT_CHANNEL,
+    create_room,
+    join_room,
+    generate_invite,
+)
+
 __all__ = [
     # Server
     "app",
@@ -128,4 +156,24 @@ __all__ = [
     "NetworkEvent",
     "NetworkStatus",
     "NetworkMonitor",
+    # Keyserver (18B)
+    "PreKeyBundle",
+    "OneTimePreKey",
+    "BundleEvent",
+    "BundleCache",
+    "OPKManager",
+    "KeyserverClient",
+    "KEYSERVER_ROOM_PREFIX",
+    # Rooms (18C)
+    "Visibility",
+    "RoomConfig",
+    "RoomInvite",
+    "RoomAnnouncement",
+    "RoomStore",
+    "InviteLinkGenerator",
+    "RoomDiscovery",
+    "ROOMS_ANNOUNCEMENT_CHANNEL",
+    "create_room",
+    "join_room",
+    "generate_invite",
 ]

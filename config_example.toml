@@ -34,3 +34,51 @@ file_picker_root = ""
 # Example:
 # primary = "#b8bb26"
 # background = "#1d2021"
+
+# =============================================================================
+# Phase 18: Relay Decentralization Settings
+# =============================================================================
+
+[backend]
+# Backend mode: "mp2" (traditional server), "relay" (decentralized), "hybrid"
+mode = "relay"
+
+[identity]
+# Local identity file path (default: ~/.config/ming-drlms/e2ee_keys.json)
+# identity_file = ""
+
+# Registration ID (auto-generated if not set)
+# registration_id = 0
+
+# Device ID for multi-device support
+device_id = 1
+
+[trust]
+# Default trust policy for new contacts
+# - "tofu": Trust On First Use (default)
+# - "manual_only": Require manual verification
+# - "anchored_only": Require external anchoring
+default_policy = "tofu"
+
+# Action when a contact's public key changes
+# - "warn": Show warning, let user decide (default)
+# - "block": Automatically block until verified
+# - "reset": Reset trust level to TOFU
+key_change_action = "warn"
+
+[keyserver]
+# Keyserver query timeout (milliseconds)
+timeout = 5000
+
+# Minimum OPK (One-Time PreKey) count before replenishment
+min_opk_count = 10
+
+# Target OPK count after replenishment
+target_opk_count = 100
+
+[rooms]
+# Default visibility for new rooms: "private", "unlisted", "public"
+default_visibility = "private"
+
+# Room announcement channel
+announcement_channel = "__rooms__"
