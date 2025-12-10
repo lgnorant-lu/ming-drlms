@@ -76,6 +76,7 @@ class OfflineQueue:
     MAX_RETRIES = 10
     BASE_DELAY_SEC = 1.0
     MAX_DELAY_SEC = 300.0  # 5 minutes
+    MAX_QUEUE_SIZE = 1000  # Maximum pending items (Fix 8.3)
 
     def __init__(
         self,
@@ -84,6 +85,7 @@ class OfflineQueue:
         max_retries: int = MAX_RETRIES,
         base_delay: float = BASE_DELAY_SEC,
         max_delay: float = MAX_DELAY_SEC,
+        max_queue_size: int = MAX_QUEUE_SIZE,
     ):
         """Initialize the offline queue.
 
@@ -93,12 +95,14 @@ class OfflineQueue:
             max_retries: Maximum number of retry attempts
             base_delay: Base delay for exponential backoff (seconds)
             max_delay: Maximum delay between retries (seconds)
+            max_queue_size: Maximum number of pending items (0 = unlimited)
         """
         self._db_path = db_path
         self._relay_manager = relay_manager
         self._max_retries = max_retries
         self._base_delay = base_delay
         self._max_delay = max_delay
+        self._max_queue_size = max_queue_size
         self._processing_task: Optional[asyncio.Task[None]] = None
         self._running = False
         self._init_schema()
@@ -164,8 +168,25 @@ class OfflineQueue:
             target_relays: Specific relays to target (empty = all)
 
         Returns:
-            Queue item ID
+            Queue item ID, or -1 if queue is full
+
+        Raises:
+            ValueError: If queue size limit exceeded (max_queue_size > 0)
         """
+        # Fix 8.3: Check queue size limit before enqueue
+        if self._max_queue_size > 0:
+            current_count = self.get_pending_count()
+            if current_count >= self._max_queue_size:
+                logger.warning(
+                    "Offline queue full: %d/%d items, rejecting event for room=%s",
+                    current_count,
+                    self._max_queue_size,
+                    room,
+                )
+                raise ValueError(
+                    f"Offline queue full ({current_count}/{self._max_queue_size})"
+                )
+
         conn = self._connect()
         try:
             cur = conn.execute(

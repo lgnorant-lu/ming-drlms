@@ -243,3 +243,53 @@ class TestOfflineQueueAsync:
 
         await queue.stop_processing()
         assert not queue.is_processing()
+
+
+class TestOfflineQueueSizeLimit:
+    """Tests for queue size limit (Fix 8.3)."""
+
+    def test_max_queue_size_rejects_when_full(self, tmp_path: Path):
+        """Queue rejects new items when max_queue_size is reached."""
+        queue = OfflineQueue(tmp_path / "queue.db", max_queue_size=3)
+
+        # Fill the queue
+        queue.enqueue(room="room1", ciphertext="e1")
+        queue.enqueue(room="room1", ciphertext="e2")
+        queue.enqueue(room="room1", ciphertext="e3")
+
+        assert queue.get_pending_count() == 3
+
+        # Next enqueue should raise ValueError
+        with pytest.raises(ValueError, match="Offline queue full"):
+            queue.enqueue(room="room1", ciphertext="e4")
+
+        # Queue count unchanged
+        assert queue.get_pending_count() == 3
+
+    def test_max_queue_size_zero_unlimited(self, tmp_path: Path):
+        """max_queue_size=0 means unlimited."""
+        queue = OfflineQueue(tmp_path / "queue.db", max_queue_size=0)
+
+        # Should be able to add many items
+        for i in range(100):
+            queue.enqueue(room="room1", ciphertext=f"e{i}")
+
+        assert queue.get_pending_count() == 100
+
+    def test_queue_accepts_after_items_processed(self, tmp_path: Path):
+        """Queue accepts new items after pending items are processed."""
+        queue = OfflineQueue(tmp_path / "queue.db", max_queue_size=2)
+
+        id1 = queue.enqueue(room="room1", ciphertext="e1")
+        queue.enqueue(room="room1", ciphertext="e2")
+
+        # Queue is full
+        with pytest.raises(ValueError):
+            queue.enqueue(room="room1", ciphertext="e3")
+
+        # Mark one as success (reduces pending count)
+        queue._mark_success(id1)
+
+        # Now should accept
+        queue.enqueue(room="room1", ciphertext="e3")
+        assert queue.get_pending_count() == 2

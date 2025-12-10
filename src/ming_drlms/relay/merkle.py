@@ -81,6 +81,12 @@ class MerkleTree:
     - Leaf nodes are hashes of event IDs
     - Internal nodes are hashes of their children
     - The tree is rebalanced on each modification
+
+    Performance Note (Fix 8.1):
+    - Uses lazy evaluation via _dirty flag
+    - add_event() only marks dirty, does NOT rebuild
+    - Rebuild only happens when root is accessed
+    - For batch operations, use add_events() then access root once
     """
 
     def __init__(self, room_id: str):

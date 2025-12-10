@@ -1,3 +1,16 @@
+"""Legacy Relay HTTP Client.
+
+DEPRECATED: This module uses httpx.Client which may have proxy issues on Windows.
+For Phase 16+, prefer using ming_drlms.relay.RelayManager which uses urllib.request
+for better Windows compatibility and supports multi-relay features.
+
+This module is kept for backward compatibility with:
+- CLI commands that haven't migrated to RelayManager
+- Tests that specifically test RelayHTTPClient behavior
+
+Migration path: Replace RelayHTTPClient usage with RelayManager.post_event()
+"""
+
 from __future__ import annotations
 
 import os

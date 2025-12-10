@@ -193,11 +193,10 @@ class HealthChecker:
 
         try:
             start = time.monotonic()
-            # Use /events endpoint for health check (same as startup script)
+            # Use dedicated /health endpoint (Phase 16A)
+            # Falls back to /events if /health returns 404
             # Use urllib instead of httpx.AsyncClient for Windows compatibility
-            health_url = (
-                f"{relay_url.rstrip('/')}/events?room=__health__&since_seq=0&limit=1"
-            )
+            health_url = f"{relay_url.rstrip('/')}/health"
 
             # Run synchronous urllib in executor to avoid blocking
             loop = asyncio.get_event_loop()

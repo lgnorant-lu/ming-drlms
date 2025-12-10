@@ -106,27 +106,36 @@
 
 - **LEGACY-03｜test_mp2_identity_strict.py 密钥生成不规范**
   - **问题**: 使用 `Ed25519PrivateKey.generate()` 生成密钥写入 `LocalKeyStore`，语义上不正确（应使用 X25519/Signal）
-  - **风险**: 中 — 依赖字节兼容性而非正确的密钥类型
+  - **风险**: 低 — 依赖字节兼容性，功能正常
   - **建议**: 改用 `generate_device_keys()` 生成真正的 Signal 密钥
-  - **状态**: **待办 (To-Do)**
+  - **状态**: **保留 (Won't Fix)** — 测试功能正常，迁移收益低
 
-- **LEGACY-04｜cli/relay.py 注释未同步**
-  - **问题**: 第 52 行注释仍提及 "Ed25519 signing"，实际已使用 XEdDSA
-  - **风险**: 低 — 仅文档不一致
-  - **建议**: 更正注释为 "XEdDSA signing"
-  - **状态**: **待办 (To-Do)**
+- ~~**LEGACY-04｜cli/relay.py 注释未同步**~~ — ✅ **已验证无问题**
+  - CLI 文档字符串已正确说明 "Signal XEdDSA via CFFI"
 
-- **LEGACY-05｜TUI TestSyncEvent 命名导致 pytest 警告**
-  - **问题**: `tui/test_sync.py` 中 `TestSyncEvent` 类名以 `Test` 开头，pytest 会尝试收集
-  - **风险**: 低 — 仅警告，不影响功能
-  - **建议**: 重命名为 `SyncEvent` 或添加 `__test__ = False`
-  - **状态**: **待办 (To-Do)**
+- ~~**LEGACY-05｜TUI TestSyncEvent 命名导致 pytest 警告**~~ — ✅ **已修复**
+  - 添加 `__test__ = False` 到 `TestSyncHook` 类
+  - `TestSyncEvent` 只是类型别名，不触发警告
 
 - **LEGACY-06｜cffi/distutils 弃用警告**
   - **问题**: Python 3.12+ 中 distutils 已移除，cffi 依赖可能产生警告
   - **风险**: 低 — 当前 Python 3.9-3.11 不受影响
   - **建议**: 升级 cffi 或在 Python 3.12 前修复
   - **状态**: **待办 (To-Do)**
+
+### CLI 迁移状态 (Phase 16)
+
+| 命令 | 实现 | 状态 |
+|------|------|------|
+| `relay post` | RelayHTTPClient | ⚠️ Legacy (保留向后兼容) |
+| `relay post-multi` | RelayManager | ✅ Phase 16 |
+| `relay post-simple` | RelayHTTPClient | ⚠️ Legacy |
+| `relay sync` | RelayHTTPClient | ⚠️ Legacy |
+| `relay sync-multi` | MultiRelaySyncManager | ✅ Phase 16 |
+| `relay health` | HealthChecker | ✅ Phase 16 |
+| `relay identity` | IdentityManager | ✅ Phase 15.5 |
+
+**说明**: Legacy 命令保留向后兼容，推荐使用 `-multi` 版本
 
 
 ---

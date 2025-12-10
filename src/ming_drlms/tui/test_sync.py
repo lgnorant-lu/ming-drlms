@@ -38,6 +38,8 @@ class SyncEvent(Enum):
 class TestSyncHook(Protocol):
     """Protocol for test synchronization hooks."""
 
+    __test__ = False  # Prevent pytest collection warning
+
     async def notify(self, event: SyncEvent) -> None:
         """Notify that an event has occurred.
 

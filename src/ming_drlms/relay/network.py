@@ -178,7 +178,8 @@ class NetworkMonitor:
         total_latency = 0.0
         latency_count = 0
 
-        # Check each relay using /events endpoint with urllib (Windows compatible)
+        # Check each relay using /health endpoint with urllib (Windows compatible)
+        # Fix 8.2: Use dedicated /health endpoint instead of /events
         import urllib.request
         import urllib.error
 
@@ -187,7 +188,7 @@ class NetworkMonitor:
         for relay_url in relays:
             try:
                 start = time.monotonic()
-                health_url = f"{relay_url.rstrip('/')}/events?room=__health__&since_seq=0&limit=1"
+                health_url = f"{relay_url.rstrip('/')}/health"
 
                 def _check(url: str) -> int:
                     with urllib.request.urlopen(url, timeout=self._timeout) as resp:

@@ -575,7 +575,11 @@ class ChatScreen(Screen):
         self.set_interval(5.0, self._update_relay_status_bar)
 
     def _update_relay_status_bar(self) -> None:
-        """Update the relay status bar with current state."""
+        """Update the relay status bar with current state.
+
+        Note: All controller method returns are defensively type-checked
+        to handle MagicMock objects in test scenarios.
+        """
         try:
             bar = self.query_one("#relay-status-bar", Static)
         except Exception:
@@ -583,19 +587,23 @@ class ChatScreen(Screen):
 
         parts = []
 
-        # Network status
+        # Network status (defensive: ensure dict)
         net_status = self.controller.get_network_status()
-        if net_status:
+        if net_status and isinstance(net_status, dict):
             online = net_status.get("online", False)
-            if online:
+            if online is True:
                 parts.append("[green]● NET[/green]")
             else:
                 parts.append("[red]○ NET[/red]")
 
-        # Relay health
+        # Relay health (defensive: ensure list)
         relay_health = self.controller.get_relay_health()
-        if relay_health:
-            healthy = sum(1 for r in relay_health if r.get("healthy", False))
+        if relay_health and isinstance(relay_health, list):
+            healthy = sum(
+                1
+                for r in relay_health
+                if isinstance(r, dict) and r.get("healthy", False) is True
+            )
             total = len(relay_health)
             if healthy == total and total > 0:
                 parts.append(f"[green]⚡ {healthy}/{total} Relay[/green]")
@@ -604,10 +612,12 @@ class ChatScreen(Screen):
             else:
                 parts.append(f"[red]⚡ {healthy}/{total} Relay[/red]")
 
-        # Queue status
+        # Queue status (defensive: ensure dict and int)
         queue_stats = self.controller.get_queue_stats()
-        if queue_stats:
+        if queue_stats and isinstance(queue_stats, dict):
             pending = queue_stats.get("pending", 0)
+            if not isinstance(pending, int):
+                pending = 0
             if pending == 0:
                 parts.append("[green]📤 Queue: 0[/green]")
             elif pending < 10:
@@ -615,11 +625,11 @@ class ChatScreen(Screen):
             else:
                 parts.append(f"[red]📤 Queue: {pending}[/red]")
 
-        # Last sync time
+        # Last sync time (defensive: ensure dict and str)
         sync_info = self.controller.get_sync_info()
-        if sync_info:
+        if sync_info and isinstance(sync_info, dict):
             last_sync = sync_info.get("last_sync_ago", "")
-            if last_sync:
+            if last_sync and isinstance(last_sync, str):
                 parts.append(f"🔄 {last_sync}")
 
         if parts:

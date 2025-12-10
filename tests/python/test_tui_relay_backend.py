@@ -33,6 +33,8 @@ def test_tui_relay_receive_dispatches_event(
     # Arrange config and env
     cfg_dir = _write_config(tmp_path)
     monkeypatch.setenv("MING_DRLMS_CONFIG_DIR", str(cfg_dir))
+    # Isolate state directory (offline_queue.db, tokens, etc.) to avoid polluting user data
+    monkeypatch.setenv("MING_DRLMS_STATE_DIR", str(cfg_dir))
 
     # Lazy import after env set
     from ming_drlms.tui.logic import ChatController
@@ -127,6 +129,7 @@ def test_tui_relay_send_posts_envelope(
     # Arrange config and env
     cfg_dir = _write_config(tmp_path)
     monkeypatch.setenv("MING_DRLMS_CONFIG_DIR", str(cfg_dir))
+    monkeypatch.setenv("MING_DRLMS_STATE_DIR", str(cfg_dir))  # Isolate state
     # Ensure DRLMS_BACKEND does not override config
     monkeypatch.delenv("DRLMS_BACKEND", raising=False)
 
@@ -165,6 +168,9 @@ def test_tui_relay_send_posts_envelope(
 
     monkeypatch.setattr(logic, "RelaySigner", _MockRelaySigner)
 
+    # Disable Phase 16 RelayManager to test legacy RelayHTTPClient path
+    monkeypatch.setattr(logic, "_HAS_RELAY_MANAGER", False)
+
     class _DummyRelay:
         def __init__(self, base_url: str, *, timeout: float = 10.0) -> None:
             self._closed = False
@@ -192,7 +198,7 @@ def test_tui_relay_send_posts_envelope(
     )
 
     ctrl.connect("Town Square")
-    # Act: send one message via relay backend
+    # Act: send one message via relay backend (legacy path)
     ctrl.send_message("hi-relay")
     ctrl.disconnect()
 
@@ -218,6 +224,7 @@ def test_tui_relay_send_uses_py_fallback_when_cffi_sign_fails(
     # Arrange config and env
     cfg_dir = _write_config(tmp_path)
     monkeypatch.setenv("MING_DRLMS_CONFIG_DIR", str(cfg_dir))
+    monkeypatch.setenv("MING_DRLMS_STATE_DIR", str(cfg_dir))  # Isolate state
     # Explicitly set backend to relay (overrides any existing env)
     monkeypatch.setenv("DRLMS_BACKEND", "relay")
 
@@ -257,6 +264,9 @@ def test_tui_relay_send_uses_py_fallback_when_cffi_sign_fails(
             )
 
     monkeypatch.setattr(logic, "RelaySigner", _MockRelaySigner)
+
+    # Disable Phase 16 RelayManager to test legacy RelayHTTPClient path
+    monkeypatch.setattr(logic, "_HAS_RELAY_MANAGER", False)
 
     class _DummyRelay:
         def __init__(self, base_url: str, *, timeout: float = 10.0) -> None:
@@ -312,6 +322,7 @@ def test_tui_relay_send_aborts_when_enforce_signed_and_no_sign(
         encoding="utf-8",
     )
     monkeypatch.setenv("MING_DRLMS_CONFIG_DIR", str(cfg_dir))
+    monkeypatch.setenv("MING_DRLMS_STATE_DIR", str(cfg_dir))  # Isolate state
 
     from ming_drlms.tui.logic import ChatController
     import ming_drlms.tui.logic as logic
@@ -404,6 +415,7 @@ def test_tui_relay_receive_drops_unverified_events(
     # Arrange config and env
     cfg_dir = _write_config(tmp_path)
     monkeypatch.setenv("MING_DRLMS_CONFIG_DIR", str(cfg_dir))
+    monkeypatch.setenv("MING_DRLMS_STATE_DIR", str(cfg_dir))  # Isolate state
 
     from ming_drlms.tui.logic import ChatController
     import ming_drlms.tui.logic as logic

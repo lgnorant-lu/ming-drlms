@@ -64,14 +64,20 @@ logger = log.get_logger("tui.logic")
 
 
 def _state_dir() -> Path:
-    """Return directory used for TUI state and tokens.
+    """Return directory used for TUI state, tokens, and offline queue.
 
-    Always uses ``Path.home() / ".drlms"`` so tests can control the
-    location via monkeypatching ``Path.home``. Global config (including
-    E2EE keystore) may still leverage ``MING_DRLMS_CONFIG_DIR``
-    separately.
+    Priority:
+    1. MING_DRLMS_STATE_DIR environment variable (for test isolation)
+    2. Path.home() / ".drlms" (default)
+
+    Tests should set MING_DRLMS_STATE_DIR to a temporary directory to
+    avoid polluting the user's real state (offline_queue.db, etc.).
     """
+    from os import environ
 
+    state_dir_env = environ.get("MING_DRLMS_STATE_DIR")
+    if state_dir_env:
+        return Path(state_dir_env)
     return Path.home() / ".drlms"
 
 
@@ -466,7 +472,11 @@ class ChatController:
                             result.errors,
                         )
                 else:
-                    # Legacy single relay path
+                    # Legacy single relay path (DEPRECATED: prefer RelayManager)
+                    # This fallback uses httpx.Client which may have proxy issues on Windows
+                    logger.warning(
+                        "Using legacy RelayHTTPClient - consider configuring relays.toml"
+                    )
                     client = RelayHTTPClient(self._relay_base_url)
                     try:
                         client.post_event(
@@ -1132,13 +1142,14 @@ class ChatController:
                         "Phase 16B: Initialized EventDeduplicator, Validator, MerkleTree"
                     )
 
-                    # Phase 16D: Initialize OfflineQueue
+                    # Phase 16D: Initialize OfflineQueue (Fix: add max_queue_size)
                     queue_db = _state_dir() / "offline_queue.db"
                     self._offline_queue = OfflineQueue(
                         db_path=queue_db,
                         max_retries=self._relays_config.offline.max_retries,
                         base_delay=self._relays_config.offline.base_delay,
                         max_delay=self._relays_config.offline.max_delay,
+                        max_queue_size=self._relays_config.offline.max_queue_size,
                     )
                     logger.info("Phase 16D: Initialized OfflineQueue")
 

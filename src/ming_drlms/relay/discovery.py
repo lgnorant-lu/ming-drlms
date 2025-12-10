@@ -228,20 +228,24 @@ class RelayDiscovery:
         return result
 
     async def _discover_well_known(self, domain: str) -> list[RelayEndpoint]:
-        """Discover relays via HTTP /.well-known/drlms-relays.json."""
-        try:
-            import httpx
-        except ImportError:
-            logger.debug("httpx not installed, skipping Well-Known discovery")
-            return []
+        """Discover relays via HTTP /.well-known/drlms-relays.json.
+
+        Uses urllib.request for Windows compatibility (consistent with Phase 16).
+        """
+        import asyncio
+        import json
+        import urllib.request
+        import urllib.error
+
+        url = f"https://{domain}/.well-known/drlms-relays.json"
+
+        def _fetch() -> dict:
+            with urllib.request.urlopen(url, timeout=5.0) as resp:
+                return json.loads(resp.read().decode("utf-8"))
 
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                resp = await client.get(
-                    f"https://{domain}/.well-known/drlms-relays.json"
-                )
-                resp.raise_for_status()
-                data = resp.json()
+            loop = asyncio.get_event_loop()
+            data = await loop.run_in_executor(None, _fetch)
 
             endpoints = []
             for relay in data.get("relays", []):

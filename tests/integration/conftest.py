@@ -59,7 +59,7 @@ class TestRelayInstance:
 async def start_test_relay(
     port: int,
     tmp_dir: Path,
-    startup_timeout: float = 10.0,
+    startup_timeout: float = 20.0,  # Increased for slower CI/Windows
 ) -> TestRelayInstance:
     """Start a test relay server on the given port.
 
@@ -105,27 +105,42 @@ async def start_test_relay(
         process=process,
     )
 
-    # Wait for server to be ready
-    try:
-        import httpx
-    except ImportError:
-        raise RuntimeError("httpx required for integration tests")
+    # Wait for server to be ready using urllib (Windows compatible)
+    import urllib.request
+    import urllib.error
 
     start_time = time.monotonic()
+    last_error = None
     while time.monotonic() - start_time < startup_timeout:
-        try:
-            async with httpx.AsyncClient(timeout=1.0) as client:
-                resp = await client.get(f"{url}/health")
-                if resp.status_code == 200:
-                    return instance
-        except Exception:
-            pass
-        await asyncio.sleep(0.2)
+        # Check if process died early
+        if process.returncode is not None:
+            stderr_data = await process.stderr.read() if process.stderr else b""
+            raise RuntimeError(
+                f"Relay on port {port} exited with code {process.returncode}: "
+                f"{stderr_data.decode('utf-8', errors='replace')[:500]}"
+            )
 
-    # Startup failed
+        try:
+            with urllib.request.urlopen(f"{url}/health", timeout=2.0) as resp:
+                if resp.status == 200:
+                    return instance
+        except urllib.error.URLError as e:
+            last_error = str(e)
+        except Exception as e:
+            last_error = str(e)
+        await asyncio.sleep(0.3)
+
+    # Startup failed - collect stderr for debugging
+    stderr_data = b""
+    if process.stderr:
+        try:
+            stderr_data = await asyncio.wait_for(process.stderr.read(), timeout=1.0)
+        except asyncio.TimeoutError:
+            pass
     await instance.stop()
     raise RuntimeError(
-        f"Relay on port {port} failed to start within {startup_timeout}s"
+        f"Relay on port {port} failed to start within {startup_timeout}s. "
+        f"Last error: {last_error}. Stderr: {stderr_data.decode('utf-8', errors='replace')[:500]}"
     )
 
 
@@ -233,20 +248,35 @@ async def post_event_to_relay(
     ciphertext: str,
     client_event_hash: Optional[str] = None,
 ) -> dict:
-    """Post an event to a relay and return the response."""
-    import httpx
+    """Post an event to a relay and return the response.
 
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        resp = await client.post(
-            f"{relay_url}/events",
-            json={
-                "room": room,
-                "ciphertext": ciphertext,
-                "client_event_hash": client_event_hash,
-            },
+    Uses urllib.request for Windows compatibility (avoids httpx proxy issues).
+    """
+    import asyncio
+    import json
+    import urllib.request
+    import urllib.error
+
+    url = f"{relay_url}/events"
+    payload = {
+        "room": room,
+        "ciphertext": ciphertext,
+        "client_event_hash": client_event_hash,
+    }
+    data = json.dumps(payload).encode("utf-8")
+
+    def _post():
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
         )
-        resp.raise_for_status()
-        return resp.json()
+        with urllib.request.urlopen(req, timeout=10.0) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _post)
 
 
 async def get_events_from_relay(
@@ -255,26 +285,48 @@ async def get_events_from_relay(
     since_seq: int = 0,
     limit: int = 100,
 ) -> list[dict]:
-    """Get events from a relay."""
-    import httpx
+    """Get events from a relay.
 
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        resp = await client.get(
-            f"{relay_url}/events",
-            params={"room": room, "since_seq": since_seq, "limit": limit},
-        )
-        resp.raise_for_status()
-        return resp.json()
+    Uses urllib.request for Windows compatibility.
+    """
+    import asyncio
+    import json
+    import urllib.request
+    import urllib.parse
+
+    params = urllib.parse.urlencode(
+        {
+            "room": room,
+            "since_seq": since_seq,
+            "limit": limit,
+        }
+    )
+    url = f"{relay_url}/events?{params}"
+
+    def _get():
+        with urllib.request.urlopen(url, timeout=10.0) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _get)
 
 
 async def get_merkle_root(relay_url: str, room: str) -> dict:
-    """Get Merkle root from a relay."""
-    import httpx
+    """Get Merkle root from a relay.
 
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        resp = await client.get(
-            f"{relay_url}/merkle/root",
-            params={"room": room},
-        )
-        resp.raise_for_status()
-        return resp.json()
+    Uses urllib.request for Windows compatibility.
+    """
+    import asyncio
+    import json
+    import urllib.request
+    import urllib.parse
+
+    params = urllib.parse.urlencode({"room": room})
+    url = f"{relay_url}/merkle/root?{params}"
+
+    def _get():
+        with urllib.request.urlopen(url, timeout=10.0) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _get)

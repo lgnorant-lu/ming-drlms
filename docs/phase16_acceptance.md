@@ -441,7 +441,15 @@ assert tree.verify_proof("event2", proof)
 2. **Well-Known 发现**：需要真实 HTTP 端点，目前仅有 mock 测试。
 3. **多 Relay 集成测试**：需要启动多个 Relay 实例，当前主要通过单机 + E2E 脚本验证。
 
-### 6.3 后续优化
+### 6.3 审查修复（2025-12-10）
+
+| 问题 | 修复内容 | 文件 |
+|------|----------|------|
+| 8.1 Merkle 重建性能 | 添加懒惰求值文档说明，确认 dirty flag 机制 | `merkle.py` |
+| 8.2 健康检查单点 | 改用专用 `/health` 端点替代 `/events` | `health.py`, `network.py` |
+| 8.3 离线队列无上限 | 添加 `max_queue_size` 参数（默认 1000） | `offline_queue.py` |
+
+### 6.4 后续优化
 
 1. **Phase 17**：非对称签名升级（Ed25519/XEdDSA）。  
 2. **Phase 18**：本地 AI 智能层。
