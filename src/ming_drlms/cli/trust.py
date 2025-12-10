@@ -20,7 +20,9 @@ from rich.console import Console
 from rich.table import Table
 import typer
 
-trust_app = typer.Typer(help="联系人信任管理命令 (Phase 18)")
+trust_app = typer.Typer(
+    help="[Relay Only] 联系人信任管理 (list/verify/anchor/accept/block)"
+)
 
 
 def _get_trust_icon(level: int) -> str:

@@ -84,9 +84,16 @@ class BackendConfig:
     def from_env(cls) -> "BackendConfig":
         """Create config from environment variables.
 
+        Supports both new and legacy variable names:
+        - DRLMS_BACKEND_MODE (recommended) / DRLMS_BACKEND (legacy)
+        - DRLMS_DEFAULT_RELAYS (recommended) / DRLMS_RELAY_BASE_URL (legacy)
+
         Also checks DRLMS_RELAYS_CONFIG for additional relay configuration.
         """
-        mode_str = os.environ.get("DRLMS_BACKEND_MODE", "relay")
+        # Mode: prefer DRLMS_BACKEND_MODE, fallback to DRLMS_BACKEND
+        mode_str = os.environ.get("DRLMS_BACKEND_MODE") or os.environ.get(
+            "DRLMS_BACKEND", "relay"
+        )
         mode = (
             BackendMode(mode_str)
             if mode_str in [m.value for m in BackendMode]
@@ -94,7 +101,13 @@ class BackendConfig:
         )
 
         # Get default relays from env
+        # Prefer DRLMS_DEFAULT_RELAYS, fallback to DRLMS_RELAY_BASE_URL
         relays_str = os.environ.get("DRLMS_DEFAULT_RELAYS", "")
+        if not relays_str:
+            # Legacy: single relay URL
+            legacy_url = os.environ.get("DRLMS_RELAY_BASE_URL", "")
+            if legacy_url:
+                relays_str = legacy_url
         relays = [r.strip() for r in relays_str.split(",") if r.strip()]
 
         # Also try to load from DRLMS_RELAYS_CONFIG if available

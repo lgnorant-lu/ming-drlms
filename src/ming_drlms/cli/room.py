@@ -17,9 +17,7 @@ from .services import RoomService, RoomServiceError
 from ..i18n import t
 
 
-room_app = typer.Typer(
-    help="room manager: info/create/set-policy/set-storage-policy/transfer"
-)
+room_app = typer.Typer(help="[MP2 Only] 房间管理 (需要 MP2 服务器连接)")
 
 _POLICY_NAME = {0: "retain", 1: "delegate", 2: "teardown"}
 _STORAGE_POLICY_NAME = {0: "persistent", 1: "ephemeral"}

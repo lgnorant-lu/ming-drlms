@@ -13,7 +13,7 @@ from ming_drlms.core.mproto_v2_client import (
 
 from .mproto_runtime import create_mp2_client
 
-e2ee_app = typer.Typer(help="E2EE 密钥管理命令")
+e2ee_app = typer.Typer(help="[MP2 Only] E2EE 密钥管理 (需要 MP2 服务器)")
 
 
 @e2ee_app.command("generate-keys", help="为用户生成端到端密钥")

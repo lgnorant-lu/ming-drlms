@@ -161,6 +161,7 @@ from . import dev as _dev  # noqa: E402
 from . import identity as _identity  # noqa: E402
 from . import trust as _trust  # noqa: E402
 from . import relay_room as _relay_room  # noqa: E402
+from . import chat as _chat  # noqa: E402
 
 app.add_typer(_client.client_app, name="client")
 app.add_typer(_config.config_app, name="config")
@@ -177,6 +178,7 @@ app.add_typer(_dev.dev_app, name="dev")
 app.add_typer(_identity.identity_app, name="identity")
 app.add_typer(_trust.trust_app, name="trust")
 app.add_typer(_relay_room.relay_room_app, name="relay-room")
+app.add_typer(_chat.chat_app, name="chat")
 _server.register_top_level_aliases(app)
 
 

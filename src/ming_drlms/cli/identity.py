@@ -18,7 +18,9 @@ from rich.console import Console
 from rich.table import Table
 import typer
 
-identity_app = typer.Typer(help="本地身份管理命令 (Phase 18)")
+identity_app = typer.Typer(
+    help="[Relay Only] 本地身份管理 (create/show/fingerprint/export/import)"
+)
 
 
 @identity_app.command("create", help="创建新的本地身份")

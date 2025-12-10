@@ -207,14 +207,16 @@ jobs:
           path: coverage/
           if-no-files-found: ignore
 
-  # Phase 16: Integration tests with live Relay server + coverage
+  # Phase 16-19: Integration tests with live Relay server + coverage
   relay-integration:
-    name: Relay Integration Tests (Phase 16)
+    name: Relay Integration Tests (Phase 16-19)
     runs-on: ubuntu-latest
     needs: cross-platform
     env:
       DRLMS_UPDATE_CHECK: '0'
       DRLMS_LOG_LEVEL: 'DEBUG'
+      DRLMS_BACKEND_MODE: 'relay'
+      DRLMS_DEFAULT_RELAYS: 'http://127.0.0.1:8081'
 
     steps:
       - name: Checkout repository
@@ -241,12 +243,14 @@ jobs:
           pip install -e ".[dev]"
           pip install coverage pytest-cov
 
-      - name: Run Phase 16 Relay unit tests with coverage
+      - name: Run Phase 16-19 Relay unit tests with coverage
         shell: bash
         run: |
           python -m coverage run --branch --parallel-mode -m pytest \
             tests/python/test_relay_*.py \
             tests/python/test_phase16_integration.py \
+            tests/python/test_phase18_*.py \
+            tests/python/test_phase19_*.py \
             tests/python/test_e2e_multi_relay_failover.py \
             -v --timeout=120
 

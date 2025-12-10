@@ -34,7 +34,9 @@ from ..relay import (
     SyncCursorStore,
 )
 
-relay_app = typer.Typer(help="Relay PoC commands")
+relay_app = typer.Typer(
+    help="[Advanced] Relay 底层调试命令 (post/sync/identity - 开发者使用)"
+)
 
 
 @relay_app.command("post")

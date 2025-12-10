@@ -17,8 +17,12 @@ from .logging_handler import TextualLogHandler
 from .log_screen import LogScreen
 from .settings_screen import SettingsScreen
 from .profiles_screen import ServerProfilesScreen
+from .relay_start_screen import RelayStartScreen
+from .relay_chat_screen import RelayChatPlaceholder
 from .logic import _state_dir
 import logging
+
+from ..core.backend import BackendConfig, BackendMode
 
 
 class DRLMSApp(App):
@@ -78,8 +82,16 @@ class DRLMSApp(App):
         return variables
 
     def on_mount(self) -> None:
-        """Show login screen on startup."""
-        self.push_screen(LoginScreen())
+        """Show appropriate screen based on backend mode."""
+        config = BackendConfig.from_env()
+
+        if config.mode == BackendMode.RELAY_ONLY:
+            # Relay mode: no server needed, use local identity
+            self.push_screen(RelayStartScreen())
+        else:
+            # MP2 mode: traditional server login
+            self.push_screen(LoginScreen())
+
         self._utf8_guard()
 
     def action_open_log(self) -> None:
@@ -95,8 +107,27 @@ class DRLMSApp(App):
             pass
 
     def action_open_profiles(self) -> None:
+        """Open server profiles (MP2 mode) or relay config (Relay mode)."""
+        from ..core.backend import BackendConfig, BackendMode
+
         try:
-            self.push_screen(ServerProfilesScreen())
+            config = BackendConfig.from_env()
+            if config.mode == BackendMode.RELAY_ONLY:
+                # Relay mode: show relay configuration info
+                relay_info = (
+                    ", ".join(config.default_relays)
+                    if config.default_relays
+                    else "未配置"
+                )
+                self.notify(
+                    f"Relay 模式 - 配置: {relay_info}\n"
+                    f"使用 DRLMS_DEFAULT_RELAYS 环境变量配置",
+                    severity="information",
+                    timeout=5,
+                )
+            else:
+                # MP2 mode: show server profiles
+                self.push_screen(ServerProfilesScreen())
         except Exception:
             pass
 
@@ -114,6 +145,15 @@ class DRLMSApp(App):
             exclusive=True,
             group="login",
         )
+
+    @on(RelayStartScreen.EnterRelay)
+    async def handle_enter_relay(self, message: RelayStartScreen.EnterRelay) -> None:
+        """Handle entering relay mode from RelayStartScreen."""
+        # For now, transition to a placeholder chat screen
+        # TODO: Create RelayRoomListScreen or adapt ChatScreen for relay mode
+        self.pop_screen()
+        # Create a relay-mode chat screen (placeholder - will be enhanced in 19C)
+        self.push_screen(RelayChatPlaceholder())
 
     async def _do_login(
         self, host: str, port: int, username: str, password: str
@@ -236,6 +276,12 @@ class DRLMSApp(App):
             group="login",
             thread=True,
         )
+
+    @on(RelayStartScreen.EnterRelay)
+    def on_enter_relay(self, message: RelayStartScreen.EnterRelay) -> None:
+        """Handle entering relay mode from RelayStartScreen."""
+        # Switch to relay chat placeholder
+        self.switch_screen(RelayChatPlaceholder())
 
     def switch_to_chat(self, username: str, server: str) -> None:
         """Switch to chat screen after successful login."""

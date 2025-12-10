@@ -19,7 +19,9 @@ from rich.console import Console
 from rich.table import Table
 import typer
 
-relay_room_app = typer.Typer(help="Relay-native 房间管理命令 (Phase 18)")
+relay_room_app = typer.Typer(
+    help="[Relay Only] Relay-native 房间管理 (create/list/join/leave/invite)"
+)
 
 
 @relay_room_app.command("create", help="创建新房间")
