@@ -309,6 +309,7 @@
 | 15 (Dumb Relay) | test_identity_manager.py, test_contact_manager.py, test_room_manager.py, test_dumb_relay.py, test_signature_*.py |
 | 15.5 (XEdDSA) | test_xeddsa_e2e.py |
 | 16 (Multi-Relay) | test_relay_*.py, test_phase16_integration.py, test_e2e_multi_relay_failover.py |
+| **17 (非对称签名)** | `test_relay_xeddsa_signing.py`, `test_relay_xeddsa_verify.py` |
 
 ### CI Jobs 架构
 
@@ -325,6 +326,49 @@ cross-platform (Linux/macOS/Windows)
 
 ### 文档
 - CI/CD 指南：`docs/ci_cd_guide.md`
+
+---
+
+## 📋 Phase 17: 非对称签名升级
+
+**Phase 17A-B** — ✅ **已完成 (2025-12-10)**
+
+### 实施内容
+
+| 子阶段 | 组件 | 说明 |
+|--------|------|------|
+| **17A** | `relay/server.py` | 双签名 (HMAC + XEdDSA) |
+| **17A** | `EventAck` | 扩展 `xeddsa_signature`, `relay_pubkey` |
+| **17A** | `/health`, `/.well-known/` | 公钥发现端点 |
+| **17B** | `relay/manager.py` | XEdDSA 验签 (`_verify_xeddsa`) |
+| **17B** | `StorageReceipt` | 扩展 XEdDSA 字段 |
+| **17B** | `RelayEndpoint` | 添加 `pubkey` 字段 |
+| **17B** | `receipt_store.py` | 自动 schema 迁移 |
+
+### 环境变量
+
+| 变量 | 说明 |
+|------|------|
+| `DRLMS_RELAY_SIGNING_KEY` | HMAC 密钥 (legacy) |
+| `DRLMS_RELAY_SIGNING_PRIVKEY` | XEdDSA 私钥 (32 字节 hex) |
+
+### 测试
+
+- `test_relay_xeddsa_signing.py` (15 tests)
+- `test_relay_xeddsa_verify.py` (9 tests)
+
+### 依赖
+
+- 添加 `pynacl>=1.5.0` 到 `[project.optional-dependencies] relay`
+
+### 下一步 (17C)
+
+- 观察期：运行双签名一段时间
+- 废弃 HMAC：设置 `hmac_deprecated: true`
+- 移除 HMAC：删除 HMAC 签名逻辑
+
+### 文档
+- 设计文档：`.drlms/checkpoint/Phase17.md`
 
 ---
 > 维护人：主领 (Gemini) / Cascade

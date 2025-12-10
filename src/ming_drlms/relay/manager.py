@@ -44,14 +44,21 @@ class WriteStatus(Enum):
 
 @dataclass
 class StorageReceipt:
-    """RCV-01: Storage receipt from a relay."""
+    """RCV-01: Storage receipt from a relay.
+
+    Phase 17A: Extended with XEdDSA signature fields.
+    """
 
     relay_url: str
     relay_id: str
     server_seq: int
     server_ts: int
-    signature: str
-    verified: bool = False
+    signature: str  # HMAC signature (legacy)
+    verified: bool = False  # HMAC verified
+    # Phase 17A: XEdDSA fields
+    xeddsa_signature: Optional[str] = None
+    relay_pubkey: Optional[str] = None
+    xeddsa_verified: bool = False
 
 
 @dataclass
@@ -187,12 +194,12 @@ class RelayManager:
         server_ts: int,
         relay_id: str,
         signature: str,
-    ) -> bool:
-        """RCV-01: Verify a storage receipt signature.
+        xeddsa_signature: Optional[str] = None,
+        relay_pubkey: Optional[str] = None,
+    ) -> tuple[bool, bool]:
+        """RCV-01 + Phase 17A: Verify storage receipt signature.
 
-        Note: This requires the relay's signing key to be known.
-        In the current implementation, we trust receipts from known relays
-        and perform signature verification only if configured.
+        Phase 17A: Dual verification - tries XEdDSA first, falls back to HMAC.
 
         Args:
             event_id: Client event hash
@@ -200,31 +207,94 @@ class RelayManager:
             server_seq: Server sequence number
             server_ts: Server timestamp
             relay_id: Relay identity
-            signature: HMAC-SHA256 signature hex
+            signature: HMAC-SHA256 signature hex (legacy)
+            xeddsa_signature: Phase 17A XEdDSA signature hex (optional)
+            relay_pubkey: Relay's X25519 public key hex (optional)
 
         Returns:
-            True if verified or verification skipped, False if failed
+            (hmac_verified, xeddsa_verified) tuple
         """
-        # RCV-01: For now, we trust receipts from our configured relays
-        # Full verification requires relay key distribution (future work)
+        message = f"{event_id}|{room}|{server_seq}|{server_ts}|{relay_id}".encode()
+        hmac_verified = False
+        xeddsa_verified = False
+
+        # Phase 17A: Try XEdDSA verification first (preferred)
+        if xeddsa_signature and relay_pubkey:
+            xeddsa_verified = self._verify_xeddsa(
+                message, xeddsa_signature, relay_pubkey, relay_id
+            )
+            if xeddsa_verified:
+                logger.debug("Phase 17A: XEdDSA verified for %s", relay_id)
+
+        # Fall back to HMAC verification
         relay_key = os.environ.get(f"DRLMS_RELAY_KEY_{relay_id}", "").encode()
-        if not relay_key:
-            # No key configured - trust the receipt
-            logger.debug("RCV-01: No key for %s, trusting receipt", relay_id)
+        if relay_key:
+            expected_sig = hmac.new(relay_key, message, hashlib.sha256).hexdigest()
+            if hmac.compare_digest(expected_sig, signature):
+                hmac_verified = True
+            else:
+                logger.warning(
+                    "RCV-01: HMAC mismatch for %s: expected=%s got=%s",
+                    relay_id,
+                    expected_sig[:16],
+                    signature[:16],
+                )
+        else:
+            # No HMAC key configured - trust if XEdDSA verified or skip
+            if xeddsa_verified:
+                hmac_verified = True  # Trust based on XEdDSA
+            else:
+                logger.debug("RCV-01: No key for %s, trusting receipt", relay_id)
+                hmac_verified = True  # Trust by default
+
+        return hmac_verified, xeddsa_verified
+
+    def _verify_xeddsa(
+        self,
+        message: bytes,
+        signature_hex: str,
+        pubkey_hex: str,
+        relay_id: str,
+    ) -> bool:
+        """Phase 17A: Verify XEdDSA signature.
+
+        Args:
+            message: Original message bytes
+            signature_hex: 64-byte signature as hex
+            pubkey_hex: X25519 public key as hex
+            relay_id: For logging
+
+        Returns:
+            True if verified, False otherwise
+        """
+        try:
+            from nacl.signing import VerifyKey
+            import nacl.exceptions
+
+            signature = bytes.fromhex(signature_hex)
+            pubkey = bytes.fromhex(pubkey_hex)
+
+            if len(signature) != 64:
+                logger.warning("Phase 17A: Invalid signature length for %s", relay_id)
+                return False
+            if len(pubkey) != 32:
+                logger.warning("Phase 17A: Invalid pubkey length for %s", relay_id)
+                return False
+
+            # Create verify key from Ed25519 public key
+            # Note: Server signs with SigningKey which produces Ed25519 keys
+            verify_key = VerifyKey(pubkey)
+            verify_key.verify(message, signature)
             return True
 
-        # Verify HMAC signature
-        message = f"{event_id}|{room}|{server_seq}|{server_ts}|{relay_id}".encode()
-        expected_sig = hmac.new(relay_key, message, hashlib.sha256).hexdigest()
-        if hmac.compare_digest(expected_sig, signature):
-            return True
-        else:
-            logger.warning(
-                "RCV-01: Signature mismatch for %s: expected=%s got=%s",
-                relay_id,
-                expected_sig[:16],
-                signature[:16],
-            )
+        except nacl.exceptions.BadSignatureError:
+            logger.warning("Phase 17A: XEdDSA verification failed for %s", relay_id)
+            return False
+        except ImportError:
+            logger.debug("Phase 17A: pynacl not available for verification")
+            return False
+        except Exception as e:
+            logger.warning("Phase 17A: XEdDSA error for %s: %s", relay_id, e)
             return False
 
     async def post_event(
@@ -318,18 +388,24 @@ class RelayManager:
                 if server_seq is not None:
                     server_seqs[url] = server_seq
 
-                # RCV-01: Extract and verify storage receipt
+                # RCV-01 + Phase 17A: Extract and verify storage receipt
                 relay_id = response.get("relay_id")
                 relay_sig = response.get("relay_signature")
                 server_ts = response.get("server_ts", 0)
+                # Phase 17A: Extract XEdDSA fields
+                xeddsa_sig = response.get("xeddsa_signature")
+                relay_pubkey = response.get("relay_pubkey")
+
                 if relay_id and relay_sig and client_event_hash:
-                    verified = self._verify_receipt(
+                    hmac_verified, xeddsa_verified = self._verify_receipt(
                         client_event_hash,
                         room,
                         server_seq,
                         server_ts,
                         relay_id,
                         relay_sig,
+                        xeddsa_signature=xeddsa_sig,
+                        relay_pubkey=relay_pubkey,
                     )
                     receipt = StorageReceipt(
                         relay_url=url,
@@ -337,11 +413,19 @@ class RelayManager:
                         server_seq=server_seq,
                         server_ts=server_ts,
                         signature=relay_sig,
-                        verified=verified,
+                        verified=hmac_verified,
+                        xeddsa_signature=xeddsa_sig,
+                        relay_pubkey=relay_pubkey,
+                        xeddsa_verified=xeddsa_verified,
                     )
                     receipts.append(receipt)
-                    if verified:
-                        logger.debug("RCV-01: Receipt verified from %s", url)
+                    if hmac_verified or xeddsa_verified:
+                        logger.debug(
+                            "RCV-01: Receipt verified from %s (hmac=%s, xeddsa=%s)",
+                            url,
+                            hmac_verified,
+                            xeddsa_verified,
+                        )
                     else:
                         logger.warning(
                             "RCV-01: Receipt verification failed from %s", url

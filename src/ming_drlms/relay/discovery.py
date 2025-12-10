@@ -33,7 +33,10 @@ class DiscoveryPriority(IntEnum):
 
 @dataclass
 class RelayEndpoint:
-    """Represents a discovered Relay endpoint."""
+    """Represents a discovered Relay endpoint.
+
+    Phase 17A: Extended with pubkey for XEdDSA verification.
+    """
 
     url: str
     priority: DiscoveryPriority
@@ -41,6 +44,8 @@ class RelayEndpoint:
     metadata: dict[str, Any] = field(default_factory=dict)
     region: Optional[str] = None
     enabled: bool = True
+    # Phase 17A: Relay's X25519 public key for XEdDSA verification
+    pubkey: Optional[str] = None
 
     def __hash__(self) -> int:
         return hash(self.url)
@@ -152,6 +157,7 @@ class RelayDiscovery:
                         metadata=relay,
                         region=relay.get("region"),
                         enabled=relay.get("enabled", True),
+                        pubkey=relay.get("pubkey"),  # Phase 17A
                     )
                 )
             logger.debug("Loaded %d relays from static config", len(endpoints))
@@ -177,6 +183,7 @@ class RelayDiscovery:
                         priority=DiscoveryPriority.LOCAL_CACHE,
                         last_seen=entry.get("last_seen"),
                         metadata=entry,
+                        pubkey=entry.get("pubkey"),  # Phase 17A
                     )
                 )
             logger.debug("Loaded %d relays from cache", len(endpoints))
@@ -255,6 +262,7 @@ class RelayDiscovery:
                         priority=DiscoveryPriority.WELL_KNOWN,
                         metadata=relay,
                         region=relay.get("region"),
+                        pubkey=relay.get("pubkey"),  # Phase 17A
                     )
                 )
             logger.debug("Discovered %d relays via Well-Known", len(endpoints))

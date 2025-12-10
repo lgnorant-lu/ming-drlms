@@ -618,6 +618,12 @@ PYTHONPATH="${ROOT_DIR}/src" timeout_cmd 300s "${PYTHON_BIN[@]}" -m coverage run
   "${ROOT_DIR}/tests/python/test_cli_relay_commands.py" \
   "${ROOT_DIR}/tests/python/test_cli_room_commands.py" || true
 
+# Phase 17A-B: XEdDSA signing/verification tests
+printf '%s\n' "--> Running Phase 17 XEdDSA tests..."
+PYTHONPATH="${ROOT_DIR}/src" timeout_cmd 300s "${PYTHON_BIN[@]}" -m coverage run --branch -a -m pytest -q \
+  "${ROOT_DIR}/tests/python/test_relay_xeddsa_signing.py" \
+  "${ROOT_DIR}/tests/python/test_relay_xeddsa_verify.py" || true
+
 printf '%s\n' "--> Generating Python coverage report..."
 mkdir -p "${ROOT_DIR}/coverage/html/python"
 COVERAGE_INCLUDE_PATTERN="*/ming_drlms/*"
