@@ -4,6 +4,7 @@ import base64
 import json
 import os
 import time
+from pathlib import Path
 from typing import Optional
 
 import typer
@@ -22,6 +23,16 @@ from ..core.mproto_v2_client import MP2Client
 # Phase 15C: IdentityManager integration
 from ..core.identity_manager import IdentityManager
 from ..core.relay_signer import RelaySigner
+
+# Phase 16A/16C: Multi-relay config and sync
+from ..relay import (
+    RelaysConfig,
+    get_default_config_path,
+    RelayManager,
+    HealthChecker,
+    MultiRelaySyncManager,
+    SyncCursorStore,
+)
 
 relay_app = typer.Typer(help="Relay PoC commands")
 
@@ -48,11 +59,11 @@ def relay_post(
     """[LEGACY] Post event using LocalKeyStore + CFFI signing.
 
     WARNING: This command uses the legacy signing path (Signal XEdDSA via CFFI).
-    For Phase 15+ projects, use 'relay post-simple' instead, which uses
-    IdentityManager + Ed25519 signing.
+    For Phase 15.5+ projects, use 'relay post-simple' instead, which uses
+    IdentityManager + XEdDSA signing via Signal Protocol (unified identity).
 
     This command is retained for backward compatibility with existing E2EE
-    encryption workflows that require Signal protocol integration.
+    encryption workflows that require direct Signal store integration.
     """
     # Legacy deprecation notice
     typer.echo(
@@ -364,6 +375,107 @@ def relay_post_simple(
     except Exception as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
+
+
+@relay_app.command("post-multi")
+def relay_post_multi(
+    room: str = typer.Option(..., "--room", "-r", help="Target room"),
+    ciphertext: str = typer.Option(..., "--ciphertext", help="Base64 ciphertext"),
+    client_event_hash: str = typer.Option(
+        ..., "--client-hash", help="Client event hash"
+    ),
+    content_len: int = typer.Option(0, "--content-len"),
+    client_ts: int = typer.Option(0, "--client-ts"),
+    config_path: str = typer.Option(
+        "", "--config", help="Path to relays.toml (optional)"
+    ),
+):
+    """Post an event to all healthy relays from relays.toml.
+
+    This command expects already prepared ciphertext and client_event_hash.
+    """
+    # Load relays config
+    cfg_path = Path(config_path) if config_path else get_default_config_path()
+    cfg = RelaysConfig.load(cfg_path)
+    relays = [r.url for r in cfg.get_primary_relays()]
+    if not relays:
+        typer.echo(f"No relays configured in {cfg_path}", err=True)
+        raise typer.Exit(1)
+
+    # Build RelayManager
+    health = HealthChecker()
+    health.set_relays(relays)
+    mgr = RelayManager(health_checker=health)
+    for url in relays:
+        mgr.add_relay(url)
+
+    # Post in parallel
+    import asyncio
+
+    async def _run():
+        return await mgr.post_event(
+            room=room,
+            ciphertext=ciphertext,
+            content_len=content_len,
+            client_event_hash=client_event_hash,
+            client_ts=client_ts or int(time.time()),
+        )
+
+    result = asyncio.run(_run())
+    typer.echo(
+        {
+            "status": result.status.value,
+            "success_count": result.success_count,
+            "total_relays": result.total_relays,
+            "failed_relays": result.failed_relays,
+            "server_seqs": result.server_seqs,
+        }
+    )
+
+
+@relay_app.command("sync-multi")
+def relay_sync_multi(
+    room: str = typer.Option(..., "--room", "-r"),
+    config_path: str = typer.Option(
+        "", "--config", help="Path to relays.toml (optional)"
+    ),
+):
+    """Sync a room from multiple relays using MultiRelaySyncManager."""
+    cfg_path = Path(config_path) if config_path else get_default_config_path()
+    cfg = RelaysConfig.load(cfg_path)
+    relays = [r.url for r in cfg.get_primary_relays()]
+    if not relays:
+        typer.echo(f"No relays configured in {cfg_path}", err=True)
+        raise typer.Exit(1)
+
+    # Build RelayManager
+    health = HealthChecker()
+    health.set_relays(relays)
+    mgr = RelayManager(health_checker=health)
+    for url in relays:
+        mgr.add_relay(url)
+
+    # Cursor store under config dir
+    db_path = cfg_path.parent / "relay_sync_cursors.db"
+    store = SyncCursorStore(db_path)
+    sync_mgr = MultiRelaySyncManager(cursor_store=store, relay_manager=mgr)
+
+    import asyncio
+
+    async def _run():
+        return await sync_mgr.sync_room(room, relays=relays)
+
+    result = asyncio.run(_run())
+    typer.echo(
+        {
+            "room": room,
+            "relays_synced": result.relays_synced,
+            "new_events": result.new_events,
+            "success": result.success,
+            "errors": result.errors,
+            "duration_ms": result.duration_ms,
+        }
+    )
 
 
 @relay_app.command("identity")

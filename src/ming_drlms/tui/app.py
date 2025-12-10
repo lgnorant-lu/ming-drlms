@@ -24,6 +24,9 @@ import logging
 class DRLMSApp(App):
     """DRLMS TUI chat application."""
 
+    TITLE = "DRLMS Chat"
+    SUB_TITLE = "Valley Messenger"
+
     # Global styles using CSS variables
     CSS = """
     Screen {

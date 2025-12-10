@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from rich.text import Text
 from textual.app import ComposeResult
-from textual.containers import Container
+from textual.containers import Container, Horizontal
 from textual.screen import Screen
 from textual.widgets import (
     Header,
@@ -49,29 +49,40 @@ class ChatScreen(Screen):
 
     CSS = """
     ChatScreen {
-        layout: horizontal;
+        layout: vertical;
         background: $background;
     }
+
+    /* Main content container (horizontal: sidebar + chat-area) */
+    #main-content {
+        layout: horizontal;
+        height: 1fr;
+    }
     
-    #connection-status {
+    /* Bottom status bar container */
+    #bottom-status {
         dock: bottom;
+        height: 1;
+        layout: horizontal;
+        background: $surface;
+    }
+
+    #connection-status {
+        width: 1fr;
         height: 1;
         background: $surface;
         color: $text-muted;
         padding: 0 2;
         content-align: center middle;
         text-style: italic;
-        layer: status;
     }
 
     #e2ee-status {
-        dock: top;
-        height: 1;
         width: 4;
+        height: 1;
         content-align: center middle;
         background: $surface;
         color: $text-muted;
-        dock: right;
     }
     
     #e2ee-status.encrypted {
@@ -97,6 +108,35 @@ class ChatScreen(Screen):
     #connection-status.disconnected {
         background: $error;
         color: $text;
+    }
+
+    /* Phase 16: Relay status bar (dock at top under Header) */
+    #relay-status-bar {
+        height: 1;
+        background: $surface;
+        color: $text-muted;
+        padding: 0 1;
+        display: none;
+    }
+
+    #relay-status-bar.visible {
+        display: block;
+    }
+
+    .status-item {
+        margin: 0 1;
+    }
+
+    .status-ok {
+        color: $success;
+    }
+
+    .status-warn {
+        color: $warning;
+    }
+
+    .status-error {
+        color: $error;
     }
 
     #sidebar {
@@ -284,11 +324,19 @@ class ChatScreen(Screen):
 
     def compose(self) -> ComposeResult:
         """Create chat interface."""
-        yield Header(show_clock=True)
+        header = Header(show_clock=True)
+        header.icon = "⚙"  # Gear icon for settings
+        yield header
 
-        # Connection status indicator
-        yield Static("✕ Disconnected", id="connection-status", classes="disconnected")
-        yield Static("🔓", id="e2ee-status")
+        # Phase 16: Relay status bar (network/sync/queue)
+        yield Static("", id="relay-status-bar")
+
+        # Bottom status bar (connection + e2ee)
+        with Horizontal(id="bottom-status"):
+            yield Static(
+                "✕ Disconnected", id="connection-status", classes="disconnected"
+            )
+            yield Static("🔓", id="e2ee-status")
 
         tm = self.app.theme_manager
         icon_room = tm.get_asset("icon_room", "[R]")
@@ -296,32 +344,34 @@ class ChatScreen(Screen):
         icon_deep = tm.get_asset("icon_deep", "[D]")
         prompt = tm.get_asset("prompt", ">")
 
-        # Sidebar
-        with Container(id="sidebar"):
-            yield Label("=== PLACES ===", id="sidebar-header")
-            yield ListView(
-                ListItem(Label(f"{icon_room} Town Square")),
-                ListItem(Label(f"{icon_home} Farm House")),
-                ListItem(Label(f"{icon_deep} Deep Woods")),
-                id="room-list",
-            )
-            yield Label("=== MEMBERS ===", id="member-header")
-            yield ListView(id="member-list")
-
-        # Chat area
-        with Container(id="chat-area"):
-            yield Label(f"~ {self.current_room} ~", id="chat-header")
-            yield MessageList()
-            with Container(id="input-bar"):
-                yield Label(prompt, id="prompt-label")
-                yield HistoryInput(
-                    placeholder="Say something... (or /help for commands)",
-                    id="message-input",
+        # Main content container (horizontal layout for sidebar + chat-area)
+        with Container(id="main-content"):
+            # Sidebar
+            with Container(id="sidebar"):
+                yield Label("=== PLACES ===", id="sidebar-header")
+                yield ListView(
+                    ListItem(Label(f"{icon_room} Town Square")),
+                    ListItem(Label(f"{icon_home} Farm House")),
+                    ListItem(Label(f"{icon_deep} Deep Woods")),
+                    id="room-list",
                 )
-                # File upload button
-                upload_icon = tm.get_asset("icon_upload", "📎")
-                yield Button(upload_icon, id="upload-button")
-                yield Label("", id="transfer-status")
+                yield Label("=== MEMBERS ===", id="member-header")
+                yield ListView(id="member-list")
+
+            # Chat area
+            with Container(id="chat-area"):
+                yield Label(f"~ {self.current_room} ~", id="chat-header")
+                yield MessageList()
+                with Container(id="input-bar"):
+                    yield Label(prompt, id="prompt-label")
+                    yield HistoryInput(
+                        placeholder="Say something... (or /help for commands)",
+                        id="message-input",
+                    )
+                    # File upload button
+                    upload_icon = tm.get_asset("icon_upload", "📎")
+                    yield Button(upload_icon, id="upload-button")
+                    yield Label("", id="transfer-status")
 
         yield Footer()
 
@@ -349,6 +399,9 @@ class ChatScreen(Screen):
         self.app.run_worker(
             lambda: self._refresh_members(self.current_room), thread=True
         )
+
+        # Phase 16: Start relay status bar updates
+        self._start_relay_status_updates()
 
     def _fetch_rooms(self) -> None:
         """Fetch room list from server."""
@@ -497,6 +550,82 @@ class ChatScreen(Screen):
             widget.update(f"{lock}{suffix}")
         except Exception:
             pass
+
+    # -------------------------------------------------------------------------
+    # Phase 16: Relay Status Bar
+    # -------------------------------------------------------------------------
+
+    def _start_relay_status_updates(self) -> None:
+        """Start periodic relay status bar updates."""
+        # Only show status bar when using relay backend
+        if not self.controller.is_relay_backend():
+            return
+
+        # Show the status bar
+        try:
+            bar = self.query_one("#relay-status-bar", Static)
+            bar.add_class("visible")
+        except Exception:
+            return
+
+        # Initial update
+        self._update_relay_status_bar()
+
+        # Schedule periodic updates (every 5 seconds)
+        self.set_interval(5.0, self._update_relay_status_bar)
+
+    def _update_relay_status_bar(self) -> None:
+        """Update the relay status bar with current state."""
+        try:
+            bar = self.query_one("#relay-status-bar", Static)
+        except Exception:
+            return
+
+        parts = []
+
+        # Network status
+        net_status = self.controller.get_network_status()
+        if net_status:
+            online = net_status.get("online", False)
+            if online:
+                parts.append("[green]● NET[/green]")
+            else:
+                parts.append("[red]○ NET[/red]")
+
+        # Relay health
+        relay_health = self.controller.get_relay_health()
+        if relay_health:
+            healthy = sum(1 for r in relay_health if r.get("healthy", False))
+            total = len(relay_health)
+            if healthy == total and total > 0:
+                parts.append(f"[green]⚡ {healthy}/{total} Relay[/green]")
+            elif healthy > 0:
+                parts.append(f"[yellow]⚡ {healthy}/{total} Relay[/yellow]")
+            else:
+                parts.append(f"[red]⚡ {healthy}/{total} Relay[/red]")
+
+        # Queue status
+        queue_stats = self.controller.get_queue_stats()
+        if queue_stats:
+            pending = queue_stats.get("pending", 0)
+            if pending == 0:
+                parts.append("[green]📤 Queue: 0[/green]")
+            elif pending < 10:
+                parts.append(f"[yellow]📤 Queue: {pending}[/yellow]")
+            else:
+                parts.append(f"[red]📤 Queue: {pending}[/red]")
+
+        # Last sync time
+        sync_info = self.controller.get_sync_info()
+        if sync_info:
+            last_sync = sync_info.get("last_sync_ago", "")
+            if last_sync:
+                parts.append(f"🔄 {last_sync}")
+
+        if parts:
+            bar.update(" │ ".join(parts))
+        else:
+            bar.update("")
 
     def _connect_to_room(self, room_name: str) -> None:
         """Connect to a chat room with auto-reconnect support."""

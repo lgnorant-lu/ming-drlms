@@ -8,7 +8,7 @@ import time
 import hashlib
 from typing import Optional, Callable, Union
 
-from .test_sync import TestSyncEvent, TestSyncHook, NullSyncHook
+from .test_sync import SyncEvent, TestSyncHook, NullSyncHook
 from ..core.event_store import LocalEventStore, VerificationStatus, LocalEvent
 from ..core.event_hash import compute_event_id
 from ..core.identity_manager import IdentityManager
@@ -32,8 +32,32 @@ from ..app_settings import (
     load_settings,
     get_backend,
     get_relay_settings,
+    get_relay_urls,
 )
 from .. import log
+
+# Phase 16A-D: Multi-relay manager, health, dedup, merkle, offline queue, network monitor
+try:
+    from ..relay import (
+        RelayManager,
+        HealthChecker,
+        MultiRelaySyncManager,
+        SyncCursorStore,
+        RelaysConfig,
+        get_default_config_path,
+        EventDeduplicator,
+        EventValidator,
+        create_xeddsa_verifier,
+        MerkleTree,
+        OfflineQueue,
+        NetworkMonitor,
+        NetworkStatus,
+        NetworkEvent,
+    )
+
+    _HAS_RELAY_MANAGER = True
+except ImportError:
+    _HAS_RELAY_MANAGER = False
 # Phase 15.5: Ed25519 imports removed - XEdDSA uses X25519 public key directly
 
 logger = log.get_logger("tui.logic")
@@ -86,6 +110,22 @@ class ChatController:
         self._relay_base_url: str = self._resolve_relay_base_url()
         self._relay_room: Optional[str] = None
         self._relay_since_seq: int = 0
+        # Phase 16A: Multi-relay manager (lazy init)
+        self._relay_manager: Optional[RelayManager] = None
+        self._health_checker: Optional[HealthChecker] = None
+        self._relays_config: Optional[RelaysConfig] = None
+        # Phase 16B: Event deduplication, validation, and Merkle tree
+        self._event_deduplicator: Optional[EventDeduplicator] = None
+        self._event_validator: Optional[EventValidator] = None
+        self._local_merkle: Optional[MerkleTree] = None
+        # Phase 16C: Multi-relay sync manager
+        self._sync_manager: Optional[MultiRelaySyncManager] = None
+        self._cursor_store: Optional[SyncCursorStore] = None
+        # Phase 16D: Offline queue and network monitor
+        self._offline_queue: Optional[OfflineQueue] = None
+        self._network_monitor: Optional[NetworkMonitor] = None
+        # Phase 16D: Flag for network recovery notification (cross-thread)
+        self._network_recovered: threading.Event = threading.Event()
         # Local event store for offline access (14F)
         self._event_store: Optional[LocalEventStore] = None
         try:
@@ -227,6 +267,52 @@ class ChatController:
                 pass
             self._relay_thread = None
 
+        # Phase 16A: Stop health checker monitoring with proper task cancellation
+        if self._health_checker is not None:
+            try:
+                self._health_checker._running = False
+                if hasattr(self, "_health_loop") and self._health_loop:
+                    task = getattr(self._health_checker, "_task", None)
+                    if task:
+                        self._health_loop.call_soon_threadsafe(task.cancel)
+            except Exception:
+                pass
+            self._health_checker = None
+
+        self._relay_manager = None
+        self._relays_config = None
+        # Phase 16B: Clean up dedup, validator, merkle
+        self._event_deduplicator = None
+        self._event_validator = None
+        self._local_merkle = None
+        # Phase 16C: Clean up sync manager
+        self._sync_manager = None
+        self._cursor_store = None
+
+        # Phase 16D: Stop network monitor with proper task cancellation
+        if self._network_monitor is not None:
+            try:
+                self._network_monitor._running = False
+                if hasattr(self, "_network_loop") and self._network_loop:
+                    task = getattr(self._network_monitor, "_task", None)
+                    if task:
+                        self._network_loop.call_soon_threadsafe(task.cancel)
+            except Exception:
+                pass
+            self._network_monitor = None
+
+        # Phase 16D: Stop offline queue with proper task cancellation
+        if self._offline_queue is not None:
+            try:
+                self._offline_queue._running = False
+                if hasattr(self, "_queue_loop") and self._queue_loop:
+                    task = getattr(self._offline_queue, "_processing_task", None)
+                    if task:
+                        self._queue_loop.call_soon_threadsafe(task.cancel)
+            except Exception:
+                pass
+            self._offline_queue = None
+
     def get_local_events(
         self, room: str, since_seq: int = 0, limit: int = 50
     ) -> list[LocalEvent]:
@@ -352,20 +438,47 @@ class ChatController:
                     else "none",
                 )
 
-                # POST to Relay
+                # POST to Relay (Phase 16A: prefer RelayManager for parallel writes)
                 ciphertext = envelope.to_ciphertext_b64()
-                client = RelayHTTPClient(self._relay_base_url)
-                try:
-                    client.post_event(
-                        room=self._relay_room or "",
-                        ciphertext=ciphertext,
-                        content_len=len(content_bytes),
-                        client_event_hash=envelope.client_hash,
-                        client_ts=envelope.timestamp,
-                    )
-                    self._test_sync.notify_sync(TestSyncEvent.MESSAGE_SENT)
-                finally:
-                    client.close()
+                if _HAS_RELAY_MANAGER and self._relay_manager:
+                    import asyncio
+
+                    async def _post():
+                        return await self._relay_manager.post_event(
+                            room=self._relay_room or "",
+                            ciphertext=ciphertext,
+                            content_len=len(content_bytes),
+                            client_event_hash=envelope.client_hash,
+                            client_ts=envelope.timestamp,
+                        )
+
+                    result = asyncio.run(_post())
+                    if result.success:
+                        self._test_sync.notify_sync(SyncEvent.MESSAGE_SENT)
+                        logger.debug(
+                            "Multi-relay write: %d/%d succeeded",
+                            result.success_count,
+                            result.total_relays,
+                        )
+                    else:
+                        logger.warning(
+                            "Multi-relay write failed: %s",
+                            result.errors,
+                        )
+                else:
+                    # Legacy single relay path
+                    client = RelayHTTPClient(self._relay_base_url)
+                    try:
+                        client.post_event(
+                            room=self._relay_room or "",
+                            ciphertext=ciphertext,
+                            content_len=len(content_bytes),
+                            client_event_hash=envelope.client_hash,
+                            client_ts=envelope.timestamp,
+                        )
+                        self._test_sync.notify_sync(SyncEvent.MESSAGE_SENT)
+                    finally:
+                        client.close()
             except Exception as exc:
                 try:
                     self._on_error(exc)
@@ -385,7 +498,7 @@ class ChatController:
                 pass
             try:
                 self.client.publish(message.encode("utf-8"), ephemeral=use_ephemeral)
-                self._test_sync.notify_sync(TestSyncEvent.MESSAGE_SENT)
+                self._test_sync.notify_sync(SyncEvent.MESSAGE_SENT)
             except Exception as exc:
                 # In strict relay mode, treat any send failure as a hard signing
                 # requirement error rather than leaking low-level MP2 issues.
@@ -508,7 +621,7 @@ class ChatController:
                         )
                     except Exception:
                         pass
-                self._test_sync.notify_sync(TestSyncEvent.FILE_UPLOAD_COMPLETE)
+                self._test_sync.notify_sync(SyncEvent.FILE_UPLOAD_COMPLETE)
                 return
             finally:
                 http.close()
@@ -570,7 +683,7 @@ class ChatController:
                 )
             except Exception:
                 pass
-            self._test_sync.notify_sync(TestSyncEvent.FILE_UPLOAD_COMPLETE)
+            self._test_sync.notify_sync(SyncEvent.FILE_UPLOAD_COMPLETE)
         finally:
             try:
                 client.close()
@@ -656,7 +769,7 @@ class ChatController:
                         )
                 except Exception:
                     pass
-                self._test_sync.notify_sync(TestSyncEvent.FILE_DOWNLOAD_COMPLETE)
+                self._test_sync.notify_sync(SyncEvent.FILE_DOWNLOAD_COMPLETE)
             finally:
                 http.close()
             return
@@ -704,7 +817,7 @@ class ChatController:
                     )
             except Exception:
                 pass
-            self._test_sync.notify_sync(TestSyncEvent.FILE_DOWNLOAD_COMPLETE)
+            self._test_sync.notify_sync(SyncEvent.FILE_DOWNLOAD_COMPLETE)
         except Exception as e:
             raise RuntimeError(str(e))
         finally:
@@ -782,9 +895,192 @@ class ChatController:
         """Set a callback for upload/download progress reporting."""
         self._progress_cb = cb
 
+    def sync_from_relays(self, room: Optional[str] = None) -> dict:
+        """Phase 16C: Trigger multi-relay sync for a room.
+
+        Args:
+            room: Room to sync (default: current relay room)
+
+        Returns:
+            Dict with sync result: {success, new_events, relays_synced, errors}
+        """
+        room_id = room or self._relay_room
+        if not room_id:
+            return {"success": False, "error": "No room specified"}
+        if not self._sync_manager:
+            return {"success": False, "error": "MultiRelaySyncManager not initialized"}
+        try:
+            # Use thread-based async execution to avoid conflicts with Textual's event loop
+            result = self._run_async_in_thread(self._sync_manager.sync_room(room_id))
+            # Update last sync timestamp only on success
+            if getattr(result, "success", False):
+                import time
+
+                self._sync_manager._last_sync_ts = time.time()
+            return {
+                "success": result.success,
+                "new_events": result.new_events,
+                "relays_synced": result.relays_synced,
+                "errors": result.errors,
+            }
+        except Exception as e:
+            import traceback
+
+            logger.error("sync_from_relays failed: %s\n%s", e, traceback.format_exc())
+            return {"success": False, "error": str(e)}
+
+    def is_relay_backend(self) -> bool:
+        """Check if using relay backend.
+
+        Returns:
+            True if current backend is relay.
+        """
+        return self._backend == "relay"
+
+    def get_network_status(self) -> dict:
+        """Phase 16D: Get network monitor status.
+
+        Returns:
+            Dict with online status and latency info.
+        """
+        if not self._network_monitor:
+            return {}
+        try:
+            status = self._network_monitor.last_status
+            if not status:
+                return {}
+            return {
+                "online": status.online,
+                "latency_ms": status.latency_ms,
+                "last_check": status.last_check,
+            }
+        except Exception:
+            return {}
+
+    def get_sync_info(self) -> dict:
+        """Get sync status information.
+
+        Returns:
+            Dict with last sync time and status.
+        """
+        if not self._sync_manager:
+            return {}
+        try:
+            import time
+
+            last_sync = getattr(self._sync_manager, "_last_sync_ts", 0)
+            if last_sync:
+                ago = int(time.time() - last_sync)
+                if ago < 60:
+                    last_sync_ago = f"{ago}s ago"
+                elif ago < 3600:
+                    last_sync_ago = f"{ago // 60}m ago"
+                else:
+                    last_sync_ago = f"{ago // 3600}h ago"
+            else:
+                last_sync_ago = "never"
+            return {
+                "last_sync_ts": last_sync,
+                "last_sync_ago": last_sync_ago,
+            }
+        except Exception:
+            return {}
+
+    def get_relay_health(self) -> list[dict]:
+        """Phase 16A: Get health status of all relays.
+
+        Returns:
+            List of dicts with relay URL, score, latency, etc.
+        """
+        if not self._health_checker:
+            return []
+        result = []
+        for url in self._health_checker._relays:
+            score = self._health_checker.get_score(url)
+            result.append(
+                {
+                    "url": url,
+                    "score": score.score,
+                    "healthy": score.is_healthy(),
+                    "avg_latency_ms": score.avg_latency_ms,
+                    "consecutive_failures": score.consecutive_failures,
+                }
+            )
+        return result
+
+    def get_queue_stats(self) -> dict:
+        """OFFQ-01: Get offline queue statistics.
+
+        Returns:
+            Dict with pending/processing/success/failed counts.
+        """
+        if not self._offline_queue:
+            return {"error": "OfflineQueue not initialized"}
+        try:
+            stats = self._offline_queue.get_stats()
+            stats["processing_active"] = self._offline_queue.is_processing()
+            return stats
+        except Exception as e:
+            return {"error": str(e)}
+
+    def clear_completed_queue(self) -> dict:
+        """OFFQ-01: Clear completed (success/failed) items from queue.
+
+        Returns:
+            Dict with count of items removed.
+        """
+        if not self._offline_queue:
+            return {"error": "OfflineQueue not initialized", "cleared": 0}
+        try:
+            count = self._offline_queue.clear_completed()
+            return {"cleared": count}
+        except Exception as e:
+            return {"error": str(e), "cleared": 0}
+
+    def retry_queue_now(self) -> dict:
+        """OFFQ-01: Trigger immediate queue processing.
+
+        Returns:
+            Dict with processing result.
+        """
+        if not self._offline_queue:
+            return {"error": "OfflineQueue not initialized"}
+        try:
+            # Use thread-based async execution to avoid conflicts with Textual's event loop
+            result = self._run_async_in_thread(self._offline_queue.process_queue())
+            return {
+                "processed": result.processed,
+                "succeeded": result.succeeded,
+                "failed": result.failed,
+                "retrying": result.retrying,
+                "errors": result.errors[:5],  # Limit error list
+            }
+        except Exception as e:
+            return {"error": str(e)}
+
     # ------------------------------------------------------------------
     # Backend helpers
     # ------------------------------------------------------------------
+    def _run_async_in_thread(self, coro):
+        """Run an async coroutine in a separate thread with its own event loop.
+
+        This avoids conflicts with Textual's main event loop.
+        """
+        import asyncio
+        import concurrent.futures
+
+        def _run():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                return loop.run_until_complete(coro)
+            finally:
+                loop.close()
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(_run)
+            return future.result(timeout=30.0)
+
     def _load_backend(self) -> str:
         try:
             s = load_settings()
@@ -808,6 +1104,199 @@ class ChatController:
         self._relay_room = room_name
         self._relay_since_seq = 0
         self._relay_stop.clear()
+
+        # Phase 16A-D: Initialize all relay components if available
+        if _HAS_RELAY_MANAGER:
+            try:
+                # Load relays.toml configuration
+                cfg_path = get_default_config_path()
+                self._relays_config = RelaysConfig.load(cfg_path)
+                health_interval = self._relays_config.health.check_interval
+                logger.debug(
+                    "Loaded relays.toml: check_interval=%.1fs", health_interval
+                )
+
+                s = load_settings()
+                relay_urls = get_relay_urls(s)
+                if relay_urls:
+                    # Phase 16B: Initialize EventDeduplicator and EventValidator
+                    self._event_deduplicator = EventDeduplicator()
+                    xeddsa_verifier = create_xeddsa_verifier()
+                    self._event_validator = EventValidator(
+                        signature_verifier=xeddsa_verifier,
+                        strict_mode=False,  # Warnings only in non-strict mode
+                    )
+                    # Phase 16B: Initialize client-side MerkleTree for this room
+                    self._local_merkle = MerkleTree(room_id=room_name)
+                    logger.info(
+                        "Phase 16B: Initialized EventDeduplicator, Validator, MerkleTree"
+                    )
+
+                    # Phase 16D: Initialize OfflineQueue
+                    queue_db = _state_dir() / "offline_queue.db"
+                    self._offline_queue = OfflineQueue(
+                        db_path=queue_db,
+                        max_retries=self._relays_config.offline.max_retries,
+                        base_delay=self._relays_config.offline.base_delay,
+                        max_delay=self._relays_config.offline.max_delay,
+                    )
+                    logger.info("Phase 16D: Initialized OfflineQueue")
+
+                    # Phase 16A: Initialize HealthChecker and RelayManager
+                    self._health_checker = HealthChecker(
+                        check_interval=self._relays_config.health.check_interval,
+                        ping_timeout=self._relays_config.health.ping_timeout,
+                        sync_test_timeout=self._relays_config.health.sync_test_timeout,
+                        min_score=self._relays_config.health.min_score,
+                    )
+                    self._health_checker.set_relays(relay_urls)
+                    self._relay_manager = RelayManager(
+                        health_checker=self._health_checker,
+                        offline_queue=self._offline_queue,  # Phase 16D integration
+                    )
+                    for url in relay_urls:
+                        self._relay_manager.add_relay(url)
+                    logger.info(
+                        "Phase 16A: Initialized RelayManager with %d relays",
+                        len(relay_urls),
+                    )
+
+                    # Start background health monitoring (non-blocking)
+                    # Store references to event loops for proper cleanup
+                    self._health_loop = None
+
+                    def _start_health_monitor():
+                        import asyncio
+
+                        try:
+                            loop = asyncio.new_event_loop()
+                            asyncio.set_event_loop(loop)
+                            self._health_loop = loop
+                            # Start monitoring and keep the loop running
+                            loop.run_until_complete(
+                                self._health_checker.start_monitoring()
+                            )
+                            # Run until the task completes (i.e., until stopped)
+                            task = getattr(self._health_checker, "_task", None)
+                            if task:
+                                loop.run_until_complete(task)
+                        except asyncio.CancelledError:
+                            pass
+                        except Exception as e:
+                            logger.debug("Health monitor stopped: %s", e)
+                        finally:
+                            loop.close()
+
+                    threading.Thread(
+                        target=_start_health_monitor, daemon=True, name="health-monitor"
+                    ).start()
+
+                    # Phase 16D: Initialize NetworkMonitor with recovery callback
+                    self._network_monitor = NetworkMonitor(
+                        check_interval=self._relays_config.health.check_interval,
+                        timeout=self._relays_config.health.ping_timeout,
+                    )
+                    self._network_monitor.set_known_relays(relay_urls)
+                    self._network_recovered.clear()
+
+                    async def _on_network_event(
+                        event: NetworkEvent, status: NetworkStatus
+                    ) -> None:
+                        """Handle network state changes."""
+                        if event == NetworkEvent.RECOVERED:
+                            logger.info(
+                                "NetworkMonitor: detected recovery, signaling sync"
+                            )
+                            self._network_recovered.set()
+
+                    self._network_monitor.add_listener(_on_network_event)
+
+                    self._network_loop = None
+
+                    def _start_network_monitor():
+                        import asyncio
+
+                        try:
+                            loop = asyncio.new_event_loop()
+                            asyncio.set_event_loop(loop)
+                            self._network_loop = loop
+                            # Do an initial connectivity check immediately
+                            loop.run_until_complete(
+                                self._network_monitor.check_connectivity()
+                            )
+                            # Start and run until the task completes
+                            loop.run_until_complete(self._network_monitor.start())
+                            task = getattr(self._network_monitor, "_task", None)
+                            if task:
+                                loop.run_until_complete(task)
+                        except asyncio.CancelledError:
+                            pass
+                        except Exception as e:
+                            logger.debug("Network monitor stopped: %s", e)
+                        finally:
+                            loop.close()
+
+                    threading.Thread(
+                        target=_start_network_monitor,
+                        daemon=True,
+                        name="network-monitor",
+                    ).start()
+                    logger.info(
+                        "Phase 16D: Initialized NetworkMonitor with recovery listener"
+                    )
+
+                    # OFFQ-01: Start OfflineQueue background processing
+                    if self._offline_queue:
+                        self._offline_queue.set_relay_manager(self._relay_manager)
+
+                        self._queue_loop = None
+
+                        def _start_offline_queue_processor():
+                            import asyncio
+
+                            try:
+                                loop = asyncio.new_event_loop()
+                                asyncio.set_event_loop(loop)
+                                self._queue_loop = loop
+                                loop.run_until_complete(
+                                    self._offline_queue.start_processing(interval=10.0)
+                                )
+                                if self._offline_queue._processing_task:
+                                    loop.run_until_complete(
+                                        self._offline_queue._processing_task
+                                    )
+                            except asyncio.CancelledError:
+                                pass
+                            except Exception as e:
+                                logger.debug("OfflineQueue processor stopped: %s", e)
+                            finally:
+                                loop.close()
+
+                        threading.Thread(
+                            target=_start_offline_queue_processor,
+                            daemon=True,
+                            name="offline-queue",
+                        ).start()
+                        logger.info(
+                            "OFFQ-01: Started OfflineQueue background processor"
+                        )
+
+                    # Phase 16C: Initialize MultiRelaySyncManager with all components
+                    cursor_db = _state_dir() / "sync_cursors.db"
+                    self._cursor_store = SyncCursorStore(str(cursor_db))
+                    self._sync_manager = MultiRelaySyncManager(
+                        cursor_store=self._cursor_store,
+                        relay_manager=self._relay_manager,
+                        deduplicator=self._event_deduplicator,
+                        validator=self._event_validator,
+                        local_merkle=self._local_merkle,
+                    )
+                    logger.info(
+                        "Phase 16C: Initialized MultiRelaySyncManager with dedup/validator/merkle"
+                    )
+            except Exception as e:
+                logger.warning("Failed to init RelayManager: %s", e)
+                self._relay_manager = None
 
         # Build identity resolver (mapping file + LocalKeyStore)
         mapping_path = os.environ.get("DRLMS_SIGNING_PUBKEYS_FILE")
@@ -871,10 +1360,47 @@ class ChatController:
             try:
                 try:
                     self._on_connection_state(ConnectionState.CONNECTED)
-                    self._test_sync.notify_sync(TestSyncEvent.CONNECTION_READY)
+                    self._test_sync.notify_sync(SyncEvent.CONNECTION_READY)
                 except Exception:
                     pass
                 while not self._relay_stop.is_set():
+                    # Phase 16D: Check if network recovered and trigger sync + queue processing
+                    if self._network_recovered.is_set():
+                        self._network_recovered.clear()
+                        logger.info(
+                            "Network recovered, triggering deep sync and queue flush"
+                        )
+                        # OFFQ-01: Trigger immediate OfflineQueue processing on recovery
+                        if self._offline_queue:
+                            try:
+                                import asyncio
+
+                                loop = asyncio.new_event_loop()
+                                asyncio.set_event_loop(loop)
+                                queue_result = loop.run_until_complete(
+                                    self._offline_queue.process_queue()
+                                )
+                                logger.info(
+                                    "Recovery queue flush: %d processed, %d succeeded, %d retrying",
+                                    queue_result.processed,
+                                    queue_result.succeeded,
+                                    queue_result.retrying,
+                                )
+                                loop.close()
+                            except Exception as q_err:
+                                logger.warning("Recovery queue flush failed: %s", q_err)
+                        # Deep sync from relays
+                        try:
+                            result = self.sync_from_relays()
+                            if result.get("success"):
+                                logger.info(
+                                    "Recovery sync: %d new events from %d relays",
+                                    result.get("new_events", 0),
+                                    result.get("relays_synced", 0),
+                                )
+                        except Exception as sync_err:
+                            logger.warning("Recovery sync failed: %s", sync_err)
+
                     try:
                         items = client.get_events(
                             room=self._relay_room or "",
@@ -884,6 +1410,24 @@ class ChatController:
                         if items:
                             max_seq = self._relay_since_seq
                             for item in items:
+                                # Phase 16B: Check deduplicator before processing
+                                event_id = item.get("client_hash") or ""
+                                if self._event_deduplicator and event_id:
+                                    if self._event_deduplicator.check_without_add(
+                                        event_id
+                                    ):
+                                        logger.debug(
+                                            "Dedup: skipping seen event %s",
+                                            event_id[:16],
+                                        )
+                                        # Still update max_seq
+                                        if item.get("server_seq"):
+                                            seq = int(item["server_seq"])
+                                            if seq > max_seq:
+                                                max_seq = seq
+                                        continue
+                                    self._event_deduplicator.add(event_id)
+
                                 clear = dec(item)
                                 if not clear or not clear.get("verified", False):
                                     continue
@@ -953,9 +1497,7 @@ class ChatController:
                                         ),
                                     )
                                 self._on_event(evt)
-                                self._test_sync.notify_sync(
-                                    TestSyncEvent.MESSAGE_RECEIVED
-                                )
+                                self._test_sync.notify_sync(SyncEvent.MESSAGE_RECEIVED)
                                 # 14F: Save event to local store
                                 if self._event_store:
                                     try:
@@ -1033,6 +1575,14 @@ class ChatController:
                                         logger.debug(
                                             "Failed to save event to local store: %s",
                                             store_err,
+                                        )
+                                # Phase 16B: Update local MerkleTree with event ID
+                                if self._local_merkle and event_id:
+                                    try:
+                                        self._local_merkle.add_event(event_id)
+                                    except Exception as merkle_err:
+                                        logger.debug(
+                                            "MerkleTree add failed: %s", merkle_err
                                         )
                                 if item.get("server_seq"):
                                     seq = int(item["server_seq"])

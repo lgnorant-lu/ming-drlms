@@ -5,13 +5,13 @@ instead of using time-based polling (pilot.pause()). In production, the hooks ar
 no-ops. In tests, they provide precise synchronization points.
 
 Usage in production code:
-    self._test_sync.notify(TestSyncEvent.MESSAGE_SENT)
+    self._test_sync.notify(SyncEvent.MESSAGE_SENT)
 
 Usage in tests:
     hook = BlockingSyncHook()
     controller = ChatController(..., test_sync=hook)
     # ...trigger action...
-    success = await hook.wait_for(TestSyncEvent.MESSAGE_SENT, timeout=5.0)
+    success = await hook.wait_for(SyncEvent.MESSAGE_SENT, timeout=5.0)
     assert success
 """
 
@@ -22,7 +22,7 @@ from enum import Enum, auto
 from typing import Protocol
 
 
-class TestSyncEvent(Enum):
+class SyncEvent(Enum):
     """Events that can be synchronized in TUI tests."""
 
     MESSAGE_SENT = auto()
@@ -38,7 +38,7 @@ class TestSyncEvent(Enum):
 class TestSyncHook(Protocol):
     """Protocol for test synchronization hooks."""
 
-    async def notify(self, event: TestSyncEvent) -> None:
+    async def notify(self, event: SyncEvent) -> None:
         """Notify that an event has occurred.
 
         Args:
@@ -46,7 +46,7 @@ class TestSyncHook(Protocol):
         """
         ...
 
-    async def wait_for(self, event: TestSyncEvent, timeout: float = 5.0) -> bool:
+    async def wait_for(self, event: SyncEvent, timeout: float = 5.0) -> bool:
         """Wait for an event to occur.
 
         Args:
@@ -65,15 +65,15 @@ class NullSyncHook:
     This is the default hook used in production. All operations are instant no-ops.
     """
 
-    async def notify(self, event: TestSyncEvent) -> None:
+    async def notify(self, event: SyncEvent) -> None:
         """No-op notification."""
         pass
 
-    def notify_sync(self, event: TestSyncEvent) -> None:
+    def notify_sync(self, event: SyncEvent) -> None:
         """Synchronous no-op notification for use in sync code paths."""
         pass
 
-    async def wait_for(self, event: TestSyncEvent, timeout: float = 5.0) -> bool:
+    async def wait_for(self, event: SyncEvent, timeout: float = 5.0) -> bool:
         """Immediately return True without waiting."""
         return True
 
@@ -86,10 +86,10 @@ class BlockingSyncHook:
     """
 
     def __init__(self) -> None:
-        self._events: dict[TestSyncEvent, asyncio.Event] = {}
-        self._notified: set[TestSyncEvent] = set()
+        self._events: dict[SyncEvent, asyncio.Event] = {}
+        self._notified: set[SyncEvent] = set()
 
-    async def notify(self, event: TestSyncEvent) -> None:
+    async def notify(self, event: SyncEvent) -> None:
         """Notify that an event has occurred.
 
         This will wake up any tasks waiting for this event and mark it as notified.
@@ -99,7 +99,7 @@ class BlockingSyncHook:
         if event in self._events:
             self._events[event].set()
 
-    async def wait_for(self, event: TestSyncEvent, timeout: float = 5.0) -> bool:
+    async def wait_for(self, event: SyncEvent, timeout: float = 5.0) -> bool:
         """Wait for an event to occur.
 
         Args:
@@ -124,7 +124,7 @@ class BlockingSyncHook:
         except asyncio.TimeoutError:
             return False
 
-    def notify_sync(self, event: TestSyncEvent) -> None:
+    def notify_sync(self, event: SyncEvent) -> None:
         """Synchronous notification for use in sync code paths (e.g., threads).
 
         This method is thread-safe and can be called from sync code. It will
@@ -147,8 +147,12 @@ class BlockingSyncHook:
 
 
 __all__ = [
-    "TestSyncEvent",
+    "SyncEvent",
+    "TestSyncEvent",  # Backward compatibility alias
     "TestSyncHook",
     "NullSyncHook",
     "BlockingSyncHook",
 ]
+
+# Backward compatibility alias (Phase 15.5 migration)
+TestSyncEvent = SyncEvent

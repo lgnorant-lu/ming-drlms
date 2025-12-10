@@ -6,19 +6,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from cryptography.hazmat.primitives.serialization import (
-    Encoding,
-    NoEncryption,
-    PrivateFormat,
-    PublicFormat,
-)
+# Phase 15.5: Removed Ed25519 imports - now using Signal Protocol X25519 keys
 
 from ming_drlms.core.e2ee_store import LocalKeyStore
 from ming_drlms.core.mproto_v2_client import (
     MP2Client,
     AuthenticationError,
-    SignalKeyPair,
 )
 from ming_drlms.core.token_store import TokenStore
 
@@ -242,23 +235,36 @@ def strict_server(server_binary_path: Path):
 
 
 def _init_identity_keys(config_dir: Path, username: str) -> None:
+    """Initialize identity keys using Signal Protocol (Phase 15.5 XEdDSA).
+
+    This properly generates X25519 keys via Signal Protocol's key helper,
+    ensuring compatibility with XEdDSA signature verification on the server.
+    """
+    from ming_drlms.core.pysignal.context import create_signal_context
+    from ming_drlms.core.pysignal.keys import generate_device_keys
+
     os.environ["MING_DRLMS_CONFIG_DIR"] = str(config_dir)
-    store = LocalKeyStore()
-    priv = Ed25519PrivateKey.generate()
-    priv_bytes = priv.private_bytes(
-        Encoding.Raw,
-        PrivateFormat.Raw,
-        NoEncryption(),
+    config_dir.mkdir(parents=True, exist_ok=True)
+
+    # Generate proper X25519 keys via Signal Protocol
+    ctx = create_signal_context()
+    keys = generate_device_keys(
+        ctx,
+        pre_key_start=1,
+        pre_key_count=1,
+        signed_pre_key_id=1,
+        device_id=1,
     )
-    pub_bytes = priv.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
-    identity = SignalKeyPair(public_key=pub_bytes, private_key=priv_bytes)
+
+    # Store in LocalKeyStore
+    store = LocalKeyStore()
     store.store_keys(
         username,
-        registration_id=1,
+        registration_id=keys.registration_id,
         device_id=1,
-        identity=identity,
-        signed_pre_key=None,
-        pre_keys=(),
+        identity=keys.identity,
+        signed_pre_key=keys.signed_pre_key,
+        pre_keys=keys.pre_keys,
     )
 
 

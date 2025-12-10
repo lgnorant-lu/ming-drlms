@@ -285,6 +285,49 @@ def get_logging_settings(s: AppSettings) -> LoggingSettings:
     return LoggingSettings(level=level)
 
 
+def get_relays_config():
+    """Load Phase 16A relays.toml configuration.
+
+    Returns RelaysConfig from relay module, or None if not available/configured.
+    """
+    try:
+        from .relay import RelaysConfig, get_default_config_path
+
+        cfg_path = get_default_config_path()
+        return RelaysConfig.load(cfg_path)
+    except Exception:
+        return None
+
+
+def get_relay_urls(s: AppSettings) -> list[str]:
+    """Get list of relay URLs from configuration.
+
+    Priority:
+    1. relays.toml (Phase 16A multi-relay config)
+    2. settings.toml relay.base_url (legacy single relay)
+    3. ENV DRLMS_RELAY_BASE_URL
+
+    Returns:
+        List of relay URLs, or empty list if none configured
+    """
+    urls: list[str] = []
+
+    # 1. Try Phase 16A relays.toml
+    relays_cfg = get_relays_config()
+    if relays_cfg:
+        for r in relays_cfg.get_primary_relays():
+            if r.url:
+                urls.append(r.url)
+
+    # 2. Fallback to legacy single relay
+    if not urls:
+        legacy = get_relay_settings(s)
+        if legacy.base_url:
+            urls.append(legacy.base_url)
+
+    return urls
+
+
 def build_effective_view(s: AppSettings) -> Dict[str, Any]:
     """Return a simplified effective config view for diagnostics/CLI display."""
     return {
