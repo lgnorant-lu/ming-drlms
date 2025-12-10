@@ -383,12 +383,21 @@ class TestRCV01StorageReceipts:
         # Import server module to test signing function
         from ming_drlms.relay.server import _sign_receipt
 
-        sig1 = _sign_receipt("event123", "room1", 42, 1733800000)
-        sig2 = _sign_receipt("event123", "room1", 42, 1733800000)
+        # Phase 17A: _sign_receipt now returns (hmac_sig, xeddsa_sig, pubkey)
+        result1 = _sign_receipt("event123", "room1", 42, 1733800000)
+        result2 = _sign_receipt("event123", "room1", 42, 1733800000)
 
-        # Same inputs = same signature
-        assert sig1 == sig2
-        assert len(sig1) == 64  # HMAC-SHA256 hex
+        # Unpack results
+        hmac1, xeddsa1, pubkey1 = result1
+        hmac2, xeddsa2, pubkey2 = result2
+
+        # Same inputs = same HMAC signature
+        assert hmac1 == hmac2
+        assert len(hmac1) == 64  # HMAC-SHA256 hex
+
+        # XEdDSA signature may be None if key not configured
+        assert xeddsa1 == xeddsa2
+        assert pubkey1 == pubkey2
 
     def test_eventack_includes_signature_fields(self):
         """EventAck model includes relay_id and relay_signature."""

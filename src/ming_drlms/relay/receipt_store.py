@@ -2,6 +2,8 @@
 
 Provides SQLite-based storage for relay storage receipts,
 enabling audit trails and verification of successful writes.
+
+Phase 17A: Extended to support XEdDSA signatures alongside HMAC.
 """
 
 from __future__ import annotations
@@ -11,7 +13,7 @@ import sqlite3
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -27,9 +29,13 @@ class StoredReceipt:
     relay_id: str
     server_seq: int
     server_ts: int
-    signature: str
-    verified: bool
+    signature: str  # HMAC signature (legacy)
+    verified: bool  # HMAC verified
     created_at: int
+    # Phase 17A: XEdDSA signature fields
+    xeddsa_signature: Optional[str] = None
+    relay_pubkey: Optional[str] = None
+    xeddsa_verified: bool = False
 
 
 class ReceiptStore:
@@ -85,12 +91,42 @@ class ReceiptStore:
                 """
             )
             conn.commit()
+
+            # Phase 17A: Add XEdDSA columns if not present (migration)
+            self._migrate_phase17a(conn)
+
             logger.debug("ReceiptStore schema ensured at %s", self.db_path)
         except sqlite3.Error as e:
             logger.exception("Failed to create receipts schema: %s", e)
             raise
         finally:
             conn.close()
+
+    def _migrate_phase17a(self, conn: sqlite3.Connection) -> None:
+        """Phase 17A: Add XEdDSA signature columns if missing."""
+        cur = conn.execute("PRAGMA table_info(client_receipts)")
+        columns = {row["name"] for row in cur.fetchall()}
+
+        migrations = [
+            ("xeddsa_signature", "TEXT"),
+            ("relay_pubkey", "TEXT"),
+            ("xeddsa_verified", "INTEGER DEFAULT 0"),
+        ]
+
+        for col_name, col_type in migrations:
+            if col_name not in columns:
+                try:
+                    conn.execute(
+                        f"ALTER TABLE client_receipts ADD COLUMN {col_name} {col_type}"
+                    )
+                    conn.commit()
+                    logger.info(
+                        "Phase 17A: Added column %s to client_receipts", col_name
+                    )
+                except sqlite3.Error as e:
+                    logger.warning(
+                        "Phase 17A: Failed to add column %s: %s", col_name, e
+                    )
 
     def save_receipt(
         self,
@@ -102,6 +138,9 @@ class ReceiptStore:
         server_ts: int,
         signature: str,
         verified: bool = False,
+        xeddsa_signature: Optional[str] = None,
+        relay_pubkey: Optional[str] = None,
+        xeddsa_verified: bool = False,
     ) -> int:
         """Save a storage receipt to the database.
 
@@ -112,8 +151,11 @@ class ReceiptStore:
             relay_id: Relay identity
             server_seq: Server sequence number
             server_ts: Server timestamp
-            signature: HMAC signature
-            verified: Whether signature was verified
+            signature: HMAC signature (legacy)
+            verified: Whether HMAC signature was verified
+            xeddsa_signature: Phase 17A XEdDSA signature (optional)
+            relay_pubkey: Phase 17A relay public key (optional)
+            xeddsa_verified: Whether XEdDSA signature was verified
 
         Returns:
             ID of the inserted receipt
@@ -125,8 +167,9 @@ class ReceiptStore:
                 """
                 INSERT INTO client_receipts
                     (event_id, room, relay_url, relay_id, server_seq, server_ts,
-                     signature, verified, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     signature, verified, created_at,
+                     xeddsa_signature, relay_pubkey, xeddsa_verified)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     event_id,
@@ -138,15 +181,19 @@ class ReceiptStore:
                     signature,
                     1 if verified else 0,
                     created_at,
+                    xeddsa_signature,
+                    relay_pubkey,
+                    1 if xeddsa_verified else 0,
                 ),
             )
             conn.commit()
             receipt_id = cur.lastrowid
             logger.debug(
-                "Saved receipt #%d for event %s from %s",
+                "Saved receipt #%d for event %s from %s (xeddsa=%s)",
                 receipt_id,
                 event_id[:16] if event_id else "?",
                 relay_id,
+                "yes" if xeddsa_signature else "no",
             )
             return receipt_id
         except sqlite3.Error as e:
