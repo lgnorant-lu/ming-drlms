@@ -285,5 +285,47 @@
 - 实施规范：`.drlms/checkpoint/Phase15.5_Implementation.md`
 
 ---
+
+## 📋 CI/CD 更新状态 (Phase 14-16)
+
+**CI/CD 全面更新** — ✅ **已完成 (2025-12-10 v2)**
+
+### 更新内容
+
+| 项目 | 状态 | 说明 |
+|------|------|------|
+| `run_coverage.sh` 扩展 | ✅ | Phase 14-16 完整测试集 + CLI 测试 |
+| `ci-test.yml` 更新 | ✅ | `relay-integration` + macOS 冒烟测试 |
+| **Relay 服务器覆盖** | ✅ | `coverage run uvicorn` 包裹 |
+| **CLI 测试补充** | ✅ | `test_cli_relay_commands.py`, `test_cli_room_commands.py` |
+| **覆盖率 badge** | ✅ | JSON 输出 + badge 数据生成 |
+| CI/CD 文档 | ✅ | `docs/ci_cd_guide.md` v2 |
+
+### 覆盖率脚本分组
+
+| Phase | 测试文件 |
+|-------|----------|
+| 14 (MP2/E2EE/Config) | test_mproto_*.py, test_e2ee_*.py, test_event_*.py, test_secret_store.py, test_config_core.py |
+| 15 (Dumb Relay) | test_identity_manager.py, test_contact_manager.py, test_room_manager.py, test_dumb_relay.py, test_signature_*.py |
+| 15.5 (XEdDSA) | test_xeddsa_e2e.py |
+| 16 (Multi-Relay) | test_relay_*.py, test_phase16_integration.py, test_e2e_multi_relay_failover.py |
+
+### CI Jobs 架构
+
+```
+cross-platform (Linux/macOS/Windows)
+    │
+    ├── linux-p2p-coverage (Phase 14-16 全面覆盖)
+    │
+    └── relay-integration (Phase 16 集成测试)
+        ├── Relay 单元测试
+        ├── 启动 Relay 服务器
+        └── 集成测试（tests/integration/）
+```
+
+### 文档
+- CI/CD 指南：`docs/ci_cd_guide.md`
+
+---
 > 维护人：主领 (Gemini) / Cascade
-> 更新时间：2025年12月9日
+> 更新时间：2025年12月10日

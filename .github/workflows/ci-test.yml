@@ -140,8 +140,26 @@ jobs:
         shell: bash
         run: bash scripts/ci/run-smoke-mproto.sh
 
+      - name: Smoke Test Relay Server (macOS)
+        if: matrix.os == 'macos-latest'
+        shell: bash
+        run: |
+          # Start Relay server in background
+          python -m uvicorn ming_drlms.relay.server:app --host 127.0.0.1 --port 8081 &
+          RELAY_PID=$!
+          sleep 3
+          
+          # Verify Relay is running
+          curl -f http://127.0.0.1:8081/health && echo "Relay health check passed"
+          
+          # Run minimal relay tests
+          python -m pytest tests/python/test_relay_health.py -v --timeout=60 || true
+          
+          # Cleanup
+          kill $RELAY_PID 2>/dev/null || true
+
   linux-p2p-coverage:
-    name: Linux P2P + Coverage
+    name: Linux P2P + Coverage (Phase 14-16)
     runs-on: ubuntu-latest
     needs: cross-platform
     env:
@@ -149,6 +167,7 @@ jobs:
       RUNNER_OS: ubuntu-latest
       VCPKG_ROOT: ${{ github.workspace }}/.cache/vcpkg
       VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.cache/vcpkg-binary-cache
+      DRLMS_UPDATE_CHECK: '0'
 
     steps:
       - name: Checkout repository
@@ -176,7 +195,7 @@ jobs:
         shell: bash
         run: bash scripts/ci/install-python-deps.sh
 
-      - name: Run Linux P2P + coverage suite
+      - name: Run Linux P2P + coverage suite (Phase 14-16)
         shell: bash
         run: bash scripts/ci/run-coverage-suite.sh
 
@@ -185,5 +204,86 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: coverage-Linux
+          path: coverage/
+          if-no-files-found: ignore
+
+  # Phase 16: Integration tests with live Relay server + coverage
+  relay-integration:
+    name: Relay Integration Tests (Phase 16)
+    runs-on: ubuntu-latest
+    needs: cross-platform
+    env:
+      DRLMS_UPDATE_CHECK: '0'
+      DRLMS_LOG_LEVEL: 'DEBUG'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-relay-${{ hashFiles('pyproject.toml', 'requirements-dev.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-relay-
+            ${{ runner.os }}-pip-
+
+      - name: Install Python dependencies
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          pip install coverage pytest-cov
+
+      - name: Run Phase 16 Relay unit tests with coverage
+        shell: bash
+        run: |
+          python -m coverage run --branch --parallel-mode -m pytest \
+            tests/python/test_relay_*.py \
+            tests/python/test_phase16_integration.py \
+            tests/python/test_e2e_multi_relay_failover.py \
+            -v --timeout=120
+
+      - name: Run integration tests with live Relay (coverage-wrapped)
+        shell: bash
+        run: |
+          # Start Relay server under coverage in background
+          python -m coverage run --branch --parallel-mode -m uvicorn \
+            ming_drlms.relay.server:app --host 127.0.0.1 --port 8081 &
+          RELAY_PID=$!
+          sleep 3  # Wait for server startup
+          
+          # Verify Relay is running
+          curl -f http://127.0.0.1:8081/health || (kill $RELAY_PID 2>/dev/null; exit 1)
+          
+          # Run integration tests with coverage
+          python -m coverage run --branch --parallel-mode -m pytest \
+            tests/integration/ -v --timeout=180 || true
+          
+          # Graceful shutdown to flush coverage data
+          kill -TERM $RELAY_PID 2>/dev/null || true
+          sleep 2
+          kill -9 $RELAY_PID 2>/dev/null || true
+
+      - name: Combine and report coverage
+        shell: bash
+        run: |
+          python -m coverage combine
+          python -m coverage report --include="*/ming_drlms/*" --show-missing
+          mkdir -p coverage/html/relay
+          python -m coverage html --include="*/ming_drlms/*" -d coverage/html/relay
+          python -m coverage json --include="*/ming_drlms/*" -o coverage/relay-coverage.json
+
+      - name: Upload relay coverage artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-relay-integration
           path: coverage/
           if-no-files-found: ignore

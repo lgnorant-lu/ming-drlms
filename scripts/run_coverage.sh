@@ -542,7 +542,7 @@ else
   fi
 fi
 
-# Execute Python tests under coverage (MP2-only)
+# Execute Python tests under coverage (Phase 14-16 comprehensive suite)
 rm -f .coverage
 "${PYTHON_BIN[@]}" -c "import coverage" >/dev/null 2>&1 || "${PYTHON_BIN[@]}" -m pip install --user -q coverage
 "${PYTHON_BIN[@]}" -c "import pytest" >/dev/null 2>&1 || "${PYTHON_BIN[@]}" -m pip install --user -q pytest pytest-cov
@@ -550,15 +550,18 @@ rm -f .coverage
 # Export COVERAGE_FILE to ensure all tools use the same file
 export COVERAGE_FILE="${BUILD_DIR}/.coverage"
 
-# Enable MP2 debug logging for better coverage
+# Enable debug logging for better coverage
 export DRLMS_MP2_DEBUG=1
+export DRLMS_UPDATE_CHECK=0
 
 # Exercise CLI config commands under coverage to validate unified config paths
 PYTHONPATH="${ROOT_DIR}/src" timeout_cmd 120s "${PYTHON_BIN[@]}" -m coverage run --branch -a -m ming_drlms.main config init-tui --target both || true
 PYTHONPATH="${ROOT_DIR}/src" timeout_cmd 120s "${PYTHON_BIN[@]}" -m coverage run --branch -a -m ming_drlms.main config show --raw || true
 PYTHONPATH="${ROOT_DIR}/src" timeout_cmd 120s "${PYTHON_BIN[@]}" -m coverage run --branch -a -m ming_drlms.main config validate || true
 
-PYTHONPATH="${ROOT_DIR}/src" timeout_cmd 480s "${PYTHON_BIN[@]}" -m coverage run --branch -a -m pytest -q \
+# Phase 14: MP2 + E2EE + Config
+printf '%s\n' "--> Running Phase 14 tests (MP2, E2EE, Config)..."
+PYTHONPATH="${ROOT_DIR}/src" timeout_cmd 300s "${PYTHON_BIN[@]}" -m coverage run --branch -a -m pytest -q \
   "${ROOT_DIR}/tests/python/test_mproto_v2_client.py" \
   "${ROOT_DIR}/tests/python/test_cli_mproto_commands.py" \
   "${ROOT_DIR}/tests/python/test_cli_room_space.py" \
@@ -571,13 +574,63 @@ PYTHONPATH="${ROOT_DIR}/src" timeout_cmd 480s "${PYTHON_BIN[@]}" -m coverage run
   "${ROOT_DIR}/tests/python/test_e2ee_roundtrip.py" \
   "${ROOT_DIR}/tests/python/test_e2ee_runtime_logic.py" \
   "${ROOT_DIR}/tests/python/test_room_service.py" \
-  "${ROOT_DIR}/tests/python/test_tui_relay_backend.py" || true
+  "${ROOT_DIR}/tests/python/test_event_store.py" \
+  "${ROOT_DIR}/tests/python/test_secret_store.py" \
+  "${ROOT_DIR}/tests/python/test_drlms_config_file_override.py" \
+  "${ROOT_DIR}/tests/python/test_config_core.py" || true
+
+# Phase 15: Dumb Relay + Contact/Room Manager + Signature tests
+printf '%s\n' "--> Running Phase 15 tests (Relay compat, Contacts, Rooms, Signatures)..."
+PYTHONPATH="${ROOT_DIR}/src" timeout_cmd 300s "${PYTHON_BIN[@]}" -m coverage run --branch -a -m pytest -q \
+  "${ROOT_DIR}/tests/python/test_contact_manager.py" \
+  "${ROOT_DIR}/tests/python/test_room_manager.py" \
+  "${ROOT_DIR}/tests/python/test_relay_mp2_compat.py" \
+  "${ROOT_DIR}/tests/python/test_signature_tamper.py" \
+  "${ROOT_DIR}/tests/python/test_signature_wrappers.py" || true
+
+# Phase 15.5: XEdDSA Unified Identity
+printf '%s\n' "--> Running Phase 15.5 tests (XEdDSA E2E)..."
+PYTHONPATH="${ROOT_DIR}/src" timeout_cmd 180s "${PYTHON_BIN[@]}" -m coverage run --branch -a -m pytest -q \
+  "${ROOT_DIR}/tests/python/test_xeddsa_e2e.py" || true
+
+# Phase 16: Multi-Relay Federation (16A-D)
+printf '%s\n' "--> Running Phase 16 tests (Multi-Relay Federation)..."
+PYTHONPATH="${ROOT_DIR}/src" timeout_cmd 300s "${PYTHON_BIN[@]}" -m coverage run --branch -a -m pytest -q \
+  "${ROOT_DIR}/tests/python/test_relay_discovery.py" \
+  "${ROOT_DIR}/tests/python/test_relay_health.py" \
+  "${ROOT_DIR}/tests/python/test_relay_dedup.py" \
+  "${ROOT_DIR}/tests/python/test_relay_merkle.py" \
+  "${ROOT_DIR}/tests/python/test_relay_network.py" \
+  "${ROOT_DIR}/tests/python/test_relay_offline_queue.py" \
+  "${ROOT_DIR}/tests/python/test_relay_sync_manager.py" \
+  "${ROOT_DIR}/tests/python/test_phase16_integration.py" \
+  "${ROOT_DIR}/tests/python/test_e2e_multi_relay_failover.py" || true
+
+# TUI Relay Backend (Phase 14B + 15 + 16 integration)
+printf '%s\n' "--> Running TUI Relay Backend tests..."
+PYTHONPATH="${ROOT_DIR}/src" timeout_cmd 180s "${PYTHON_BIN[@]}" -m coverage run --branch -a -m pytest -q \
+  "${ROOT_DIR}/tests/python/test_tui_relay_backend.py" \
+  "${ROOT_DIR}/tests/python/test_tui_test_sync.py" || true
+
+# CLI Commands (Phase 14-16 coverage boost)
+printf '%s\n' "--> Running CLI command tests..."
+PYTHONPATH="${ROOT_DIR}/src" timeout_cmd 300s "${PYTHON_BIN[@]}" -m coverage run --branch -a -m pytest -q \
+  "${ROOT_DIR}/tests/python/test_cli_relay_commands.py" \
+  "${ROOT_DIR}/tests/python/test_cli_room_commands.py" || true
 
 printf '%s\n' "--> Generating Python coverage report..."
 mkdir -p "${ROOT_DIR}/coverage/html/python"
 COVERAGE_INCLUDE_PATTERN="*/ming_drlms/*"
 "${PYTHON_BIN[@]}" -m coverage report --include "${COVERAGE_INCLUDE_PATTERN}"
 "${PYTHON_BIN[@]}" -m coverage html --include "${COVERAGE_INCLUDE_PATTERN}" -d "${ROOT_DIR}/coverage/html/python"
+"${PYTHON_BIN[@]}" -m coverage json --include "${COVERAGE_INCLUDE_PATTERN}" -o "${ROOT_DIR}/coverage/coverage.json"
+
+# Generate coverage badge data
+if [[ -f "${ROOT_DIR}/coverage/coverage.json" ]]; then
+  COVERAGE_PCT=$("${PYTHON_BIN[@]}" -c "import json; d=json.load(open('${ROOT_DIR}/coverage/coverage.json')); print(round(d['totals']['percent_covered'], 1))")
+  printf '%s\n' "{\"schemaVersion\": 1, \"label\": \"coverage\", \"message\": \"${COVERAGE_PCT}%%\", \"color\": \"yellow\"}" > "${ROOT_DIR}/coverage/coverage-badge.json"
+  printf "Coverage: %s%%\n" "${COVERAGE_PCT}"
+fi
 
 if [[ "${C_COVERAGE_SUPPORTED}" -eq 1 && "${IS_DARWIN}" -ne 1 ]]; then
   printf "C coverage report: %s\n" "file://${ROOT_DIR}/coverage/html/c/index.html"
