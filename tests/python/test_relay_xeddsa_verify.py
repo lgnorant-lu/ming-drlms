@@ -109,12 +109,81 @@ class TestVerifyXEdDSA:
 
         assert result is False
 
+    def test_invalid_hex_signature_fails(self):
+        """Test that invalid hex in signature is handled."""
+        from ming_drlms.relay.manager import RelayManager
+
+        manager = RelayManager.__new__(RelayManager)
+        result = manager._verify_xeddsa(
+            message=b"test",
+            signature_hex="ZZZZ" + "00" * 62,  # Invalid hex
+            pubkey_hex="00" * 32,
+            relay_id="test-relay",
+        )
+
+        assert result is False
+
+    def test_invalid_hex_pubkey_fails(self):
+        """Test that invalid hex in pubkey is handled."""
+        from ming_drlms.relay.manager import RelayManager
+
+        manager = RelayManager.__new__(RelayManager)
+        result = manager._verify_xeddsa(
+            message=b"test",
+            signature_hex="00" * 64,
+            pubkey_hex="GGGG" + "00" * 28,  # Invalid hex
+            relay_id="test-relay",
+        )
+
+        assert result is False
+
+    def test_empty_message_signature(self):
+        """Test signing and verifying empty message."""
+        from ming_drlms.relay.manager import RelayManager
+
+        signing_key = nacl.signing.SigningKey.generate()
+        message = b""
+        signed = signing_key.sign(message)
+
+        manager = RelayManager.__new__(RelayManager)
+        result = manager._verify_xeddsa(
+            message=message,
+            signature_hex=signed.signature.hex(),
+            pubkey_hex=signing_key.verify_key.encode().hex(),
+            relay_id="test-relay",
+        )
+
+        assert result is True
+
+    def test_corrupted_signature_single_bit_fails(self):
+        """Test that a single bit flip in signature fails."""
+        from ming_drlms.relay.manager import RelayManager
+
+        signing_key = nacl.signing.SigningKey.generate()
+        message = b"test message"
+        signed = signing_key.sign(message)
+
+        # Corrupt single byte
+        sig_bytes = bytearray(signed.signature)
+        sig_bytes[0] ^= 0x01  # Flip one bit
+        corrupted_sig = bytes(sig_bytes).hex()
+
+        manager = RelayManager.__new__(RelayManager)
+        result = manager._verify_xeddsa(
+            message=message,
+            signature_hex=corrupted_sig,
+            pubkey_hex=signing_key.verify_key.encode().hex(),
+            relay_id="test-relay",
+        )
+
+        assert result is False
+
 
 class TestVerifyReceipt:
-    """Tests for _verify_receipt method with dual verification."""
+    """Tests for _verify_receipt method (Phase 17C: XEdDSA only)."""
 
-    def test_xeddsa_only_verification(self):
-        """Test verification with only XEdDSA (no HMAC key)."""
+    def test_xeddsa_verification_success(self):
+        """Test successful XEdDSA verification."""
         from ming_drlms.relay.manager import RelayManager
 
         # Generate signature
@@ -123,40 +192,88 @@ class TestVerifyReceipt:
         signed = signing_key.sign(message)
 
         manager = RelayManager.__new__(RelayManager)
-        hmac_verified, xeddsa_verified = manager._verify_receipt(
+        verified = manager._verify_receipt(
             event_id="event123",
             room="room1",
             server_seq=42,
             server_ts=1733800000,
             relay_id="relay-test",
-            signature="dummy_hmac_sig",
             xeddsa_signature=signed.signature.hex(),
             relay_pubkey=signing_key.verify_key.encode().hex(),
         )
 
-        # HMAC should be trusted (no key), XEdDSA should verify
-        assert hmac_verified is True
-        assert xeddsa_verified is True
+        assert verified is True
 
-    def test_no_xeddsa_falls_back_to_hmac_trust(self):
-        """Test that missing XEdDSA signature falls back to HMAC trust."""
+    def test_no_xeddsa_signature_fails(self):
+        """Test that missing XEdDSA signature fails verification."""
         from ming_drlms.relay.manager import RelayManager
 
         manager = RelayManager.__new__(RelayManager)
-        hmac_verified, xeddsa_verified = manager._verify_receipt(
+        verified = manager._verify_receipt(
             event_id="event123",
             room="room1",
             server_seq=42,
             server_ts=1733800000,
             relay_id="relay-test",
-            signature="dummy_hmac_sig",
             xeddsa_signature=None,
             relay_pubkey=None,
         )
 
-        # No HMAC key configured - should trust
-        assert hmac_verified is True
-        assert xeddsa_verified is False
+        # Phase 17C: No signature = not verified
+        assert verified is False
+
+    def test_xeddsa_with_pubkey_but_no_signature(self):
+        """Test pubkey present but no signature."""
+        from ming_drlms.relay.manager import RelayManager
+
+        manager = RelayManager.__new__(RelayManager)
+        verified = manager._verify_receipt(
+            event_id="event123",
+            room="room1",
+            server_seq=42,
+            server_ts=1733800000,
+            relay_id="relay-test",
+            xeddsa_signature=None,
+            relay_pubkey="00" * 32,  # Pubkey present
+        )
+
+        # XEdDSA not attempted (no signature)
+        assert verified is False
+
+    def test_xeddsa_with_signature_but_no_pubkey(self):
+        """Test signature present but no pubkey."""
+        from ming_drlms.relay.manager import RelayManager
+
+        manager = RelayManager.__new__(RelayManager)
+        verified = manager._verify_receipt(
+            event_id="event123",
+            room="room1",
+            server_seq=42,
+            server_ts=1733800000,
+            relay_id="relay-test",
+            xeddsa_signature="00" * 64,  # Signature present
+            relay_pubkey=None,
+        )
+
+        # XEdDSA not attempted (no pubkey)
+        assert verified is False
+
+    def test_invalid_xeddsa_fails(self):
+        """Test that invalid XEdDSA signature fails."""
+        from ming_drlms.relay.manager import RelayManager
+
+        manager = RelayManager.__new__(RelayManager)
+        verified = manager._verify_receipt(
+            event_id="event123",
+            room="room1",
+            server_seq=42,
+            server_ts=1733800000,
+            relay_id="relay-test",
+            xeddsa_signature="invalid_sig",  # Invalid
+            relay_pubkey="00" * 32,
+        )
+
+        assert verified is False
 
 
 class TestStorageReceiptDataclass:

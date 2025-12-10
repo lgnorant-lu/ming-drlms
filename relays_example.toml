@@ -53,7 +53,7 @@ max_delay = 300.0
 max_queue_size = 1000
 
 # -----------------------------------------------------------------------------
-# 回执验证设置 (Receipt) - Phase 16 RCV-01 / Phase 17A XEdDSA
+# 回执验证设置 (Receipt) - Phase 17C XEdDSA Only
 # -----------------------------------------------------------------------------
 [receipt]
 # 是否要求回执验证通过才算写入成功
@@ -68,15 +68,8 @@ persist_receipts = true
 # 回执保留天数（0 = 永久保留）
 retention_days = 30
 
-# Phase 17A: 签名方案
-# "hmac" = 仅 HMAC (legacy)
-# "xeddsa" = 仅 XEdDSA
-# "dual" = 两者都接受，优先 XEdDSA
-# "xeddsa_required" = 必须有 XEdDSA 签名
-signature_scheme = "dual"
-
-# Phase 17A: 是否优先验证非对称签名
-prefer_asymmetric = true
+# Phase 17C: XEdDSA only (HMAC removed)
+# signature_scheme = "xeddsa"  # Only option now
 
 # -----------------------------------------------------------------------------
 # Relay 列表
@@ -92,7 +85,7 @@ priority = 1
 enabled = true
 backup_only = false
 region = "local"
-# Phase 17A: Relay 公钥 (64 hex chars = 32 bytes X25519)
+# Phase 17A: Relay 公钥 (64 hex chars = 32 bytes Ed25519)
 # 用于验证 XEdDSA 签名，可从 /health 或 /.well-known/drlms-relay.json 获取
 # pubkey = "abc123def456..."
 

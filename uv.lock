@@ -874,6 +874,20 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+all = [
+    { name = "fastapi" },
+    { name = "httpx" },
+    { name = "nuitka" },
+    { name = "pydantic" },
+    { name = "pynacl" },
+    { name = "pytest", version = "8.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
+    { name = "pytest", version = "9.0.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+    { name = "pytest-asyncio", version = "1.2.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
+    { name = "pytest-asyncio", version = "1.3.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+    { name = "pytest-cov" },
+    { name = "python-multipart" },
+    { name = "uvicorn", extra = ["standard"] },
+]
 dev = [
     { name = "nuitka" },
     { name = "pytest", version = "8.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
@@ -898,6 +912,8 @@ requires-dist = [
     { name = "cryptography", specifier = ">=42,<44" },
     { name = "fastapi", marker = "extra == 'relay'" },
     { name = "httpx", marker = "extra == 'relay'" },
+    { name = "ming-drlms", extras = ["dev"], marker = "extra == 'all'" },
+    { name = "ming-drlms", extras = ["relay"], marker = "extra == 'all'" },
     { name = "nuitka", marker = "extra == 'dev'", specifier = ">=2.0" },
     { name = "packaging", specifier = ">=24.2" },
     { name = "protobuf", specifier = "==6.33.1" },
@@ -917,7 +933,7 @@ requires-dist = [
     { name = "typing-extensions", specifier = ">=4.7.0" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'relay'" },
 ]
-provides-extras = ["dev", "relay"]
+provides-extras = ["dev", "relay", "all"]
 
 [[package]]
 name = "nuitka"

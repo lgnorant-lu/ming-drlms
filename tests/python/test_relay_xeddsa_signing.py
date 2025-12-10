@@ -1,6 +1,6 @@
-"""Phase 17A: XEdDSA signing tests for Relay server.
+"""Phase 17C: XEdDSA signing tests for Relay server.
 
-Tests the dual signing mechanism (HMAC + XEdDSA) introduced in Phase 17A.
+Tests the XEdDSA-only signing mechanism (HMAC removed in Phase 17C).
 """
 
 from __future__ import annotations
@@ -46,20 +46,20 @@ class TestXEdDSAKeyLoading:
             assert os.environ.get("DRLMS_RELAY_SIGNING_PRIVKEY") == ""
 
 
-class TestSignReceiptHMAC:
-    """Tests for legacy HMAC receipt signing."""
+class TestXEdDSAOnlySigning:
+    """Tests for Phase 17C XEdDSA-only signing."""
 
-    def test_hmac_sign_produces_hex(self):
-        """Test HMAC signing produces hex output."""
-        import hashlib
-        import hmac as hmac_mod
+    def test_xeddsa_signature_length(self):
+        """Test XEdDSA signature is 128 hex chars (64 bytes)."""
+        from nacl.signing import SigningKey
 
-        key = secrets.token_bytes(32)
+        privkey = secrets.token_bytes(32)
+        signing_key = SigningKey(privkey)
         message = b"test_event_id|test_room|1|1234567890|relay-test"
-        sig = hmac_mod.new(key, message, hashlib.sha256).hexdigest()
+        signed = signing_key.sign(message)
 
-        assert len(sig) == 64  # SHA256 hex is 64 chars
-        assert all(c in "0123456789abcdef" for c in sig)
+        assert len(signed.signature.hex()) == 128
+        assert all(c in "0123456789abcdef" for c in signed.signature.hex())
 
 
 class TestSignReceiptXEdDSA:
@@ -121,11 +121,11 @@ class TestSignReceiptXEdDSA:
         assert not verified
 
 
-class TestDualSigning:
-    """Tests for dual HMAC + XEdDSA signing."""
+class TestXEdDSAMessageFormat:
+    """Tests for XEdDSA message format."""
 
-    def test_dual_signature_message_format(self):
-        """Test that both signatures use the same message format."""
+    def test_xeddsa_message_format(self):
+        """Test XEdDSA signature message format."""
         event_id = "abc123"
         room = "test-room"
         server_seq = 42
@@ -134,12 +134,12 @@ class TestDualSigning:
 
         message = f"{event_id}|{room}|{server_seq}|{server_ts}|{relay_id}".encode()
 
-        # This should be consistent between HMAC and XEdDSA
+        # Standard message format for XEdDSA signing
         assert message == b"abc123|test-room|42|1234567890|relay-test"
 
 
 class TestEventAckModel:
-    """Tests for EventAck Pydantic model with Phase 17A fields."""
+    """Tests for EventAck Pydantic model (Phase 17C: XEdDSA only)."""
 
     def test_eventack_has_xeddsa_fields(self):
         """Test EventAck model includes XEdDSA fields."""
@@ -149,13 +149,11 @@ class TestEventAckModel:
             server_seq=1,
             server_ts=1234567890,
             relay_id="relay-test",
-            relay_signature="hmac_sig_hex",
             xeddsa_signature="xeddsa_sig_hex",
             relay_pubkey="pubkey_hex",
         )
 
         assert ack.server_seq == 1
-        assert ack.relay_signature == "hmac_sig_hex"
         assert ack.xeddsa_signature == "xeddsa_sig_hex"
         assert ack.relay_pubkey == "pubkey_hex"
 
@@ -173,7 +171,7 @@ class TestEventAckModel:
 
 
 class TestHealthEndpoint:
-    """Tests for health endpoint with Phase 17A info."""
+    """Tests for health endpoint (Phase 17C: XEdDSA only)."""
 
     def test_health_includes_signature_schemes(self):
         """Test health endpoint includes signature_schemes list."""
@@ -182,7 +180,8 @@ class TestHealthEndpoint:
         result = health_check()
 
         assert "signature_schemes" in result
-        assert "hmac" in result["signature_schemes"]
+        # Phase 17C: HMAC removed, only xeddsa if configured
+        assert "hmac" not in result["signature_schemes"]
 
     def test_health_includes_relay_id(self):
         """Test health endpoint includes relay_id."""
@@ -194,7 +193,7 @@ class TestHealthEndpoint:
 
 
 class TestWellKnownEndpoint:
-    """Tests for Well-Known endpoint (Phase 17B preview)."""
+    """Tests for Well-Known endpoint (Phase 17C)."""
 
     def test_wellknown_returns_version(self):
         """Test Well-Known endpoint returns version info."""
@@ -202,7 +201,7 @@ class TestWellKnownEndpoint:
 
         result = wellknown_relay_info()
 
-        assert result["version"] == 1
+        assert result["version"] == 2  # Phase 17C version
         assert "relay_id" in result
         assert "signature_schemes" in result
 

@@ -44,7 +44,7 @@ class RelayEndpoint:
     metadata: dict[str, Any] = field(default_factory=dict)
     region: Optional[str] = None
     enabled: bool = True
-    # Phase 17A: Relay's X25519 public key for XEdDSA verification
+    # Phase 17A: Relay's Ed25519 public key for XEdDSA verification
     pubkey: Optional[str] = None
 
     def __hash__(self) -> int:
