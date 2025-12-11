@@ -142,7 +142,7 @@ class RelayChatPlaceholder(Screen):
                     ListItem(
                         Label(f"💬 {name}"),
                         classes="room-item",
-                        id=f"room-{room.room_id[:8]}",
+                        id=f"room-{room.room_id}",  # 使用完整 room_id 避免重复
                     )
                 )
 

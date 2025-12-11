@@ -1,84 +1,162 @@
-# DRLMS Configuration Example
-# Copy this file to ~/.drlms/config.toml and customize as needed
+# =============================================================================
+# DRLMS 配置文件
+# =============================================================================
+# 位置：
+#   Windows: %APPDATA%\DRLMS\config.toml
+#   Linux:   ~/.config/drlms/config.toml
+#
+# 优先级：环境变量 > config.toml > 默认值
+# =============================================================================
 
+# =============================================================================
+# 通用设置
+# =============================================================================
 [general]
-# General application settings
-language = "en"
+# 界面语言: "en", "zh"
+language = "zh"
 
+# 启动时检查更新
+update_check = true
+
+# =============================================================================
+# 后端配置
+# =============================================================================
+[backend]
+# 后端模式：
+#   - "relay": 去中心化 Relay 模式（推荐）
+#   - "mp2": 传统 MP2 服务器模式
+#   - "hybrid": 房间级别模式选择
+mode = "relay"
+
+# --- Relay 配置 ---
+[backend.relay]
+# Relay 服务器地址（数组或逗号分隔字符串）
+# 示例：
+#   urls = ["http://localhost:8081"]
+#   urls = ["http://relay1.example.com", "http://relay2.example.com"]
+urls = ["http://localhost:8081"]
+
+# 高级：多 Relay 详细配置文件路径（relays.toml）
+# config_file = ""
+
+# --- MP2 服务器配置 ---
+[backend.mp2]
+# MP2 服务器地址
+host = "127.0.0.1"
+
+# MP2 服务器端口
+port = 15035
+
+# 启用 TLS 加密连接
+tls = false
+
+# =============================================================================
+# 身份配置
+# =============================================================================
+[identity]
+# 当前用户名（用于 LocalKeyStore 身份查找）
+# 许多 CLI 命令需要此配置
+user = ""
+
+# 设备 ID（多设备支持）
+device_id = 1
+
+# 注册 ID（未设置则自动生成）
+# registration_id = 0
+
+# =============================================================================
+# 信任策略
+# =============================================================================
+[trust]
+# 新联系人默认信任策略：
+#   - "tofu": 首次信任（默认，便捷）
+#   - "manual_only": 仅手动验证（高安全）
+#   - "anchored_only": 仅外部锚定（最高安全）
+default_policy = "tofu"
+
+# 联系人公钥变更时的行为：
+#   - "warn": 显示警告，让用户决定（默认）
+#   - "block": 自动阻止直到手动验证
+#   - "reset": 重置信任级别到 TOFU
+key_change_action = "warn"
+
+# =============================================================================
+# Keyserver 配置
+# =============================================================================
+[keyserver]
+# 查询超时（秒）
+timeout = 5.0
+
+# OPK（一次性预密钥）最小数量，低于此值触发补充
+min_opk_count = 10
+
+# 补充后目标 OPK 数量
+target_opk_count = 100
+
+# =============================================================================
+# 房间默认设置
+# =============================================================================
+[rooms]
+# 新房间默认可见性: "private", "unlisted", "public"
+default_visibility = "private"
+
+# 房间公告频道
+announcement_channel = "__rooms__"
+
+# =============================================================================
+# TUI 界面设置
+# =============================================================================
 [tui]
-# TUI-specific settings
-
-# Theme: "forest" (default) or custom theme name
+# 主题: "forest"（默认）, "cyberpunk"
 theme = "forest"
 
-# File picker root directory
-# - Empty string "" (default): Use current working directory
-# - Absolute path: e.g., "/home/user/drlms_data" or "C:/Users/Me/Documents"
-# - Relative path: e.g., "./uploads" (relative to where you run ming-drlms)
-# - Special tokens:
-#   - "$HOME" or "~": Your home directory
-#   - "$CWD": Current working directory (same as empty string)
+# 文件选择器根目录：
+#   - "": 当前工作目录（默认）
+#   - "~/Documents/DRLMS": 主目录子文件夹
+#   - "/absolute/path": 绝对路径
 file_picker_root = ""
 
-# Examples:
-# file_picker_root = ""                                    # Current working directory (default)
-# file_picker_root = "~/Documents/DRLMS"                   # Home directory subfolder
-# file_picker_root = "/mnt/d/dogepy/pythonProject1/schoolworks/DRLMS"  # Absolute path (Linux/WSL)
-# file_picker_root = "D:\\dogepy\\pythonProject1\\schoolworks\\DRLMS"  # Absolute path (Windows)
-# file_picker_root = "./data"                              # Relative to launch directory
-
+# 自定义主题颜色（可选）
 [tui.custom_colors]
-# Override default Forest theme colors (optional)
-# Format: color_name = "#RRGGBB"
-# Available keys: primary, secondary, accent, background, surface, text, etc.
-# Example:
+# 格式: color_name = "#RRGGBB"
+# 可用键: primary, secondary, accent, background, surface, text
+# 示例:
 # primary = "#b8bb26"
 # background = "#1d2021"
 
 # =============================================================================
-# Phase 18: Relay Decentralization Settings
+# 日志配置
 # =============================================================================
+[logging]
+# 日志级别: "DEBUG", "INFO", "WARNING", "ERROR"
+level = "INFO"
 
-[backend]
-# Backend mode: "mp2" (traditional server), "relay" (decentralized), "hybrid"
-mode = "relay"
+# 日志目录（留空使用默认: ~/.drlms/logs 或 %APPDATA%\DRLMS\logs）
+dir = ""
 
-[identity]
-# Local identity file path (default: ~/.config/ming-drlms/e2ee_keys.json)
-# identity_file = ""
+# 控制台输出
+console = true
 
-# Registration ID (auto-generated if not set)
-# registration_id = 0
+# JSON 格式日志（生成 .jsonl 文件）
+json = false
 
-# Device ID for multi-device support
-device_id = 1
+# 日志轮转模式: "size"（按大小）, "time"（按天）
+rotate = "size"
 
-[trust]
-# Default trust policy for new contacts
-# - "tofu": Trust On First Use (default)
-# - "manual_only": Require manual verification
-# - "anchored_only": Require external anchoring
-default_policy = "tofu"
+# 保留日志文件数量
+keep = 5
 
-# Action when a contact's public key changes
-# - "warn": Show warning, let user decide (default)
-# - "block": Automatically block until verified
-# - "reset": Reset trust level to TOFU
-key_change_action = "warn"
+# 单文件最大大小（MB，按大小轮转时生效）
+max_mb = 10
 
-[keyserver]
-# Keyserver query timeout (milliseconds)
-timeout = 5000
+# =============================================================================
+# 路径配置（高级）
+# =============================================================================
+[paths]
+# 数据目录覆盖（日志、数据库等）
+# 默认: Windows: %LOCALAPPDATA%\drlms, Linux: ~/.local/share/drlms
+# data_dir = ""
 
-# Minimum OPK (One-Time PreKey) count before replenishment
-min_opk_count = 10
-
-# Target OPK count after replenishment
-target_opk_count = 100
-
-[rooms]
-# Default visibility for new rooms: "private", "unlisted", "public"
-default_visibility = "private"
-
-# Room announcement channel
-announcement_channel = "__rooms__"
+# 配置目录覆盖（通常不需要设置）
+# 默认: Windows: %APPDATA%\DRLMS, Linux: ~/.config/drlms
+# config_dir = ""

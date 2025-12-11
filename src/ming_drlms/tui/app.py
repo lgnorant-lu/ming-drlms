@@ -19,6 +19,7 @@ from .settings_screen import SettingsScreen
 from .profiles_screen import ServerProfilesScreen
 from .relay_start_screen import RelayStartScreen
 from .relay_chat_screen import RelayChatPlaceholder
+from .setup_wizard import SetupWizardScreen, needs_setup
 from .logic import _state_dir
 import logging
 
@@ -83,6 +84,11 @@ class DRLMSApp(App):
 
     def on_mount(self) -> None:
         """Show appropriate screen based on backend mode."""
+        # Phase 21D: Check if first-run setup is needed
+        if needs_setup():
+            self.push_screen(SetupWizardScreen())
+            return
+
         config = BackendConfig.from_env()
 
         if config.mode == BackendMode.RELAY_ONLY:

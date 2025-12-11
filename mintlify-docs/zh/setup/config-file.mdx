@@ -36,72 +36,94 @@ DRLMS 支持通过 TOML 格式的配置文件进行配置。
 ## 完整配置示例
 
 ```toml
+# =============================================================================
 # DRLMS 配置文件
-# Linux: ~/.config/drlms/config.toml
-# Windows: %APPDATA%\DRLMS\config.toml
+# =============================================================================
+# 位置：
+#   Windows: %APPDATA%\DRLMS\config.toml
+#   Linux:   ~/.config/drlms/config.toml
+#
+# 优先级：环境变量 > config.toml > 默认值
+# =============================================================================
 
-[general]
+# =============================================================================
 # 通用设置
+# =============================================================================
+[general]
+# 界面语言: "en", "zh"
 language = "zh"
 
-[tui]
-# TUI 界面设置
+# 启动时检查更新
+update_check = true
 
-# 主题："forest"（默认）或自定义主题名
-theme = "forest"
-
-# 文件选择器根目录
-# - 空字符串 ""（默认）：使用当前工作目录
-# - 绝对路径：如 "/home/user/drlms_data" 或 "C:/Users/Me/Documents"
-# - 相对路径：如 "./uploads"
-# - 特殊标记：
-#   - "$HOME" 或 "~"：用户主目录
-#   - "$CWD"：当前工作目录
-file_picker_root = ""
-
-[tui.custom_colors]
-# 自定义主题颜色（可选）
-# 格式：color_name = "#RRGGBB"
-# 可用键：primary, secondary, accent, background, surface, text 等
-# primary = "#b8bb26"
-# background = "#1d2021"
-
+# =============================================================================
+# 后端配置
+# =============================================================================
 [backend]
-# 后端模式："mp2"（传统服务器）、"relay"（去中心化）、"hybrid"（混合）
+# 后端模式：
+#   - "relay": 去中心化 Relay 模式（推荐）
+#   - "mp2": 传统 MP2 服务器模式
+#   - "hybrid": 房间级别模式选择
 mode = "relay"
 
+# --- Relay 配置 ---
+[backend.relay]
+# Relay 服务器地址（数组或逗号分隔字符串）
+# 示例：
+#   urls = ["http://localhost:8081"]
+#   urls = ["http://relay1.example.com", "http://relay2.example.com"]
+urls = ["http://localhost:8081"]
+
+# 高级：多 Relay 详细配置文件路径（relays.toml）
+# config_file = ""
+
+# --- MP2 服务器配置 ---
+[backend.mp2]
+# MP2 服务器地址
+host = "127.0.0.1"
+
+# MP2 服务器端口
+port = 15035
+
+# 启用 TLS 加密连接
+tls = false
+
+# =============================================================================
+# 身份配置
+# =============================================================================
 [identity]
-# 本地身份配置
-
-# 身份文件路径（默认：~/.config/drlms/e2ee_keys.json）
-# identity_file = ""
-
-# 注册 ID（未设置则自动生成）
-# registration_id = 0
+# 当前用户名（用于 CLI 命令和身份管理）
+# 许多 CLI 命令需要此配置
+user = ""
 
 # 设备 ID（多设备支持）
 device_id = 1
 
-[trust]
-# 信任策略配置
+# 注册 ID（未设置则自动生成）
+# registration_id = 0
 
-# 新联系人默认信任策略
-# - "tofu"：首次信任（默认）
-# - "manual_only"：仅手动验证
-# - "anchored_only"：仅外部锚定
+# =============================================================================
+# 信任策略
+# =============================================================================
+[trust]
+# 新联系人默认信任策略：
+#   - "tofu": 首次信任（默认，便捷）
+#   - "manual_only": 仅手动验证（高安全）
+#   - "anchored_only": 仅外部锚定（最高安全）
 default_policy = "tofu"
 
-# 联系人公钥变更时的行为
-# - "warn"：显示警告，让用户决定（默认）
-# - "block"：自动阻止直到验证
-# - "reset"：重置信任级别到 TOFU
+# 联系人公钥变更时的行为：
+#   - "warn": 显示警告，让用户决定（默认）
+#   - "block": 自动阻止直到手动验证
+#   - "reset": 重置信任级别到 TOFU
 key_change_action = "warn"
 
-[keyserver]
+# =============================================================================
 # Keyserver 配置
-
-# 查询超时（毫秒）
-timeout = 5000
+# =============================================================================
+[keyserver]
+# 查询超时（秒）
+timeout = 5.0
 
 # OPK（一次性预密钥）最小数量，低于此值触发补充
 min_opk_count = 10
@@ -109,14 +131,73 @@ min_opk_count = 10
 # 补充后目标 OPK 数量
 target_opk_count = 100
 
-[rooms]
+# =============================================================================
 # 房间默认设置
-
-# 新房间默认可见性："private"、"unlisted"、"public"
+# =============================================================================
+[rooms]
+# 新房间默认可见性: "private", "unlisted", "public"
 default_visibility = "private"
 
 # 房间公告频道
 announcement_channel = "__rooms__"
+
+# =============================================================================
+# TUI 界面设置
+# =============================================================================
+[tui]
+# 主题: "forest"（默认）, "cyberpunk"
+theme = "forest"
+
+# 文件选择器根目录：
+#   - "": 当前工作目录（默认）
+#   - "~/Documents/DRLMS": 主目录子文件夹
+#   - "/absolute/path": 绝对路径
+file_picker_root = ""
+
+# 自定义主题颜色（可选）
+[tui.custom_colors]
+# 格式: color_name = "#RRGGBB"
+# 可用键: primary, secondary, accent, background, surface, text
+# 示例:
+# primary = "#b8bb26"
+# background = "#1d2021"
+
+# =============================================================================
+# 日志配置
+# =============================================================================
+[logging]
+# 日志级别: "DEBUG", "INFO", "WARNING", "ERROR"
+level = "INFO"
+
+# 日志目录（留空使用默认: ~/.drlms/logs 或 %APPDATA%\DRLMS\logs）
+dir = ""
+
+# 控制台输出
+console = true
+
+# JSON 格式日志（生成 .jsonl 文件）
+json = false
+
+# 日志轮转模式: "size"（按大小）, "time"（按天）
+rotate = "size"
+
+# 保留日志文件数量
+keep = 5
+
+# 单文件最大大小（MB，按大小轮转时生效）
+max_mb = 10
+
+# =============================================================================
+# 路径配置（高级）
+# =============================================================================
+[paths]
+# 数据目录覆盖（日志、数据库等）
+# 默认: Windows: %LOCALAPPDATA%\drlms, Linux: ~/.local/share/drlms
+# data_dir = ""
+
+# 配置目录覆盖（通常不需要设置）
+# 默认: Windows: %APPDATA%\DRLMS, Linux: ~/.config/drlms
+# config_dir = ""
 ```
 
 ---
@@ -127,7 +208,59 @@ announcement_channel = "__rooms__"
 
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `language` | string | `"en"` | 界面语言 |
+| `language` | string | `"zh"` | 界面语言 (`en`, `zh`) |
+| `update_check` | bool | `true` | 启动时检查更新 |
+
+### [backend]
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `mode` | string | `"relay"` | 后端模式 (`relay`, `mp2`, `hybrid`) |
+
+### [backend.relay]
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `urls` | array | `[]` | Relay 服务器地址列表 |
+| `config_file` | string | `""` | 详细 Relay 配置文件路径 |
+
+### [backend.mp2]
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `host` | string | `"127.0.0.1"` | MP2 服务器地址 |
+| `port` | integer | `15035` | MP2 服务器端口 |
+| `tls` | bool | `false` | 启用 TLS 加密 |
+
+### [identity]
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `user` | string | `""` | 当前用户名（必填） |
+| `device_id` | integer | `1` | 设备 ID |
+| `registration_id` | integer | 自动生成 | Signal 注册 ID |
+
+### [trust]
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `default_policy` | string | `"tofu"` | 默认信任策略 |
+| `key_change_action` | string | `"warn"` | 密钥变更行为 |
+
+### [keyserver]
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `timeout` | float | `5.0` | 超时（秒） |
+| `min_opk_count` | integer | `10` | 最小 OPK 数量 |
+| `target_opk_count` | integer | `100` | 目标 OPK 数量 |
+
+### [rooms]
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `default_visibility` | string | `"private"` | 默认可见性 |
+| `announcement_channel` | string | `"__rooms__"` | 公告频道 |
 
 ### [tui]
 
@@ -148,41 +281,24 @@ surface = "#282828"
 text = "#ebdbb2"
 ```
 
-### [backend]
+### [logging]
 
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `mode` | string | `"relay"` | 后端模式 |
+| `level` | string | `"INFO"` | 日志级别 |
+| `dir` | string | `""` | 日志目录 |
+| `console` | bool | `true` | 控制台输出 |
+| `json` | bool | `false` | JSON 格式日志 |
+| `rotate` | string | `"size"` | 轮转模式 (`size`, `time`) |
+| `keep` | integer | `5` | 保留文件数 |
+| `max_mb` | integer | `10` | 最大文件大小 (MB) |
 
-### [identity]
-
-| 字段 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `identity_file` | string | - | 身份文件路径 |
-| `registration_id` | integer | 自动生成 | Signal 注册 ID |
-| `device_id` | integer | `1` | 设备 ID |
-
-### [trust]
+### [paths]
 
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `default_policy` | string | `"tofu"` | 默认信任策略 |
-| `key_change_action` | string | `"warn"` | 密钥变更行为 |
-
-### [keyserver]
-
-| 字段 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `timeout` | integer | `5000` | 超时（毫秒） |
-| `min_opk_count` | integer | `10` | 最小 OPK 数量 |
-| `target_opk_count` | integer | `100` | 目标 OPK 数量 |
-
-### [rooms]
-
-| 字段 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `default_visibility` | string | `"private"` | 默认可见性 |
-| `announcement_channel` | string | `"__rooms__"` | 公告频道 |
+| `data_dir` | string | 平台默认 | 数据目录覆盖 |
+| `config_dir` | string | 平台默认 | 配置目录覆盖 |
 
 ---
 

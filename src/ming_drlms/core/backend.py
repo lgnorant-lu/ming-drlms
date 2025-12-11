@@ -82,7 +82,10 @@ class BackendConfig:
 
     @classmethod
     def from_env(cls) -> "BackendConfig":
-        """Create config from environment variables.
+        """Create config from environment variables and config.toml.
+
+        Uses UnifiedConfig which handles priority:
+        Environment variables > config.toml > Default values
 
         Supports both new and legacy variable names:
         - DRLMS_BACKEND_MODE (recommended) / DRLMS_BACKEND (legacy)
@@ -90,6 +93,46 @@ class BackendConfig:
 
         Also checks DRLMS_RELAYS_CONFIG for additional relay configuration.
         """
+        # Use UnifiedConfig for centralized configuration
+        # Force reload to pick up any env var changes
+        try:
+            from .unified_config import get_config
+
+            cfg = get_config(reload=True)
+
+            mode_str = cfg.backend.mode
+            mode = (
+                BackendMode(mode_str)
+                if mode_str in [m.value for m in BackendMode]
+                else BackendMode.RELAY_ONLY
+            )
+
+            relays = cfg.backend.relay.urls
+
+            # Also try to load from config_file if available and no relays set
+            if not relays and cfg.backend.relay.config_file:
+                config_relays = cls._load_relays_from_toml(
+                    Path(cfg.backend.relay.config_file)
+                )
+                if config_relays:
+                    relays = config_relays
+
+            return cls(
+                mode=mode,
+                default_relays=relays,
+                keyserver_timeout=cfg.keyserver.timeout,
+                default_trust_policy=cfg.trust.default_policy,
+                key_change_action=cfg.trust.key_change_action,
+                mp2_host=cfg.backend.mp2.host,
+                mp2_port=cfg.backend.mp2.port,
+            )
+        except Exception:
+            # Fallback to legacy env-only loading if UnifiedConfig fails
+            return cls._from_env_legacy()
+
+    @classmethod
+    def _from_env_legacy(cls) -> "BackendConfig":
+        """Legacy: Create config from environment variables only."""
         # Mode: prefer DRLMS_BACKEND_MODE, fallback to DRLMS_BACKEND
         mode_str = os.environ.get("DRLMS_BACKEND_MODE") or os.environ.get(
             "DRLMS_BACKEND", "relay"
@@ -101,10 +144,8 @@ class BackendConfig:
         )
 
         # Get default relays from env
-        # Prefer DRLMS_DEFAULT_RELAYS, fallback to DRLMS_RELAY_BASE_URL
         relays_str = os.environ.get("DRLMS_DEFAULT_RELAYS", "")
         if not relays_str:
-            # Legacy: single relay URL
             legacy_url = os.environ.get("DRLMS_RELAY_BASE_URL", "")
             if legacy_url:
                 relays_str = legacy_url
