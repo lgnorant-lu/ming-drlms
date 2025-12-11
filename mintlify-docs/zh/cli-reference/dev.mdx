@@ -1,0 +1,117 @@
+---
+title: "dev"
+description: "[Advanced] 开发与调试命令"
+---
+
+## 概述
+
+`dev` 命令组提供开发、测试和构建相关的命令。
+
+```bash
+ming-drlms dev --help
+```
+
+---
+
+## 命令列表
+
+| 命令 | 说明 |
+|------|------|
+| `test` | 运行测试 (ipc/integration/all) |
+| `coverage` | 覆盖率报告 (run/show) |
+| `pkg` | 打包管理 (build/install/uninstall) |
+| `artifacts` | 构建产物 (artifacts/run) |
+
+---
+
+## dev test
+
+运行测试。
+
+### 子命令
+
+| 命令 | 说明 |
+|------|------|
+| `test ipc` | 运行 IPC 测试套件 |
+| `test integration` | 运行集成测试 |
+| `test all` | 运行所有测试 |
+
+### 示例
+
+```bash
+ming-drlms dev test ipc
+ming-drlms dev test integration --host 127.0.0.1 --port 8080
+ming-drlms dev test all
+```
+
+---
+
+## dev coverage
+
+覆盖率报告。
+
+### 子命令
+
+| 命令 | 说明 |
+|------|------|
+| `coverage run` | 运行覆盖率收集 |
+| `coverage show` | 显示覆盖率报告 |
+
+### 示例
+
+```bash
+ming-drlms dev coverage run
+ming-drlms dev coverage show         # 默认显示 120 行
+ming-drlms dev coverage show 50      # 显示前 50 行
+```
+
+---
+
+## dev pkg
+
+打包管理命令。
+
+### 子命令
+
+| 命令 | 说明 |
+|------|------|
+| `pkg build` | 构建发布包 |
+| `pkg install` | 安装 |
+| `pkg uninstall` | 卸载 |
+
+### 示例
+
+```bash
+ming-drlms dev pkg build
+ming-drlms dev pkg install           # 无 sudo
+ming-drlms dev pkg install --sudo    # 使用 sudo
+ming-drlms dev pkg uninstall --sudo  # 卸载
+```
+
+---
+
+## dev artifacts
+
+构建产物管理。
+
+### 子命令
+
+| 命令 | 说明 |
+|------|------|
+| `artifacts artifacts` | 收集构建产物 |
+| `artifacts run` | 运行并收集 |
+
+### 示例
+
+```bash
+ming-drlms dev artifacts artifacts --out ./artifacts
+ming-drlms dev artifacts run --out ./artifacts
+```
+
+---
+
+## 相关文档
+
+- [测试指南](/zh/development/testing) - 测试详情
+- [构建指南](/zh/development/building) - 构建详情
+- [贡献指南](/zh/development/contributing) - 贡献流程

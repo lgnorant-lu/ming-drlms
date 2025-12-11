@@ -1,0 +1,330 @@
+---
+title: "relay-room"
+description: "[Relay Only] Relay-native 房间管理命令"
+---
+
+## 概述
+
+`relay-room` 命令组用于管理 Relay 原生房间。与 MP2 模式的 `room` 命令不同，这些房间完全去中心化，数据存储在 Relay 网络中。
+
+```bash
+ming-drlms relay-room --help
+```
+
+---
+
+## 命令列表
+
+| 命令 | 说明 |
+|------|------|
+| `create` | 创建新房间 |
+| `list` | 列出已加入的房间 |
+| `invite` | 生成邀请链接 |
+| `join` | 通过邀请链接加入房间 |
+| `leave` | 离开房间 |
+| `discover` | 发现公开房间 |
+| `info` | 显示房间详情 |
+
+---
+
+## relay-room create
+
+创建一个新的 Relay-native 房间。
+
+### 语法
+
+```bash
+ming-drlms relay-room create [选项]
+```
+
+### 选项
+
+| 选项 | 简写 | 默认值 | 说明 |
+|------|------|--------|------|
+| `--name` | `-n` | - | 房间名称 |
+| `--desc` | `-d` | - | 房间描述 |
+| `--visibility` | `-v` | `private` | 可见性: private, unlisted, public |
+| `--relays` | `-r` | - | Relay 列表（逗号分隔） |
+
+### 可见性选项
+
+| 可见性 | 说明 |
+|--------|------|
+| `private` | 仅通过邀请链接加入 |
+| `unlisted` | 不在公开列表中，但链接可访问 |
+| `public` | 公开可见，可被发现 |
+
+### 示例
+
+```bash
+# 创建私有房间
+ming-drlms relay-room create --name "我的房间"
+
+# 创建公开房间
+ming-drlms relay-room create --name "公共聊天" --visibility public
+
+# 指定 Relay 服务器
+ming-drlms relay-room create --name "项目讨论" --relays "relay1.example.com,relay2.example.com"
+```
+
+### 输出示例
+
+```
+房间创建成功！
+
+房间 ID: rm_1234567890abcdef
+可见性: private
+名称: 我的房间
+
+邀请链接:
+  drlms://room/rm_1234567890abcdef?key=...&relays=...
+```
+
+---
+
+## relay-room list
+
+列出所有已加入的房间。
+
+### 语法
+
+```bash
+ming-drlms relay-room list [选项]
+```
+
+### 选项
+
+| 选项 | 简写 | 说明 |
+|------|------|------|
+| `--visibility` | `-v` | 按可见性过滤 |
+
+### 示例
+
+```bash
+# 列出所有房间
+ming-drlms relay-room list
+
+# 仅列出公开房间
+ming-drlms relay-room list --visibility public
+```
+
+### 输出示例
+
+```
+          已加入房间
+┌────────────┬──────────┬──────────┬────────────┬────────────────┐
+│ ID          │ 名称     │ 可见性   │ 加入时间   │ 最后活动       │
+├────────────┼──────────┼──────────┼────────────┼────────────────┤
+│ rm_1234...  │ 我的房间 │ private  │ 2025-12-11 │ 2025-12-11 14:30 │
+│ rm_5678...  │ 公共聊天 │ public   │ 2025-12-10 │ 2025-12-11 10:00 │
+└────────────┴──────────┴──────────┴────────────┴────────────────┘
+```
+
+---
+
+## relay-room invite
+
+为房间生成邀请链接。
+
+### 语法
+
+```bash
+ming-drlms relay-room invite <房间ID>
+```
+
+### 示例
+
+```bash
+ming-drlms relay-room invite rm_1234567890abcdef
+```
+
+### 输出示例
+
+```
+房间: 我的房间 (rm_1234567890abcdef)
+
+邀请链接:
+  drlms://room/rm_1234567890abcdef?key=AbCdEf...&relays=relay.example.com
+
+分享此链接给其他用户以邀请他们加入
+```
+
+### 邀请链接格式
+
+```
+drlms://room/{room_id}?key={room_key}&relays={relay1},{relay2}
+```
+
+| 参数 | 说明 |
+|------|------|
+| `room_id` | 房间唯一标识 |
+| `key` | 房间加密密钥（用于解密消息） |
+| `relays` | Relay 服务器列表 |
+
+---
+
+## relay-room join
+
+通过邀请链接加入房间。
+
+### 语法
+
+```bash
+ming-drlms relay-room join <邀请链接>
+```
+
+### 示例
+
+```bash
+ming-drlms relay-room join "drlms://room/rm_1234...?key=...&relays=..."
+```
+
+### 输出示例
+
+```
+正在解析邀请链接...
+正在加入房间 rm_1234567890abcdef...
+
+加入成功！
+房间: 我的房间
+Relays: relay.example.com
+```
+
+---
+
+## relay-room leave
+
+离开房间。
+
+### 语法
+
+```bash
+ming-drlms relay-room leave <房间ID> [选项]
+```
+
+### 选项
+
+| 选项 | 简写 | 说明 |
+|------|------|------|
+| `--force` | `-f` | 跳过确认 |
+
+### 示例
+
+```bash
+ming-drlms relay-room leave rm_1234567890abcdef
+ming-drlms relay-room leave rm_1234567890abcdef --force
+```
+
+---
+
+## relay-room discover
+
+发现公开房间。
+
+### 语法
+
+```bash
+ming-drlms relay-room discover [选项]
+```
+
+### 选项
+
+| 选项 | 简写 | 说明 |
+|------|------|------|
+| `--relays` | `-r` | Relay 列表（逗号分隔，必需） |
+
+### 示例
+
+```bash
+# 从指定 Relay 发现房间
+ming-drlms relay-room discover --relays relay.example.com
+
+# 从多个 Relay 发现
+ming-drlms relay-room discover --relays "relay1.example.com,relay2.example.com"
+```
+
+### 输出示例
+
+```
+          发现 2 个公开房间
+┌────────────┬──────────────┬──────────────────┬────────────────┐
+│ ID          │ 名称         │ 描述             │ 创建者         │
+├────────────┼──────────────┼──────────────────┼────────────────┤
+│ rm_abcd...  │ General Chat │ 欢迎大家加入... │ 1234 5678...   │
+│ rm_efgh...  │ Tech Talk    │ 技术讨论...       │ abcd ef01...   │
+└────────────┴──────────────┴──────────────────┴────────────────┘
+
+使用 'ming-drlms relay-room join <invite_link>' 加入房间
+```
+
+---
+
+## relay-room info
+
+显示房间详细信息。
+
+### 语法
+
+```bash
+ming-drlms relay-room info <房间ID>
+```
+
+### 示例
+
+```bash
+ming-drlms relay-room info rm_1234567890abcdef
+```
+
+### 输出示例
+
+```
+          房间信息
+┌─────────────┬──────────────────────────┐
+│ 属性        │ 值                       │
+├─────────────┼──────────────────────────┤
+│ 房间 ID     │ rm_1234567890abcdef      │
+│ 名称        │ 我的房间                 │
+│ 描述        │ 这是一个测试房间         │
+│ 可见性      │ private                  │
+│ 创建者指纹  │ 1234 5678 9ABC DEF0...   │
+│ 创建时间    │ 2025-12-11 10:00:00      │
+│ 加入时间    │ 2025-12-11 10:05:00      │
+│ 最后活动    │ 2025-12-11 14:30:00      │
+│ 加密        │ 是                       │
+│ Relay 数量  │ 1                        │
+└─────────────┴──────────────────────────┘
+
+Relay 列表:
+  • https://relay.example.com
+
+邀请链接:
+drlms://room/rm_1234567890abcdef?key=...
+```
+
+---
+
+## 房间存储
+
+房间配置本地存储在 `~/.config/ming-drlms/rooms.json`：
+
+```json
+{
+  "rooms": [
+    {
+      "room_id": "rm_1234567890abcdef",
+      "name": "我的房间",
+      "visibility": "private",
+      "room_key": "...",
+      "relays": ["https://relay.example.com"],
+      "joined_at": "2025-12-11T10:00:00Z"
+    }
+  ]
+}
+```
+
+---
+
+## 相关命令
+
+- [chat](/zh/cli-reference/chat) - Relay 聊天命令
+- [room](/zh/cli-reference/room) - MP2 房间管理（传统模式）

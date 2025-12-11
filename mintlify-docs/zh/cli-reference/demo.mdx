@@ -1,0 +1,75 @@
+---
+title: "demo"
+description: "演示与快速启动命令"
+---
+
+## 概述
+
+`demo` 命令组提供快速演示脚本，帮助新用户快速体验 DRLMS 功能。
+
+```bash
+ming-drlms demo --help
+```
+
+---
+
+## 命令列表
+
+| 命令 | 说明 |
+|------|------|
+| `quickstart` | 快速启动演示 |
+
+---
+
+## demo quickstart
+
+启动快速演示，测试基本功能。
+
+### 语法
+
+```bash
+ming-drlms demo quickstart
+```
+
+<Note>
+此命令无额外选项，自动使用默认配置。
+</Note>
+
+### 执行内容
+
+1. 启动 C 服务器（端口 8080，宽松认证模式）
+2. 运行 `client list` 测试连接
+3. 上传/下载 README.md 测试文件传输
+4. 运行集成测试
+5. 停止服务器
+
+### 说明
+
+- 需要已编译的 C 二进制文件（log_collector_server, log_agent）
+- 缺少二进制文件时会跳过相关步骤
+- 默认用户: alice/password
+
+---
+
+## 数据目录
+
+演示使用项目根目录下的 `server_files/` 作为数据目录：
+
+```bash
+# 数据目录位置
+{项目根目录}/server_files/
+
+# 下载的测试文件
+/tmp/README.md
+```
+
+<Note>
+`server_files/` 包含用户认证文件和服务器数据，请勿随意删除。
+</Note>
+
+---
+
+## 相关命令
+
+- [help](/zh/cli-reference/help) - 帮助系统
+- [server](/zh/cli-reference/server) - 服务器管理

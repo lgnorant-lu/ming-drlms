@@ -1,0 +1,143 @@
+---
+title: "系统 API"
+description: "Relay 服务器健康检查与发现端点"
+---
+
+## 概述
+
+系统 API 提供健康检查和公钥发现功能。
+
+---
+
+## GET /health
+
+检查 Relay 服务器健康状态。
+
+### 请求
+
+```http
+GET /health
+```
+
+### 响应
+
+```json
+{
+  "status": "ok",
+  "timestamp": 1702300000,
+  "version": "0.4.0",
+  "relay_id": "relay-default",
+  "signature_schemes": ["xeddsa"],
+  "pubkey": "hex_encoded_32_bytes_ed25519_pubkey",
+  "pubkey_type": "ed25519"
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `status` | string | 状态：`ok` / `degraded` |
+| `timestamp` | integer | 当前服务器时间戳（秒） |
+| `version` | string | 服务器版本 |
+| `relay_id` | string | Relay 标识（来自 `DRLMS_RELAY_ID` 环境变量） |
+| `signature_schemes` | array | 支持的签名方案（Phase 17C 后仅 `xeddsa`） |
+| `pubkey` | string | Relay Ed25519 公钥（hex，仅配置签名时返回） |
+| `pubkey_type` | string | 公钥类型（`ed25519`） |
+| `warning` | string | 警告信息（仅 `degraded` 状态时） |
+
+### 状态说明
+
+| 状态 | 条件 | 说明 |
+|------|------|------|
+| `ok` | XEdDSA 签名已配置 | 正常运行 |
+| `degraded` | XEdDSA 签名未配置 | 缺少 `DRLMS_RELAY_SIGNING_PRIVKEY` |
+
+### 示例
+
+<Tabs>
+  <Tab title="curl">
+    ```bash
+    curl http://localhost:8081/health
+    ```
+  </Tab>
+  <Tab title="PowerShell">
+    ```powershell
+    Invoke-RestMethod http://localhost:8081/health
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## GET /.well-known/drlms-relay.json
+
+获取 Relay 服务器公钥信息，用于签名验证（Phase 17B）。
+
+### 请求
+
+```http
+GET /.well-known/drlms-relay.json
+```
+
+### 响应
+
+```json
+{
+  "version": 2,
+  "relay_id": "relay-default",
+  "signature_schemes": ["xeddsa"],
+  "pubkey": "hex_encoded_32_bytes_ed25519_pubkey",
+  "pubkey_type": "ed25519"
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `version` | integer | 协议版本（Phase 17C 为 2） |
+| `relay_id` | string | Relay 标识 |
+| `signature_schemes` | array | 支持的签名方案 |
+| `pubkey` | string | Relay Ed25519 公钥（hex，仅配置签名时返回） |
+| `pubkey_type` | string | 公钥类型 |
+
+### 用途
+
+客户端使用此端点：
+
+1. 自动发现 Relay 公钥
+2. 验证存储回执签名
+3. 无需手动配置公钥
+
+### 示例
+
+<Tabs>
+  <Tab title="curl">
+    ```bash
+    curl http://localhost:8081/.well-known/drlms-relay.json
+    ```
+  </Tab>
+  <Tab title="PowerShell">
+    ```powershell
+    Invoke-RestMethod http://localhost:8081/.well-known/drlms-relay.json
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## 客户端验证流程
+
+```
+1. 获取 /.well-known/drlms-relay.json
+2. 提取 pubkey
+3. 投递事件，获取 xeddsa_signature 和 relay_pubkey
+4. 验证 relay_pubkey 与 well-known 中的 pubkey 一致
+5. 使用 pubkey 验证 xeddsa_signature
+6. 签名消息格式: event_id|room|server_seq|server_ts|relay_id
+7. 验证通过则确认存储成功
+```
+
+---
+
+## 相关文档
+
+- [API 概述](/zh/api-reference/overview) - API 总览
+- [XEdDSA 签名](/zh/security/xeddsa) - 签名算法

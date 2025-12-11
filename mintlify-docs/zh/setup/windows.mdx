@@ -1,0 +1,259 @@
+---
+title: "Windows 配置"
+description: "Windows 环境下的 DRLMS 安装与配置指南"
+---
+
+## 概述
+
+DRLMS 完全支持 Windows 10/11。本指南涵盖原生 Windows 和 WSL 两种环境的配置。
+
+---
+
+## 前置要求
+
+- Windows 10 1903+ 或 Windows 11
+- Python 3.10+（推荐从 [python.org](https://www.python.org/downloads/) 或 Microsoft Store 安装）
+- 可选：Windows Terminal（更好的终端体验）
+
+---
+
+## Python 安装
+
+### 方式一：Microsoft Store（推荐）
+
+1. 打开 Microsoft Store
+2. 搜索 "Python 3.11" 或 "Python 3.12"
+3. 点击安装
+
+### 方式二：官方安装包
+
+1. 下载 [Python 官方安装包](https://www.python.org/downloads/)
+2. 运行安装程序
+3. 勾选 "Add Python to PATH"
+4. 选择 "Customize installation"
+5. 确保勾选 pip
+
+验证安装：
+
+```powershell
+python --version
+pip --version
+```
+
+---
+
+## 安装 DRLMS
+
+### 使用 uv（推荐）
+
+```powershell
+# 安装 uv
+powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+# 重启 PowerShell
+
+# 安装 DRLMS
+uv tool install ming-drlms
+
+# 验证
+ming-drlms --version
+```
+
+### 使用 pipx
+
+```powershell
+pipx install ming-drlms
+```
+
+---
+
+## 路径配置
+
+### 用户目录
+
+DRLMS 在 Windows 上使用以下默认路径：
+
+| 用途 | 路径 |
+|------|------|
+| 配置目录 | `%APPDATA%\DRLMS\` |
+| 数据目录 | `%LOCALAPPDATA%\DRLMS\` |
+| 缓存目录 | `%LOCALAPPDATA%\DRLMS\cache\` |
+
+### 自定义路径
+
+通过环境变量覆盖：
+
+```powershell
+# 永久设置（用户级）
+[Environment]::SetEnvironmentVariable("MING_DRLMS_CONFIG_DIR", "D:\MyConfig\drlms", "User")
+[Environment]::SetEnvironmentVariable("DRLMS_DATA_DIR", "D:\MyData\drlms", "User")
+```
+
+---
+
+## 环境变量配置
+
+### 临时设置（当前会话）
+
+```powershell
+$env:DRLMS_BACKEND_MODE = "relay"
+$env:DRLMS_DEFAULT_RELAYS = "http://localhost:8081"
+$env:DRLMS_LOG_LEVEL = "INFO"
+```
+
+### 永久设置
+
+```powershell
+# 用户级环境变量
+[Environment]::SetEnvironmentVariable("DRLMS_BACKEND_MODE", "relay", "User")
+[Environment]::SetEnvironmentVariable("DRLMS_DEFAULT_RELAYS", "http://localhost:8081", "User")
+```
+
+### 使用 .env 文件
+
+创建 `.env.local` 文件：
+
+```ini
+DRLMS_BACKEND_MODE=relay
+DRLMS_DEFAULT_RELAYS=http://localhost:8081
+DRLMS_LOG_LEVEL=INFO
+```
+
+加载环境变量：
+
+```powershell
+# PowerShell 加载脚本
+Get-Content .env.local | ForEach-Object {
+    if ($_ -match '^([^#=]+)=(.*)$') {
+        $name = $matches[1].Trim()
+        $value = $matches[2].Trim()
+        [Environment]::SetEnvironmentVariable($name, $value, "Process")
+    }
+}
+```
+
+---
+
+## TUI 配置
+
+### Windows Terminal 设置
+
+为获得最佳 TUI 体验，推荐使用 Windows Terminal：
+
+1. 安装 [Windows Terminal](https://aka.ms/terminal)
+2. 设置字体为支持 Unicode 的等宽字体（如 Cascadia Code、JetBrains Mono）
+3. 启用 Unicode 支持
+
+```json
+// settings.json 片段
+{
+    "profiles": {
+        "defaults": {
+            "font": {
+                "face": "Cascadia Code",
+                "size": 12
+            }
+        }
+    }
+}
+```
+
+### 传统 CMD/PowerShell
+
+如果使用传统终端，设置代码页：
+
+```powershell
+# 设置 UTF-8
+chcp 65001
+```
+
+---
+
+## 构建 C 服务器（可选）
+
+### 前置条件
+
+1. Visual Studio 2022（含 C++ 工作负载）
+2. CMake 3.18+
+3. vcpkg
+
+### 安装 vcpkg
+
+```powershell
+git clone https://github.com/Microsoft/vcpkg.git C:\vcpkg
+cd C:\vcpkg
+.\bootstrap-vcpkg.bat
+.\vcpkg integrate install
+```
+
+### 构建
+
+```powershell
+cd ming-drlms
+mkdir build
+cd build
+cmake .. -G "Visual Studio 17 2022" -DCMAKE_TOOLCHAIN_FILE=C:\vcpkg\scripts\buildsystems\vcpkg.cmake
+cmake --build . --config Release
+```
+
+---
+
+## 防火墙配置
+
+运行服务器时需要允许网络访问：
+
+```powershell
+# 允许 Relay 服务器端口
+New-NetFirewallRule -DisplayName "DRLMS Relay" -Direction Inbound -LocalPort 8081 -Protocol TCP -Action Allow
+
+# 允许 C 服务器端口（默认 15034）
+New-NetFirewallRule -DisplayName "DRLMS Server" -Direction Inbound -LocalPort 15034 -Protocol TCP -Action Allow
+```
+
+---
+
+## 常见问题
+
+### pip 安装失败
+
+```powershell
+# 升级 pip
+python -m pip install --upgrade pip
+
+# 使用国内镜像
+pip install ming-drlms -i https://pypi.tuna.tsinghua.edu.cn/simple
+```
+
+### 命令未找到
+
+确保 Python Scripts 目录在 PATH 中：
+
+```powershell
+# 检查 PATH
+$env:PATH -split ";"
+
+# 添加到 PATH（用户级）
+$scriptsPath = [Environment]::GetFolderPath("LocalApplicationData") + "\Programs\Python\Python311\Scripts"
+[Environment]::SetEnvironmentVariable("PATH", $env:PATH + ";" + $scriptsPath, "User")
+```
+
+### TUI 显示异常
+
+1. 使用 Windows Terminal
+2. 设置正确的字体
+3. 检查终端尺寸（建议 120x30 以上）
+
+### 编码问题
+
+```powershell
+# 设置 PowerShell 默认编码
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
+```
+
+---
+
+## 相关文档
+
+- [WSL 配置](/zh/setup/wsl) - Windows 子系统 Linux 环境
+- [环境变量](/zh/setup/environment-variables) - 完整环境变量参考

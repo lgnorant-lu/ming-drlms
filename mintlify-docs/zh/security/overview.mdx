@@ -1,0 +1,256 @@
+---
+title: "安全概述"
+description: "DRLMS 安全架构与防护机制"
+---
+
+## 安全设计原则
+
+DRLMS 遵循以下安全设计原则：
+
+- **纵深防御**: 多层安全机制，单点失效不导致全面失败
+- **最小权限**: 组件仅拥有完成任务所需的最小权限
+- **默认安全**: 安全功能默认启用
+- **可审计**: 关键操作可追溯
+
+---
+
+## 安全架构
+
+### 层级防御模型
+
+```
+┌─────────────────────────────────────────┐
+│           应用层安全                     │
+│   身份管理 | 信任验证 | 访问控制         │
+├─────────────────────────────────────────┤
+│           消息层安全                     │
+│   Signal E2EE | XEdDSA 签名             │
+├─────────────────────────────────────────┤
+│           会话层安全                     │
+│   JWT Token | 会话管理                   │
+├─────────────────────────────────────────┤
+│           认证层安全                     │
+│   Argon2id | Challenge-Response         │
+├─────────────────────────────────────────┤
+│           传输层安全                     │
+│   TLS 1.3（可选）                        │
+└─────────────────────────────────────────┘
+```
+
+---
+
+## 认证安全
+
+### 密码存储
+
+使用 Argon2id 哈希密码：
+
+```
+Argon2id(password, salt)
+  m = 65536 (64 MB)
+  t = 2 (迭代次数)
+  p = 1 (并行度)
+```
+
+### Challenge-Response
+
+防止重放攻击：
+
+```
+Client                    Server
+   │                        │
+   │  CHALLENGE_REQUEST     │
+   │───────────────────────►│
+   │                        │
+   │  CHALLENGE_RESPONSE    │
+   │◄───────────────────────│
+   │  (nonce)               │
+   │                        │
+   │  AUTHENTICATE          │
+   │───────────────────────►│
+   │  hash(pwd + nonce)     │
+```
+
+### JWT Token
+
+| 属性 | 值 |
+|------|------|
+| 算法 | HS256 |
+| Access Token 有效期 | 15 分钟 |
+| Refresh Token 有效期 | 7 天 |
+
+---
+
+## 端到端加密
+
+### Signal 协议
+
+实现完整的 Signal 协议：
+
+- **X3DH**: Extended Triple Diffie-Hellman 密钥协商
+- **Double Ratchet**: 消息加密与密钥更新
+- **前向安全**: 密钥泄露不影响历史消息
+- **后向安全**: 密钥泄露不影响未来消息
+
+### XEdDSA 签名
+
+使用 XEdDSA 实现 X25519 密钥的签名功能：
+
+- 与 Signal 身份密钥统一
+- 消息完整性验证
+- 发送者不可否认性
+
+详见 [XEdDSA 签名](/zh/security/xeddsa)。
+
+---
+
+## 信任模型
+
+### 信任级别
+
+| 级别 | 名称 | 说明 |
+|------|------|------|
+| 0 | TOFU | 首次信任 |
+| 1 | 手动验证 | 指纹比对 |
+| 2 | 社交担保 | 已验证联系人担保 |
+| 3 | 外部锚定 | DNS/HTTPS/GitHub |
+
+### 密钥变更检测
+
+自动检测联系人公钥变更，防止中间人攻击。
+
+详见 [信任模型](/zh/security/trust-model)。
+
+---
+
+## 数据保护
+
+### 静态数据
+
+| 数据类型 | 保护方式 |
+|----------|----------|
+| 身份私钥 | 本地 JSON 文件，权限 600 |
+| 会话状态 | 本地 JSON 文件（e2ee_keys.json） |
+| 信任存储 | 本地 JSON 文件（trust_store.json） |
+| 配置文件 | 本地文件，明文 |
+
+### 传输数据
+
+| 场景 | 保护方式 |
+|------|----------|
+| MP2 通信 | TLS（可选）+ E2EE |
+| Relay 通信 | HTTPS + E2EE |
+| 消息内容 | Signal E2EE |
+
+---
+
+## 安全配置
+
+### 生产环境必须配置
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    # 更换 JWT 密钥
+    export DRLMS_JWT_SECRET=$(openssl rand -hex 32)
+    
+    # 启用严格认证
+    export DRLMS_AUTH_STRICT=1
+    
+    # 强制签名验证
+    export DRLMS_RELAY_ENFORCE_SIGNED=1
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    # 更换 JWT 密钥
+    $env:DRLMS_JWT_SECRET = -join ((48..57) + (97..102) | Get-Random -Count 64 | ForEach-Object {[char]$_})
+    
+    # 启用严格认证
+    $env:DRLMS_AUTH_STRICT = "1"
+    
+    # 强制签名验证
+    $env:DRLMS_RELAY_ENFORCE_SIGNED = "1"
+    ```
+  </Tab>
+</Tabs>
+
+### 推荐配置
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    # 信任策略
+    export DRLMS_TRUST_POLICY=manual_only
+    
+    # 密钥变更行为
+    export DRLMS_KEY_CHANGE_ACTION=block
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    # 信任策略
+    $env:DRLMS_TRUST_POLICY = "manual_only"
+    
+    # 密钥变更行为
+    $env:DRLMS_KEY_CHANGE_ACTION = "block"
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## 安全审计
+
+### 日志记录
+
+关键安全事件记录：
+
+- 认证尝试（成功/失败）
+- 密钥生成/变更
+- 信任级别变更
+- 异常访问
+
+### 审计日志位置
+
+```
+$DRLMS_DATA_DIR/logs/audit.log.jsonl
+```
+
+默认位置：`./logs/audit.log.jsonl`
+
+---
+
+## 已知限制
+
+1. **元数据暴露**: Relay 服务器可见发送者/接收者公钥
+2. **单设备**: 当前不支持多设备同步
+3. **无 PFS 重协商**: 长期会话不会自动重新协商密钥
+
+---
+
+## 漏洞报告
+
+发现安全漏洞请通过以下方式报告：
+
+- GitHub Security Advisory
+- 邮件：security@example.com（加密）
+
+---
+
+## 相关文档
+
+<Columns cols={2}>
+  <Card title="XEdDSA 签名" icon="signature" href="/zh/security/xeddsa">
+    签名算法详解
+  </Card>
+  <Card title="信任模型" icon="shield" href="/zh/security/trust-model">
+    信任机制详解
+  </Card>
+  <Card title="密钥生命周期" icon="key" href="/zh/security/key-lifecycle">
+    密钥管理
+  </Card>
+  <Card title="威胁模型" icon="skull" href="/zh/security/threat-model">
+    威胁分析
+  </Card>
+</Columns>

@@ -1,0 +1,219 @@
+---
+title: "API 概述"
+description: "Relay 服务器 REST API 参考"
+---
+
+## 简介
+
+DRLMS Relay 服务器提供 REST API 用于事件存储、文件传输和系统监控。
+
+基础 URL: `http://<relay-host>:<port>`
+
+---
+
+## 认证
+
+当前版本的 Relay 服务器不要求请求认证。事件完整性通过 XEdDSA 签名在客户端验证。
+
+---
+
+## 端点概览
+
+### 事件端点
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `POST` | `/events` | 投递事件 |
+| `GET` | `/events` | 拉取事件 |
+| `GET` | `/events/by-ids` | 按 ID 获取事件 |
+
+### 文件端点
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `POST` | `/files` | 上传文件 |
+| `GET` | `/files/{file_id}` | 下载文件 |
+| `HEAD` | `/files/{file_id}` | 获取文件元信息 |
+
+### 系统端点
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `GET` | `/health` | 健康检查 |
+| `GET` | `/.well-known/drlms-relay.json` | 公钥发现 |
+
+### Merkle 端点
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `GET` | `/merkle/root` | 获取 Merkle 根 |
+| `POST` | `/merkle/diff` | 计算差异 |
+| `GET` | `/merkle/proof` | 获取证明 |
+| `GET` | `/merkle/events` | 获取事件列表 |
+
+---
+
+## 响应格式
+
+### 错误响应
+
+所有错误以 FastAPI HTTPException 格式返回：
+
+```json
+{
+  "detail": "Error message"
+}
+```
+
+HTTP 状态码：
+- `200`: 成功
+- `400`: 请求错误（缺少必需字段、格式错误）
+- `404`: 资源不存在
+- `500`: 服务器内部错误（数据库错误等）
+
+---
+
+## 数据模型
+
+### CipherEvent
+
+加密事件对象（GET /events 返回）：
+
+```json
+{
+  "room": "room_name",
+  "server_seq": 1,
+  "server_ts": 1702300000,
+  "ciphertext": "base64_encoded_encrypted_data",
+  "client_hash": "sha256_hex_hash",
+  "content_len": 128
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `room` | string | 房间 ID |
+| `server_seq` | integer | 服务器分配的序号 |
+| `server_ts` | integer | 服务器时间戳（秒） |
+| `ciphertext` | string | Base64 编码的加密数据 |
+| `client_hash` | string | 客户端事件哈希（可选） |
+| `content_len` | integer | 明文内容长度（可选） |
+
+### EventAck
+
+事件投递确认（POST /events 返回）：
+
+```json
+{
+  "server_seq": 1,
+  "server_ts": 1702300000,
+  "relay_id": "relay-default",
+  "xeddsa_signature": "hex_encoded_64_bytes",
+  "relay_pubkey": "hex_encoded_32_bytes"
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `server_seq` | integer | 服务器分配的序号 |
+| `server_ts` | integer | 服务器时间戳（秒） |
+| `relay_id` | string | Relay 标识（总是返回） |
+| `xeddsa_signature` | string | XEdDSA 回执签名（仅配置签名且提供 `client_event_hash` 时） |
+| `relay_pubkey` | string | Relay Ed25519 公钥（仅配置签名且提供 `client_event_hash` 时） |
+
+---
+
+## 快速参考
+
+### 投递事件
+
+<Tabs>
+  <Tab title="curl">
+    ```bash
+    curl -X POST http://localhost:8081/events \
+      -H "Content-Type: application/json" \
+      -d '{
+        "room": "general",
+        "ciphertext": "encrypted_data_base64",
+        "client_event_hash": "sha256_hex",
+        "client_ts": 1702300000
+      }'
+    ```
+  </Tab>
+  <Tab title="PowerShell">
+    ```powershell
+    $body = @{
+        room = "general"
+        ciphertext = "encrypted_data_base64"
+        client_event_hash = "sha256_hex"
+        client_ts = 1702300000
+    } | ConvertTo-Json
+
+    Invoke-RestMethod -Uri "http://localhost:8081/events" -Method Post -Body $body -ContentType "application/json"
+    ```
+  </Tab>
+</Tabs>
+
+### 拉取事件
+
+<Tabs>
+  <Tab title="curl">
+    ```bash
+    curl "http://localhost:8081/events?room=general&since_seq=0&limit=20"
+    ```
+  </Tab>
+  <Tab title="PowerShell">
+    ```powershell
+    Invoke-RestMethod "http://localhost:8081/events?room=general&since_seq=0&limit=20"
+    ```
+  </Tab>
+</Tabs>
+
+### 健康检查
+
+<Tabs>
+  <Tab title="curl">
+    ```bash
+    curl http://localhost:8081/health
+    ```
+  </Tab>
+  <Tab title="PowerShell">
+    ```powershell
+    Invoke-RestMethod http://localhost:8081/health
+    ```
+  </Tab>
+</Tabs>
+
+### 公钥发现
+
+<Tabs>
+  <Tab title="curl">
+    ```bash
+    curl http://localhost:8081/.well-known/drlms-relay.json
+    ```
+  </Tab>
+  <Tab title="PowerShell">
+    ```powershell
+    Invoke-RestMethod http://localhost:8081/.well-known/drlms-relay.json
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## 详细参考
+
+<Columns cols={2}>
+  <Card title="事件 API" icon="message" href="/zh/api-reference/events">
+    事件投递与拉取
+  </Card>
+  <Card title="文件 API" icon="file" href="/zh/api-reference/files">
+    文件上传与下载
+  </Card>
+  <Card title="系统 API" icon="heart-pulse" href="/zh/api-reference/health">
+    健康检查与公钥发现
+  </Card>
+  <Card title="Merkle API" icon="sitemap" href="/zh/api-reference/merkle">
+    一致性验证
+  </Card>
+</Columns>

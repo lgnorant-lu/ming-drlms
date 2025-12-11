@@ -1,0 +1,227 @@
+---
+title: "Docker 配置"
+description: "使用 Docker 部署 DRLMS"
+---
+
+<Warning>
+**计划中功能**: Docker 镜像和相关配置尚未正式发布。本文档描述的是后续版本计划支持的部署方式，供参考和预览。当前请使用 [Relay 服务器部署](/zh/operations/relay-server) 中描述的原生部署方式。
+</Warning>
+
+## 概述
+
+DRLMS 计划提供 Docker 镜像，方便快速部署 Relay 服务器。
+
+---
+
+## 快速开始
+
+### 拉取镜像
+
+```bash
+docker pull ghcr.io/lgnorant-lu/ming-drlms:latest
+```
+
+### 运行 Relay 服务器
+
+```bash
+docker run -d \
+  --name drlms-relay \
+  -p 8081:8081 \
+  -v drlms-data:/data \
+  -e DRLMS_DB_PATH=/data/relay.db \
+  ghcr.io/lgnorant-lu/ming-drlms:latest \
+  uvicorn ming_drlms.relay.server:app --host 0.0.0.0 --port 8081
+```
+
+---
+
+## Dockerfile
+
+### Relay 服务器
+
+```dockerfile
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# 安装依赖
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# 复制代码
+COPY . .
+RUN pip install --no-cache-dir .
+
+# 创建数据目录
+RUN mkdir -p /data
+
+# 暴露端口
+EXPOSE 8081
+
+# 环境变量
+ENV DRLMS_DB_PATH=/data/relay.db
+ENV DRLMS_FILES_DIR=/data/files
+
+# 启动命令
+CMD ["uvicorn", "ming_drlms.relay.server:app", "--host", "0.0.0.0", "--port", "8081"]
+```
+
+### 构建镜像
+
+```bash
+docker build -t drlms-relay:latest .
+```
+
+---
+
+## Docker Compose
+
+### 单 Relay 部署
+
+```yaml
+# docker-compose.yml
+version: '3.8'
+
+services:
+  relay:
+    image: ghcr.io/lgnorant-lu/ming-drlms:latest
+    command: uvicorn ming_drlms.relay.server:app --host 0.0.0.0 --port 8081
+    ports:
+      - "8081:8081"
+    volumes:
+      - relay-data:/data
+    environment:
+      - DRLMS_DB_PATH=/data/relay.db
+      - DRLMS_FILES_DIR=/data/files
+      - DRLMS_RELAY_SIGNING_PRIVKEY=${RELAY_SIGNING_KEY}
+    restart: unless-stopped
+
+volumes:
+  relay-data:
+```
+
+### 多 Relay 联邦
+
+```yaml
+# docker-compose.federation.yml
+version: '3.8'
+
+services:
+  relay1:
+    image: ghcr.io/lgnorant-lu/ming-drlms:latest
+    command: uvicorn ming_drlms.relay.server:app --host 0.0.0.0 --port 8081
+    ports:
+      - "8081:8081"
+    volumes:
+      - relay1-data:/data
+    environment:
+      - DRLMS_DB_PATH=/data/relay.db
+      - DRLMS_FILES_DIR=/data/files
+
+  relay2:
+    image: ghcr.io/lgnorant-lu/ming-drlms:latest
+    command: uvicorn ming_drlms.relay.server:app --host 0.0.0.0 --port 8081
+    ports:
+      - "8082:8081"
+    volumes:
+      - relay2-data:/data
+    environment:
+      - DRLMS_DB_PATH=/data/relay.db
+      - DRLMS_FILES_DIR=/data/files
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - relay1
+      - relay2
+
+volumes:
+  relay1-data:
+  relay2-data:
+```
+
+---
+
+## 环境变量
+
+**服务器配置**：
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `DRLMS_DB_PATH` | `drlms.db` | 数据库路径 |
+| `DRLMS_FILES_DIR` | `relay_files` | 文件存储目录 |
+| `DRLMS_RELAY_ID` | `relay-default` | Relay 标识 |
+| `DRLMS_RELAY_SIGNING_PRIVKEY` | - | XEdDSA 签名私钥 |
+| `DRLMS_LOG_LEVEL` | `INFO` | 日志级别 (DEBUG/INFO/WARNING/ERROR) |
+
+---
+
+## 数据持久化
+
+### 使用 Volume
+
+```bash
+docker volume create drlms-data
+
+docker run -d \
+  -v drlms-data:/data \
+  ghcr.io/lgnorant-lu/ming-drlms:latest
+```
+
+### 使用 Bind Mount
+
+```bash
+docker run -d \
+  -v /opt/drlms/data:/data \
+  ghcr.io/lgnorant-lu/ming-drlms:latest
+```
+
+---
+
+## 健康检查
+
+```yaml
+services:
+  relay:
+    # ...
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+```
+
+---
+
+## 日志管理
+
+### 查看日志
+
+```bash
+docker logs -f drlms-relay
+```
+
+### 日志配置
+
+```yaml
+services:
+  relay:
+    # ...
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+```
+
+---
+
+## 相关文档
+
+- [Relay 服务器部署](/zh/operations/relay-server) - 详细部署指南
+- [监控与日志](/zh/operations/logging) - 日志配置

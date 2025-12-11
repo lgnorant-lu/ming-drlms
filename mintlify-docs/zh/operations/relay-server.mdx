@@ -1,0 +1,277 @@
+---
+title: "Relay 服务器部署"
+description: "DRLMS Relay 服务器部署与配置指南"
+---
+
+## 概述
+
+Relay 服务器是 DRLMS 去中心化模式的核心组件，基于 FastAPI 实现。
+
+---
+
+## 快速部署
+
+### 使用 uvicorn
+
+```bash
+uvicorn ming_drlms.relay.server:app --host 0.0.0.0 --port 8081
+```
+
+---
+
+## 配置
+
+### 环境变量
+
+**服务器配置**：
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `DRLMS_DB_PATH` | `drlms.db` | SQLite 数据库路径 |
+| `DRLMS_FILES_DIR` | `relay_files` | 文件存储目录 |
+| `DRLMS_RELAY_ID` | `relay-default` | Relay 服务器标识 |
+| `DRLMS_RELAY_SIGNING_PRIVKEY` | - | XEdDSA 签名私钥（32 字节 hex） |
+
+**日志配置**：
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `DRLMS_LOG_LEVEL` | `INFO` | 日志级别 (DEBUG/INFO/WARNING/ERROR) |
+
+<Note>
+客户端安全配置（如 `DRLMS_RELAY_ENFORCE_SIGNED`、`DRLMS_STRICT_P2P`）不适用于 Relay 服务器。Relay 服务器通过 `DRLMS_RELAY_SIGNING_PRIVKEY` 配置签名密钥即可。
+</Note>
+
+<Note>
+端口和地址通过 uvicorn 命令行参数控制，而非环境变量。
+</Note>
+
+### 生成签名密钥
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    # 生成 32 字节随机私钥
+    export DRLMS_RELAY_SIGNING_PRIVKEY=$(python -c "import secrets; print(secrets.token_hex(32))")
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    # 生成 32 字节随机私钥
+    $env:DRLMS_RELAY_SIGNING_PRIVKEY = python -c "import secrets; print(secrets.token_hex(32))"
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## 生产部署
+
+### 使用 Gunicorn
+
+```bash
+gunicorn ming_drlms.relay.server:app \
+  -w 4 \
+  -k uvicorn.workers.UvicornWorker \
+  -b 0.0.0.0:8081
+```
+
+### 使用 systemd
+
+创建服务文件 `/etc/systemd/system/drlms-relay.service`：
+
+```ini
+[Unit]
+Description=DRLMS Relay Server
+After=network.target
+
+[Service]
+Type=simple
+User=drlms
+WorkingDirectory=/opt/drlms
+Environment=DRLMS_DB_PATH=/var/lib/drlms/relay.db
+Environment=DRLMS_FILES_DIR=/var/lib/drlms/files
+ExecStart=/usr/local/bin/uvicorn ming_drlms.relay.server:app --host 0.0.0.0 --port 8081
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+启动服务：
+
+```bash
+sudo systemctl enable drlms-relay
+sudo systemctl start drlms-relay
+```
+
+### 反向代理（Nginx）
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name relay.example.com;
+
+    ssl_certificate /etc/ssl/certs/relay.crt;
+    ssl_certificate_key /etc/ssl/private/relay.key;
+
+    location / {
+        proxy_pass http://127.0.0.1:8081;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+---
+
+## 数据存储
+
+### SQLite 数据库
+
+默认使用 SQLite 存储事件：
+
+```
+relay.db
+├── relay_events   # 事件表 (room, server_seq, server_ts, ciphertext, ...)
+├── room_seq       # 房间序列号表 (room, seq)
+└── relay_files    # 文件元数据 (id, room, filename, path, ...)
+```
+
+### 数据备份
+
+```bash
+# 备份数据库
+sqlite3 relay.db ".backup 'relay_backup.db'"
+
+# 定期备份脚本
+0 * * * * sqlite3 /var/lib/drlms/relay.db ".backup '/backup/relay_$(date +\%Y\%m\%d_\%H).db'"
+```
+
+---
+
+## 健康检查
+
+### 端点
+
+<Tabs>
+  <Tab title="curl">
+    ```bash
+    curl http://localhost:8081/health
+    ```
+  </Tab>
+  <Tab title="PowerShell">
+    ```powershell
+    Invoke-RestMethod http://localhost:8081/health
+    ```
+  </Tab>
+</Tabs>
+
+响应：
+
+```json
+{
+  "status": "ok",
+  "timestamp": 1702300000,
+  "version": "0.4.0",
+  "relay_id": "relay-default",
+  "signature_schemes": ["xeddsa"],
+  "pubkey": "<ed25519_pubkey_hex>",
+  "pubkey_type": "ed25519"
+}
+```
+
+<Note>
+如果未配置 `DRLMS_RELAY_SIGNING_PRIVKEY`，状态会显示 `degraded` 并包含警告。
+</Note>
+
+### 监控端点
+
+- `/health` - 基本健康状态
+- `/.well-known/drlms-relay.json` - Relay 公钥信息
+
+### API 端点
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/events` | POST | 发布事件 |
+| `/events` | GET | 获取事件列表（`?room=&since_seq=&limit=`） |
+| `/events/by-ids` | GET | 按 ID 获取事件 |
+| `/files` | POST | 上传文件 |
+| `/files/{id}` | GET | 下载文件 |
+| `/files/{id}` | HEAD | 文件元数据 |
+| `/merkle/root` | GET | 获取房间 Merkle 根 |
+| `/merkle/diff` | POST | 计算 Merkle 差异 |
+| `/merkle/proof` | GET | 获取 Merkle 证明 |
+| `/merkle/events` | GET | 获取 Merkle 事件列表 |
+
+---
+
+## 安全配置
+
+### 启用 XEdDSA 签名
+
+Relay 服务器使用 XEdDSA 签名为存储回执提供证明：
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    # 设置 Relay 服务器签名私钥（32 字节 hex）
+    export DRLMS_RELAY_SIGNING_PRIVKEY=$(python -c "import secrets; print(secrets.token_hex(32))")
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    # 设置 Relay 服务器签名私钥（32 字节 hex）
+    $env:DRLMS_RELAY_SIGNING_PRIVKEY = python -c "import secrets; print(secrets.token_hex(32))"
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+配置此密钥后，Relay 会在事件存储时返回 XEdDSA 签名，客户端可验证存储回执的真实性。
+</Note>
+
+### 速率限制
+
+使用 Nginx 配置速率限制：
+
+```nginx
+limit_req_zone $binary_remote_addr zone=relay:10m rate=100r/s;
+
+location /events {
+    limit_req zone=relay burst=200 nodelay;
+    proxy_pass http://127.0.0.1:8081;
+}
+```
+
+---
+
+## 故障排查
+
+### 启动失败
+
+```bash
+# 检查端口占用
+netstat -tlnp | grep 8081
+
+# 检查日志
+journalctl -u drlms-relay -f
+```
+
+### 数据库锁定
+
+```bash
+# 检查数据库状态
+sqlite3 relay.db "PRAGMA integrity_check;"
+```
+
+---
+
+## 相关文档
+
+- [Docker 配置](/zh/operations/docker) - Docker 部署
+- [监控与日志](/zh/operations/logging) - 日志配置

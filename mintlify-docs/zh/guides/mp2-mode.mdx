@@ -1,0 +1,388 @@
+---
+title: "MP2 模式指南"
+description: "传统 M-Proto-v2 服务器模式完整使用指南"
+---
+
+## 概述
+
+MP2 模式是 DRLMS 的传统运行模式，使用 C 语言实现的 `log_collector_server` 作为中心服务器。适合需要集中管理的场景。
+
+---
+
+## 启用 MP2 模式
+
+### 环境变量配置
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    export DRLMS_BACKEND_MODE=mp2
+    export DRLMS_MP2_HOST=127.0.0.1
+    export DRLMS_MP2_PORT=15035
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    $env:DRLMS_BACKEND_MODE = "mp2"
+    $env:DRLMS_MP2_HOST = "127.0.0.1"
+    $env:DRLMS_MP2_PORT = "15035"
+    ```
+  </Tab>
+</Tabs>
+
+### 配置文件
+
+在 `config.toml` 中：
+
+```toml
+[backend]
+mode = "mp2"
+
+[mp2]
+host = "127.0.0.1"
+port = 15035
+tls = false
+```
+
+---
+
+## 启动服务器
+
+### 快速启动
+
+```bash
+ming-drlms server up --port 8080 -d server_files
+```
+
+### 启动选项
+
+| 选项 | 简写 | 默认值 | 说明 |
+|------|------|--------|------|
+| `--port` | `-p` | `8080` | 监听端口 |
+| `--data-dir` | `-d` | `server_files` | 数据目录 |
+| `--strict/--no-strict` | `-S` | `true` | 严格认证模式 |
+| `--max-conn` | `-m` | `128` | 最大连接数 |
+| `--config` | `-c` | - | 配置 yaml 文件路径 |
+| `--verbose` | `-v` | `false` | 显示服务器输出 |
+
+### 使用演示模式
+
+```bash
+ming-drlms demo quickstart
+```
+
+此命令会自动启动服务器并创建测试用户。
+
+---
+
+## 用户认证
+
+### 登录
+
+```bash
+ming-drlms login -u <用户名> -H <主机> -p <端口>
+```
+
+示例：
+
+```bash
+ming-drlms login -u alice -H 127.0.0.1 -p 15035
+```
+
+### 认证流程
+
+1. 客户端发送 Challenge 请求
+2. 服务器返回随机 nonce
+3. 客户端计算 `Argon2id(password + nonce)`
+4. 服务器验证并返回 JWT AccessToken
+5. 后续请求携带 JWT
+
+### 用户管理
+
+用户存储在 `server_files/users.txt`：
+
+```
+# 格式: username:password_hash:role
+alice:$argon2id$v=19$m=65536,t=2,p=1$...:user
+bob:$argon2id$v=19$m=65536,t=2,p=1$...:admin
+```
+
+---
+
+## 房间管理
+
+### 创建房间
+
+```bash
+ming-drlms room create -r <房间名>
+```
+
+### 订阅房间
+
+```bash
+ming-drlms room sub -r <房间名> -u <用户名> -H <主机> -p <端口>
+```
+
+### 查看房间信息
+
+```bash
+ming-drlms room info -r <房间名> -u <用户名> -H <主机> -p <端口>
+```
+
+### 查看成员
+
+```bash
+ming-drlms room members -r <房间名> -u <用户名> -H <主机> -p <端口>
+```
+
+### 房间策略
+
+| 策略 | 说明 |
+|------|------|
+| `retain` | 保留消息历史 |
+| `delegate` | 委托给其他服务器 |
+| `teardown` | 最后成员离开时销毁 |
+
+---
+
+## 消息发送
+
+### 发布文本消息
+
+```bash
+ming-drlms room pub -r <房间名> -t "消息内容" -u <用户名> -H <主机> -p <端口>
+```
+
+### 发送文件
+
+```bash
+ming-drlms client upload -r <房间名> -f <文件路径>
+```
+
+### 接收消息
+
+在 TUI 中自动接收，或使用 IPC 命令：
+
+```bash
+ming-drlms ipc recv
+```
+
+---
+
+## E2EE 配置
+
+### 生成密钥
+
+```bash
+ming-drlms e2ee generate-keys -u <用户名> -H <主机> -p <端口>
+```
+
+### 获取预密钥包
+
+```bash
+ming-drlms e2ee prekey-bundle -u <用户名> --target-user <目标用户>
+```
+
+### 建立会话
+
+与新联系人首次通信时自动建立 Signal 会话。
+
+---
+
+## TUI 使用
+
+### 启动
+
+```bash
+ming-drlms tui
+```
+
+### 登录流程
+
+1. 在登录界面输入服务器地址
+2. 输入用户名和密码
+3. 点击"登录"
+
+[IMAGE: TUI 登录界面截图]
+
+### 聊天界面
+
+登录后进入聊天界面：
+
+- 左侧：房间列表
+- 中间：消息区域
+- 底部：输入框
+
+---
+
+## 服务器管理
+
+### 检查状态
+
+```bash
+ming-drlms server status
+```
+
+### 停止服务器
+
+```bash
+ming-drlms server down
+```
+
+### 查看日志
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    tail -f server_files/server.log
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    Get-Content server_files\server.log -Wait
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## 服务器配置
+
+### 配置文件（C 服务器）
+
+服务器启动参数可通过命令行或环境变量配置：
+
+| 环境变量 | 说明 |
+|----------|------|
+| `DRLMS_PORT` | 监听端口 |
+| `DRLMS_MAX_CONN` | 最大连接数 |
+| `DRLMS_AUTH_STRICT` | 严格认证模式 |
+| `DRLMS_JWT_SECRET` | JWT 密钥 |
+
+### 安全配置
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    # 生产环境必须更换 JWT 密钥
+    export DRLMS_JWT_SECRET=$(openssl rand -hex 32)
+    
+    # 启用严格认证
+    export DRLMS_AUTH_STRICT=1
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    # 生产环境必须更换 JWT 密钥
+    $env:DRLMS_JWT_SECRET = -join ((48..57) + (97..102) | Get-Random -Count 64 | ForEach-Object {[char]$_})
+    
+    # 启用严格认证
+    $env:DRLMS_AUTH_STRICT = "1"
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## IPC 通信
+
+### 共享内存模式
+
+MP2 模式支持通过 IPC 进行进程间通信：
+
+```bash
+# 发送消息
+ming-drlms ipc send --text "消息内容"
+
+# 监听消息（tail 模式）
+ming-drlms ipc tail --max 10
+```
+
+### IPC 配置
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    export DRLMS_SHM_KEY=0x4c4f4755
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    $env:DRLMS_SHM_KEY = "0x4c4f4755"
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+`DRLMS_SHM_KEY` 使用十六进制格式（如 `0x4c4f4755`）。
+</Note>
+
+---
+
+## 联邦（可选）
+
+MP2 服务器支持与其他 MP2 服务器联邦：
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    export DRLMS_FEDERATE_SERVERS=server2.example.com:15035
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    $env:DRLMS_FEDERATE_SERVERS = "server2.example.com:15035"
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## 故障排查
+
+### 连接失败
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    # 检查服务器是否运行
+    ming-drlms server status
+    
+    # 检查端口
+    netstat -an | grep 8080  # server up 默认端口
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    # 检查服务器是否运行
+    ming-drlms server status
+    
+    # 检查端口
+    netstat -an | findstr 8080
+    ```
+  </Tab>
+</Tabs>
+
+### 认证失败
+
+1. 确认用户名密码正确
+2. 检查 users.txt 文件格式
+3. 检查 JWT_SECRET 配置
+
+### E2EE 会话建立失败
+
+```bash
+# 重新生成密钥
+ming-drlms e2ee generate-keys -u <用户名> --force
+
+# 获取目标用户的密钥包
+ming-drlms e2ee prekey-bundle -u <用户名> --target-user <目标用户>
+```
+
+---
+
+## 相关文档
+
+- [Relay 模式](/zh/guides/relay-mode) - 去中心化模式指南
+- [E2EE 设置](/zh/guides/e2ee-setup) - 端到端加密详解
+- [C 服务器架构](/zh/architecture/c-server) - 服务器内部架构

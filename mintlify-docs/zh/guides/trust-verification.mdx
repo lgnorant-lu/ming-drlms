@@ -1,0 +1,331 @@
+---
+title: "信任验证"
+description: "联系人身份验证与信任管理完整指南"
+---
+
+## 概述
+
+信任验证是防止中间人攻击的关键步骤。DRLMS 提供多种验证方式，确保你与正确的人通信。
+
+---
+
+## 信任级别
+
+| 级别 | 名称 | 图标 | 说明 |
+|------|------|------|------|
+| -1 | 未知 | - | 从未交互 |
+| 0 | TOFU | 黄色 | 首次信任 |
+| 1 | 手动验证 | 绿色 | 通过指纹比对确认 |
+| 2 | 社交担保 | 绿色 | 由已验证联系人担保 |
+| 3 | 外部锚定 | 绿色 | DNS/HTTPS/GitHub 验证 |
+
+---
+
+## TOFU（首次信任）
+
+### 工作原理
+
+首次与某公钥交互时自动信任。这是默认策略：
+
+1. 收到新公钥
+2. 自动记录为 TOFU 状态
+3. 后续通信使用此公钥
+4. 检测到变更时发出警告
+
+### 适用场景
+
+- 临时通信
+- 低风险场景
+- 初始建立联系后再升级验证
+
+### 风险
+
+- 首次连接可能被中间人攻击
+- 建议尽快升级到更高信任级别
+
+---
+
+## 手动验证
+
+### 验证流程
+
+1. **获取对方指纹**: 通过安全渠道（面对面、电话、视频通话）
+2. **比对指纹**: 使用 CLI 命令验证
+3. **确认身份**: 标记为已验证
+
+### 步骤一：获取你的指纹
+
+```bash
+ming-drlms identity fingerprint
+```
+
+输出：
+
+```
+7A3F 9B2C 4E1D 8F5A 2C7B 1D9E
+```
+
+### 步骤二：交换指纹
+
+通过安全渠道与对方交换指纹。推荐方式：
+
+| 方式 | 安全性 | 说明 |
+|------|--------|------|
+| 面对面 | 最高 | 直接对比屏幕或纸质 |
+| 视频通话 | 高 | 确认是本人后读取 |
+| 电话 | 中 | 确认声音后使用数字格式 |
+| 加密邮件 | 中 | 需要已验证的邮件加密 |
+
+### 步骤三：验证对方
+
+```bash
+# 交互式验证
+ming-drlms trust verify <对方公钥>
+
+# 自动比对验证
+ming-drlms trust verify <对方公钥> --fingerprint "7A3F 9B2C 4E1D..."
+```
+
+成功后显示：
+
+```
+验证成功！
+联系人已标记为"手动验证"
+```
+
+---
+
+## 外部锚定验证
+
+### DNS 验证
+
+对方在其域名的 DNS TXT 记录中发布公钥：
+
+```
+_drlms.example.com TXT "v=drlms1 k=<pubkey_hex>"
+```
+
+验证：
+
+```bash
+ming-drlms trust anchor <公钥> --type dns --id example.com
+```
+
+### HTTPS Well-Known 验证
+
+对方在网站发布公钥：
+
+```
+https://example.com/.well-known/drlms.json
+```
+
+内容：
+
+```json
+{
+  "version": 1,
+  "identity_pubkey": "<base64_or_hex>",
+  "updated_at": "2025-01-01T00:00:00Z"
+}
+```
+
+验证：
+
+```bash
+ming-drlms trust anchor <公钥> --type https --id example.com
+```
+
+### GitHub 验证
+
+对方创建包含公钥的 Gist：
+
+```bash
+ming-drlms trust anchor <公钥> --type github --id username
+```
+
+---
+
+## 查看联系人
+
+### 列出所有联系人
+
+```bash
+# 列出所有 TOFU 以上级别的联系人
+ming-drlms trust list
+
+# 包括未知级别的联系人
+ming-drlms trust list --all
+
+# 包括已屏蔽的联系人
+ming-drlms trust list --blocked
+```
+
+输出：
+
+```
+          联系人信任列表
+┌──────┬─────────────────┬──────────┬────────────────┬────────────┐
+│ 状态 │ 名称/指纹       │ 信任级别 │ 验证方式       │ 最后联系   │
+├──────┼─────────────────┼──────────┼────────────────┼────────────┤
+│  🟢  │ Alice           │ 手动验证 │ manual: ...    │ 2025-12-11 │
+│  🟡  │ Bob             │ TOFU     │ -              │ 2025-12-10 │
+│  ⚠️  │ Carol           │ TOFU     │ -              │ 2025-12-09 │
+└──────┴─────────────────┴──────────┴────────────────┴────────────┘
+```
+
+### 查看联系人详情
+
+```bash
+ming-drlms trust show <公钥或指纹前缀>
+```
+
+---
+
+## 处理密钥变更
+
+### 密钥变更警告
+
+当检测到联系人公钥变更时：
+
+```
+⚠️ 警告: 联系人 Alice 的公钥已变更！
+
+旧指纹: 7A3F 9B2C 4E1D 8F5A 2C7B 1D9E
+新指纹: 3B8C 1D7E 5F2A 9C4D 6A1B 8E3F
+
+这可能是：
+1. 对方更换了设备或重新生成身份
+2. 中间人攻击
+
+请通过安全渠道确认对方身份后再继续。
+```
+
+### 处理方式
+
+#### 接受变更（确认后）
+
+```bash
+ming-drlms trust accept <公钥>
+```
+
+#### 屏蔽联系人
+
+```bash
+ming-drlms trust block <公钥> --reason "可疑密钥变更"
+```
+
+#### 重新验证
+
+```bash
+# 先接受，再重新手动验证
+ming-drlms trust accept <公钥>
+ming-drlms trust verify <公钥> --fingerprint "新指纹..."
+```
+
+#### 撤销信任
+
+```bash
+# 撤销联系人的所有验证，重置为 TOFU
+ming-drlms trust revoke <公钥>
+```
+
+### 密钥变更策略
+
+通过环境变量配置：
+
+| 策略 | 说明 |
+|------|------|
+| `warn` | 警告并等待用户决定（默认） |
+| `block` | 自动屏蔽直到手动验证 |
+| `reset` | 重置为 TOFU 状态 |
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    export DRLMS_KEY_CHANGE_ACTION=warn
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    $env:DRLMS_KEY_CHANGE_ACTION = "warn"
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## 屏蔽与解除屏蔽
+
+### 屏蔽联系人
+
+```bash
+ming-drlms trust block <公钥> --reason "原因说明"
+```
+
+屏蔽后：
+- 不再接收该联系人的消息
+- 发送到该联系人的消息会失败
+
+### 解除屏蔽
+
+```bash
+ming-drlms trust unblock <公钥>
+```
+
+### 查看屏蔽列表
+
+```bash
+ming-drlms trust list --blocked
+```
+
+---
+
+## 信任策略配置
+
+### 可用策略
+
+| 策略 | 安全性 | 便利性 | 说明 |
+|------|--------|--------|------|
+| `tofu` | 中 | 高 | 首次信任，推荐普通用户 |
+| `manual_only` | 高 | 低 | 仅手动验证的联系人可通信 |
+| `anchored_only` | 最高 | 最低 | 仅外部锚定验证 |
+
+### 配置方式
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    export DRLMS_TRUST_POLICY=manual_only
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    $env:DRLMS_TRUST_POLICY = "manual_only"
+    ```
+  </Tab>
+</Tabs>
+
+或在 `config.toml` 中：
+
+```toml
+[trust]
+default_policy = "manual_only"
+```
+
+---
+
+## 验证最佳实践
+
+1. **高价值联系人**: 使用手动验证或外部锚定
+2. **定期审计**: 定期检查联系人列表
+3. **警惕变更**: 认真对待密钥变更警告
+4. **多因素验证**: 结合多种验证方式
+5. **记录验证**: 记录验证时间和方式
+
+---
+
+## 相关文档
+
+- [身份管理](/zh/guides/identity-management) - 身份创建与备份
+- [信任模型](/zh/security/trust-model) - 安全架构详解
+- [E2EE 设置](/zh/guides/e2ee-setup) - 加密配置

@@ -1,0 +1,192 @@
+---
+title: "环境变量"
+description: "DRLMS 全部环境变量完整参考"
+---
+
+## 概述
+
+DRLMS 使用环境变量进行配置。复制 `.env.example` 为 `.env.local` 并按需修改。
+
+```bash
+# 加载环境变量（Linux/WSL）
+export $(grep -v '^#' .env.local | xargs)
+
+# 加载环境变量（PowerShell）
+Get-Content .env.local | ForEach-Object { 
+  if ($_ -match '^([^#=]+)=(.*)$') { 
+    [System.Environment]::SetEnvironmentVariable($matches[1].Trim(), $matches[2].Trim()) 
+  } 
+}
+```
+
+---
+
+## 配置路径与目录
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `MING_DRLMS_CONFIG_DIR` | Windows: `%APPDATA%\DRLMS`, Linux: `~/.config/drlms` | 配置目录 |
+| `DRLMS_CONFIG_FILE` | - | 配置文件完整路径（优先级高于目录） |
+| `DRLMS_DATA_DIR` | Windows: `%LOCALAPPDATA%\drlms`, Linux: `~/.local/share/drlms` | 数据目录 |
+| `DRLMS_ROOT` | - | 项目根目录覆盖 |
+
+---
+
+## 后端模式选择
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `DRLMS_BACKEND_MODE` | `relay` | 后端类型：`mp2`（传统）/ `relay`（去中心化）/ `hybrid`（混合） |
+| `DRLMS_BACKEND` | - | [兼容] 旧版变量，优先读取 `DRLMS_BACKEND_MODE` |
+
+### MP2 服务器配置
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `DRLMS_MP2_HOST` | `127.0.0.1` | MP2 服务器地址 |
+| `DRLMS_MP2_PORT` | `15035` | MP2 服务器端口 |
+| `DRLMS_MP2_TLS` | `0` | 是否启用 TLS（0/1） |
+
+### Relay 服务器配置
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `DRLMS_DEFAULT_RELAYS` | - | Relay 服务器列表（逗号分隔） |
+| `DRLMS_RELAY_BASE_URL` | - | [兼容] 旧版单 Relay 变量 |
+| `DRLMS_RELAY_ID` | `relay-default` | Relay 身份标识 |
+| `DRLMS_RELAYS_CONFIG` | - | Relay 配置文件路径 |
+
+---
+
+## P2P 安全策略
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `DRLMS_STRICT_P2P` | - | 严格模式总开关（0/1） |
+| `DRLMS_REQUIRE_IDENTITY_SIG` | `1` | 要求身份签名 |
+| `DRLMS_RELAY_ENFORCE_SIGNED` | `1` | Relay 强制签名验证 |
+| `DRLMS_RELAY_STRICT_MODE` | `1` | Relay 严格模式 |
+| `DRLMS_IDENTITY_SIG_MAX_SKEW` | `300` | 签名时间偏移容忍窗口（秒） |
+
+---
+
+## 日志配置
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `DRLMS_LOG_LEVEL` | `INFO` | 日志级别：`DEBUG`/`INFO`/`WARN`/`ERROR` |
+| `DRLMS_LOG_DIR` | - | 日志目录 |
+| `DRLMS_LOG_ROTATE` | `size` | 轮转模式：`size`（按大小）/`time`（按时间） |
+| `DRLMS_LOG_KEEP` | `5` | 保留日志文件数量 |
+| `DRLMS_LOG_MAX_MB` | `10` | 单文件最大大小（MB） |
+| `DRLMS_LOG_CONSOLE` | `1` | 控制台输出（0/1） |
+| `DRLMS_LOG_JSON` | `0` | JSON 格式日志（0/1） |
+
+---
+
+## 身份与密钥
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `DRLMS_USER` | - | 当前用户名（用于 LocalKeyStore 查找） |
+| `DRLMS_E2EE_KEYS_FILE` | `$CONFIG_DIR/e2ee_keys.json` | E2EE 密钥存储路径 |
+| `DRLMS_CONTACTS_FILE` | `$CONFIG_DIR/contacts.json` | 联系人文件路径 |
+| `DRLMS_TRUST_STORE_FILE` | `$CONFIG_DIR/trust_store.json` | 信任存储路径 |
+| `DRLMS_ROOMS_FILE` | `$CONFIG_DIR/rooms.json` | 房间状态文件路径 |
+
+---
+
+## 信任策略（Phase 18）
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `DRLMS_TRUST_POLICY` | `tofu` | 信任策略：`tofu`/`manual_only`/`anchored_only` |
+| `DRLMS_KEY_CHANGE_ACTION` | `warn` | 密钥变更行为：`warn`/`block`/`reset` |
+| `DRLMS_KEYSERVER_TIMEOUT` | `5.0` | Keyserver 查询超时（秒） |
+
+---
+
+## Relay 服务端配置
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `DRLMS_DB_PATH` | `drlms.db` | SQLite 数据库路径 |
+| `DRLMS_FILES_DIR` | `relay_files` | 文件存储目录 |
+| `DRLMS_RELAY_SIGNING_PRIVKEY` | - | XEdDSA 签名私钥（32字节 hex，64字符） |
+
+生成私钥：
+```bash
+python -c "import secrets; print(secrets.token_hex(32))"
+```
+
+---
+
+## C 服务器配置
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `DRLMS_PORT` | `15034` | 监听端口 |
+| `DRLMS_ENABLE_MPROTO_V2` | `1` | 启用 MP2 协议 |
+| `DRLMS_MAX_CONN` | `128` | 最大并发连接数 |
+| `DRLMS_AUTH_STRICT` | `1` | 认证严格模式 |
+| `DRLMS_MP2_ACCEPT_ANY` | `0` | [危险] 开发后门：跳过密码验证 |
+
+---
+
+## 安全与加密
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `DRLMS_JWT_SECRET` | `dev-secret` | JWT 签名密钥（生产环境必须更换） |
+| `DRLMS_SERVER_SALT` | `mp2` | 服务器 Salt |
+| `DRLMS_SIGNAL_PREFIX` | - | Signal 库安装路径 |
+| `DRLMS_ARGON2_T_COST` | `2` | Argon2 时间成本 |
+| `DRLMS_ARGON2_M_COST` | `65536` | Argon2 内存成本 |
+| `DRLMS_ARGON2_PARALLELISM` | `1` | Argon2 并行度 |
+
+---
+
+## 开发与测试
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `DRLMS_UPDATE_CHECK` | `1` | 更新检查（CI 环境建议设为 0） |
+| `DRLMS_TEST_VERBOSE` | `0` | 测试详细输出 |
+| `DRLMS_TEST_SYNC` | `0` | 测试同步钩子 |
+| `DRLMS_FAKE_SERVER` | `0` | 模拟服务器模式 |
+
+---
+
+## 示例配置
+
+### Relay 模式（推荐）
+
+```bash
+# .env.local
+DRLMS_BACKEND_MODE=relay
+DRLMS_DEFAULT_RELAYS=http://localhost:8081
+DRLMS_USER=alice
+DRLMS_TRUST_POLICY=tofu
+DRLMS_LOG_LEVEL=INFO
+```
+
+### MP2 开发模式
+
+```bash
+# .env.local
+DRLMS_BACKEND_MODE=mp2
+DRLMS_MP2_HOST=127.0.0.1
+DRLMS_MP2_PORT=15035
+DRLMS_LOG_LEVEL=DEBUG
+DRLMS_LOG_CONSOLE=1
+```
+
+### Relay 服务端
+
+```bash
+# .env.relay
+DRLMS_DB_PATH=/var/lib/drlms/drlms.db
+DRLMS_FILES_DIR=/var/lib/drlms/files
+DRLMS_RELAY_SIGNING_PRIVKEY=<your-64-char-hex-key>
+DRLMS_RELAY_ID=relay-prod-01
+```

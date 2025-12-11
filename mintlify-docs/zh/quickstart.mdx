@@ -1,0 +1,263 @@
+---
+title: "快速开始"
+description: "5 分钟体验 DRLMS 端到端加密传输"
+---
+
+<Note>
+**本文档演示**：通过 CLI/TUI 客户端体验 DRLMS 的端到端加密传输能力。CLI/TUI 是协议栈的概念演示，实际应用可集成为任意形态（AI Agent 通信、日志同步、文件传输等）。
+</Note>
+
+## 前置要求
+
+- Python 3.10+
+- uv（推荐）或 pip
+
+---
+
+## 安装
+
+<Tabs>
+  <Tab title="uv（推荐）">
+    ```bash
+    # 安装 uv（如果尚未安装）
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    
+    # 安装 DRLMS CLI
+    uv tool install ming-drlms
+    ```
+  </Tab>
+  <Tab title="pip">
+    ```bash
+    pip install ming-drlms
+    ```
+  </Tab>
+  <Tab title="pipx">
+    ```bash
+    # pipx 提供隔离安装，但推荐使用 uv tool
+    pipx install ming-drlms
+    ```
+  </Tab>
+  <Tab title="源码">
+    ```bash
+    git clone https://github.com/lgnorant-lu/ming-drlms.git
+    cd ming-drlms
+    uv pip install -e ".[dev]"
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## 选择传输模式
+
+DRLMS 支持两种传输模式：
+
+<Columns cols={2}>
+  <Card title="Relay 模式（推荐）" icon="globe">
+    去中心化事件转发。Relay 仅存储/转发密文，无法见明文。
+  </Card>
+  <Card title="MP2 模式" icon="server">
+    集中式服务器模型。需要运行 C 服务器。
+  </Card>
+</Columns>
+
+---
+
+## Relay 模式快速开始
+
+### 步骤 1：配置环境变量
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    export DRLMS_BACKEND_MODE=relay
+    export DRLMS_DEFAULT_RELAYS=http://localhost:8081
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    $env:DRLMS_BACKEND_MODE = "relay"
+    $env:DRLMS_DEFAULT_RELAYS = "http://localhost:8081"
+    ```
+  </Tab>
+</Tabs>
+
+### 步骤 2：创建本地身份
+
+```bash
+ming-drlms identity create --name "YourName"
+```
+
+输出示例：
+```
+Identity created successfully
+Fingerprint: 1234 5678 9ABC DEF0 ...
+Public Key: 0x...
+```
+
+这会生成本地 Signal 密钥对，用于端到端加密。
+
+### 步骤 3：启动 TUI 演示
+
+```bash
+ming-drlms tui
+```
+
+TUI 提供可视化界面演示加密传输流程。
+
+### 步骤 4：CLI 加密传输
+
+```bash
+# 发布密钥包供他人发现
+ming-drlms chat publish-bundle
+
+# 发送加密数据（文本、任意负载）
+ming-drlms chat send --to <recipient_pubkey> --message "<any_payload>"
+
+# 接收并解密
+ming-drlms chat recv --room general
+```
+
+---
+
+## MP2 模式快速开始
+
+### 步骤 1：启动演示服务器
+
+```bash
+ming-drlms demo quickstart
+```
+
+此命令会自动启动本地 C 服务器用于测试。
+
+### 步骤 2：登录
+
+```bash
+ming-drlms login -u testuser -H 127.0.0.1 -p 15035
+```
+
+### 步骤 3：订阅房间
+
+```bash
+ming-drlms room sub -r general
+```
+
+### 步骤 4：发布消息
+
+```bash
+ming-drlms room pub -r general -t "Hello, world!"
+```
+
+---
+
+## TUI 演示界面
+
+```bash
+ming-drlms tui
+```
+
+### 快捷键
+
+| 按键 | 功能 |
+|------|------|
+| `Ctrl+H` | 帮助 |
+| `Ctrl+E` | E2EE 状态 |
+| `Ctrl+U` | 文件传输 |
+| `F2` | 设置 |
+| `F3` | 后端配置 |
+| `Ctrl+Q` | 退出 |
+
+---
+
+## 验证安装
+
+检查安装是否正确：
+
+```bash
+# 检查版本
+ming-drlms --version
+
+# 运行 XEdDSA 自检（需要先创建身份）
+ming-drlms xeddsa-selftest --user YourName
+```
+
+---
+
+## 后续步骤
+
+<Columns cols={2}>
+  <Card
+    title="环境变量"
+    icon="gear"
+    href="/zh/setup/environment-variables"
+  >
+    配置传输参数
+  </Card>
+  <Card
+    title="CLI 参考"
+    icon="terminal"
+    href="/zh/cli-reference/overview"
+  >
+    完整命令参考
+  </Card>
+  <Card
+    title="加密原理"
+    icon="lock"
+    href="/zh/security/overview"
+  >
+    理解 Signal E2EE
+  </Card>
+  <Card
+    title="架构设计"
+    icon="sitemap"
+    href="/zh/architecture/overview"
+  >
+    深入协议栈
+  </Card>
+</Columns>
+
+---
+
+## 故障排查
+
+### uv 命令未找到
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    # 重新安装 uv
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    source ~/.bashrc  # 或重启终端
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    # 重新安装 uv
+    powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+    # 重启 PowerShell
+    ```
+  </Tab>
+</Tabs>
+
+### 端口被占用
+
+使用 `--port` 更换端口：
+
+```bash
+ming-drlms server-up --port 8080
+```
+
+### WSL 路径问题
+
+使用 Linux 风格路径：
+
+```bash
+# 在 WSL 中设置
+export DRLMS_ROOT=/mnt/d/path/to/DRLMS
+```
+
+<Note>
+Windows 原生环境不需要设置 `DRLMS_ROOT`，路径会自动处理。
+</Note>
+
+更多帮助请参阅 [故障排查指南](/zh/guides/troubleshooting) 或在 [GitHub](https://github.com/lgnorant-lu/ming-drlms/issues) 提交 issue。

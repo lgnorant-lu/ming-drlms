@@ -1,0 +1,163 @@
+---
+title: "config"
+description: "配置管理命令"
+---
+
+## 概述
+
+`config` 命令组用于查看和修改 DRLMS 配置。
+
+```bash
+ming-drlms config --help
+```
+
+---
+
+## 命令列表
+
+| 命令 | 说明 |
+|------|------|
+| `init` | 初始化配置模板 (drlms.yaml) |
+| `init-tui` | 初始化 TUI 配置 (config.toml) |
+| `init-cli` | 初始化 CLI 配置 (drlms.yaml) |
+| `show` | 显示配置（原始/生效） |
+| `validate` | 验证配置最低要求 |
+| `apply-cli` | 应用本地配置到用户目录 |
+| `apply-tui` | 应用本地 TUI 配置到用户目录 |
+
+---
+
+## config init
+
+初始化配置模板。
+
+### 语法
+
+```bash
+ming-drlms config init [--path <路径>]
+```
+
+### 示例
+
+```bash
+ming-drlms config init --path drlms.yaml
+```
+
+---
+
+## config init-tui
+
+初始化 TUI 配置文件 (config.toml)。
+
+### 语法
+
+```bash
+ming-drlms config init-tui [--target <位置>]
+```
+
+### 位置选项
+
+| 值 | 说明 |
+|------|------|
+| `local` | 本地仓库 .drlms/config.toml |
+| `home` | 用户配置目录 |
+| `both` | 两者都创建（默认） |
+
+---
+
+## config init-cli
+
+初始化 CLI 配置文件 (drlms.yaml)。
+
+### 语法
+
+```bash
+ming-drlms config init-cli [--target <位置>]
+```
+
+---
+
+## config show
+
+显示配置内容。
+
+### 语法
+
+```bash
+ming-drlms config show [--effective | --raw]
+```
+
+### 选项
+
+| 选项 | 默认 | 说明 |
+|------|------|------|
+| `--effective` | - | 显示生效配置（合并环境变量覆盖） |
+| `--raw` | ✓ | 显示原始配置文件 |
+
+---
+
+## config validate
+
+验证配置文件最低要求。
+
+### 语法
+
+```bash
+ming-drlms config validate
+```
+
+---
+
+## config apply-cli
+
+将本地配置 (.drlms/drlms.yaml) 应用到用户目录 (~/.drlms/drlms.yaml)。
+
+### 语法
+
+```bash
+ming-drlms config apply-cli [--overwrite | --no-overwrite]
+```
+
+### 选项
+
+| 选项 | 默认 | 说明 |
+|------|------|------|
+| `--overwrite` | - | 覆盖已有的用户配置 |
+| `--no-overwrite` | ✓ | 不覆盖已有配置（存在时报错） |
+
+<Note>如果目标文件已存在且未指定 `--overwrite`，命令将失败。</Note>
+
+---
+
+## config apply-tui
+
+将本地 TUI 配置 (.drlms/config.toml) 应用到用户目录。
+
+### 语法
+
+```bash
+ming-drlms config apply-tui [--overwrite | --no-overwrite]
+```
+
+### 选项
+
+| 选项 | 默认 | 说明 |
+|------|------|------|
+| `--overwrite` | - | 覆盖已有的用户配置 |
+| `--no-overwrite` | ✓ | 不覆盖已有配置（存在时报错） |
+
+---
+
+## 配置优先级
+
+1. 命令行参数
+2. 环境变量
+3. 配置文件
+4. 默认值
+
+---
+
+## 相关文档
+
+- [配置文件](/zh/setup/config-file) - config.toml 参考
+- [环境变量](/zh/setup/environment-variables) - 环境变量参考

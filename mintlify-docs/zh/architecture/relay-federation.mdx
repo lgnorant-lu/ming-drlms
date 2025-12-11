@@ -1,0 +1,331 @@
+---
+title: "Relay 联邦"
+description: "多 Relay 联邦架构与同步机制"
+---
+
+## 概述
+
+DRLMS Relay 联邦允许多个独立的 Relay 服务器协同工作，提供去中心化的消息传递能力。
+
+[IMAGE: Relay 联邦架构图 - 展示多个 Relay 服务器之间的同步关系]
+
+---
+
+## 架构设计
+
+### 无主架构
+
+```
+┌──────────┐      ┌──────────┐      ┌──────────┐
+│ Relay A  │◄────►│ Relay B  │◄────►│ Relay C  │
+└──────────┘      └──────────┘      └──────────┘
+     ▲                 ▲                 ▲
+     │                 │                 │
+     └─────────────────┼─────────────────┘
+                       │
+                    Merkle 同步
+```
+
+特点：
+- 无中心节点
+- 任意 Relay 可读写
+- 最终一致性
+
+### 客户端多写
+
+客户端同时写入多个 Relay：
+
+```
+客户端                 Relay A, B, C
+   │                      │
+   │  POST /events        │
+   │─────────────────────►│ Relay A
+   │─────────────────────►│ Relay B
+   │─────────────────────►│ Relay C
+   │                      │
+   │  等待多数确认         │
+   │◄─────────────────────│
+```
+
+---
+
+## Relay 发现
+
+### 五层发现机制
+
+按优先级从高到低（`DiscoveryPriority` 枚举）：
+
+| 层级 | 来源 | 说明 |
+|------|------|------|
+| 1 | 静态配置 | `DRLMS_DEFAULT_RELAYS` 环境变量或 `relays.toml` |
+| 2 | 本地缓存 | `relay_cache.json` 上次成功的 Relay |
+| 3 | DNS TXT | `_drlms-relay.domain` TXT 记录 |
+| 4 | Well-Known | `/.well-known/drlms-relays.json` |
+| 5 | Bootstrap | 硬编码的引导服务器（默认为空） |
+
+### DNS TXT 记录
+
+```
+_drlms-relay.example.com. 86400 IN TXT "url=https://relay1.example.com"
+_drlms-relay.example.com. 86400 IN TXT "url=https://relay2.example.com"
+```
+
+### Well-Known 格式
+
+**单个 Relay 自描述** (`/.well-known/drlms-relay.json`)：
+
+```json
+{
+  "version": 2,
+  "relay_id": "relay-default",
+  "signature_schemes": ["xeddsa"],
+  "pubkey": "hex_encoded_32_bytes_ed25519_pubkey",
+  "pubkey_type": "ed25519"
+}
+```
+
+**多 Relay 发现** (`/.well-known/drlms-relays.json`)：
+
+```json
+{
+  "relays": [
+    {"url": "https://relay1.example.com", "region": "us-west"},
+    {"url": "https://relay2.example.com", "region": "eu-central"}
+  ]
+}
+```
+
+<Note>
+`drlms-relay.json`（单个 Relay 公钥发现）与 `drlms-relays.json`（多 Relay 列表发现）是不同的端点。
+</Note>
+
+---
+
+## 健康检查
+
+### 评分系统
+
+每个 Relay 维护健康评分（0.0-1.0）：
+
+**成功时恢复**：
+```python
+latency_factor = max(0.5, 1.0 - latency_ms / 5000.0)
+score = min(1.0, score * 1.2) * latency_factor
+```
+
+**失败时衰减**：
+```python
+decay = 0.5 ** consecutive_failures
+score = max(0.0, score * decay)
+```
+
+| 要素 | 说明 |
+|------|------|
+| 延迟因子 | 5000ms 以上开始惩罚，最低 0.5 |
+| 成功恢复 | 每次成功乘以 1.2 |
+| 失败衰减 | 指数衰减 0.5^n |
+
+### 降级与恢复
+
+```
+健康 (score >= 0.3) → 不健康 (score < 0.3)
+                   ←
+              指数恢复
+```
+
+默认健康阈值：`min_score = 0.3`
+
+---
+
+## 事件同步
+
+### 增量同步
+
+基于 `since_seq` 的增量拉取：
+
+```
+GET /events?room=X&since_seq=100&limit=50
+```
+
+### Merkle 同步
+
+使用 Merkle 树进行内容级一致性校验：
+
+```
+客户端                    Relay A              Relay B
+   │                        │                    │
+   │  GET /merkle/root      │                    │
+   │───────────────────────►│                    │
+   │◄───────────────────────│                    │
+   │  root_a                │                    │
+   │                        │                    │
+   │  GET /merkle/root      │                    │
+   │───────────────────────────────────────────►│
+   │◄───────────────────────────────────────────│
+   │  root_b                │                    │
+   │                        │                    │
+   │  if root_a != root_b:  │                    │
+   │    POST /merkle/diff   │                    │
+   │    拉取差异事件         │                    │
+```
+
+### 同步模式
+
+| 模式 | 触发条件 | 说明 |
+|------|----------|------|
+| `incremental` | 正常情况 | 基于 seq 增量 |
+| `merkle` | 根不一致 | 差异计算 |
+| `full` | 严重不一致 | 完整重同步 |
+
+---
+
+## Merkle 树
+
+### 结构
+
+```
+        Root Hash
+       /         \
+    Hash AB      Hash CD
+    /    \       /    \
+Hash A  Hash B  Hash C  Hash D
+  │       │       │       │
+Event1  Event2  Event3  Event4
+```
+
+### API 端点
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/merkle/root` | GET | 获取房间 Merkle 根 |
+| `/merkle/diff` | POST | 计算两个 Merkle 树的差异 |
+| `/merkle/proof` | GET | 获取事件的 Merkle 证明 |
+| `/merkle/events` | GET | 获取房间所有事件 ID |
+
+### 证明验证
+
+```python
+def verify_proof(event_id, proof, root):
+    current = hash(event_id)
+    for (sibling, is_left) in proof:
+        if is_left:
+            current = hash(sibling + current)
+        else:
+            current = hash(current + sibling)
+    return current == root
+```
+
+---
+
+## 离线队列
+
+### 功能
+
+- 网络不可用时缓存消息
+- 网络恢复后自动重试
+- 支持指定目标 Relay
+
+### 重试策略
+
+```
+初次重试: 1秒
+第2次: 2秒
+第3次: 4秒
+...
+最大间隔: 5分钟
+最大重试: 10次
+```
+
+### 存储
+
+SQLite 数据库：`~/.config/drlms/offline_queue.db`（Linux）或 `%APPDATA%\DRLMS\offline_queue.db`（Windows）
+
+可通过 `MING_DRLMS_CONFIG_DIR` 环境变量覆盖路径。
+
+```sql
+CREATE TABLE offline_queue (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    room TEXT NOT NULL,
+    ciphertext TEXT NOT NULL,
+    content_len INTEGER,
+    client_event_hash TEXT,
+    client_ts INTEGER,
+    target_relays TEXT,  -- JSON array
+    created_at TEXT NOT NULL,
+    retry_count INTEGER DEFAULT 0,
+    next_retry TEXT,
+    last_error TEXT,
+    status TEXT DEFAULT 'pending'
+);
+```
+
+---
+
+## 故障转移
+
+### 自动降级
+
+```
+客户端                 Relay A (故障)     Relay B
+   │                      │                │
+   │  POST /events        │                │
+   │─────────────────────►│ × 超时          │
+   │                      │                │
+   │  自动重试到 Relay B   │                │
+   │───────────────────────────────────────►│
+   │◄───────────────────────────────────────│
+   │  成功                 │                │
+```
+
+### 手动切换
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    # 更新 Relay 列表
+    export DRLMS_DEFAULT_RELAYS=http://relay2.example.com,http://relay3.example.com
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    # 更新 Relay 列表
+    $env:DRLMS_DEFAULT_RELAYS = "http://relay2.example.com,http://relay3.example.com"
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## 安全考虑
+
+### 签名验证
+
+所有事件必须包含发送者签名：
+
+```json
+{
+  "event_id": "...",
+  "ciphertext": "...",
+  "signature": "xeddsa_signature"
+}
+```
+
+### 回执签名
+
+Relay 对存储回执签名：
+
+```json
+{
+  "event_id": "...",
+  "server_seq": 123,
+  "receipt_sig": "relay_xeddsa_signature"
+}
+```
+
+---
+
+## 相关文档
+
+- [架构概述](/zh/architecture/overview) - 系统架构
+- [Merkle 一致性](/zh/architecture/merkle-consistency) - 详细算法
+- [离线队列](/zh/architecture/offline-queue) - 队列实现

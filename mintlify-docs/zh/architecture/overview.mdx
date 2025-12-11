@@ -1,0 +1,281 @@
+---
+title: "架构概述"
+description: "DRLMS 系统架构高层视角解析"
+---
+
+## 设计理念
+
+DRLMS 采用 C + Python 混合架构，平衡以下目标：
+
+- **性能与可控性**: C 负责高并发 TCP、文件 I/O、安全与节流
+- **体验与可维护性**: Python CLI 提供友好交互、打包发布与教学式帮助
+- **易演示与安全默认**: 文本协议可读、Argon2id 认证、可配置限速
+
+[IMAGE: 系统架构图 - 展示 C 服务器、Python 客户端、Relay 服务器三大组件及其交互]
+
+---
+
+## 核心组件
+
+### C 服务器 (`log_collector_server`)
+
+位置: `src/server/`
+
+多线程 TCP 服务器，实现 M-Proto-v2 协议：
+
+| 特性 | 说明 |
+|------|------|
+| 线程模型 | 每连接一线程（thread-per-connection） |
+| 协议 | M-Proto-v2 二进制分帧 + Protobuf 消息 |
+| 认证 | Challenge-Response + JWT AccessToken |
+| 房间策略 | retain / delegate / teardown |
+| 持久化 | SQLite + 文件系统 |
+
+协议消息类型分段：
+- 100-199: 认证消息
+- 200-299: 房间消息
+- 300-399: 联邦消息
+- 400-499: 通用控制消息（错误/心跳）
+- 500-599: E2EE 密钥消息
+
+### libipc 共享内存库
+
+位置: `src/libipc/`
+
+高性能进程间通信：
+
+- 跨平台共享内存（platform_shm_* 抽象）
+- 环形缓冲区设计（write_index/read_index）
+- `sem_full/sem_empty` 信号量
+- Spinlock 原子锁（InterlockedExchange / __atomic_exchange_n）
+- 分片消息头（MsgHdr）+ LAST_FLAG 标记
+
+### Python 客户端 (`ming-drlms`)
+
+位置: `src/ming_drlms/`
+
+功能模块：
+
+| 模块 | 功能 |
+|------|------|
+| `cli/` | 多个命令组，Typer 框架 |
+| `tui/` | Textual 终端界面 |
+| `core/` | 协议客户端、密钥存储、E2EE 引擎 |
+| `identity/` | 本地身份、信任管理（Phase 18） |
+| `relay/` | Relay 客户端、多 Relay 同步、离线队列（Phase 16） |
+
+### Relay 服务器
+
+位置: `src/ming_drlms/relay/server.py`
+
+FastAPI 实现的事件中继服务：
+
+| 端点 | 方法 | 功能 |
+|------|------|------|
+| `/events` | POST | 投递事件 |
+| `/events` | GET | 拉取事件 |
+| `/events/by-ids` | GET | 按 ID 获取事件 |
+| `/files` | POST | 上传文件 |
+| `/files/{id}` | GET | 下载文件 |
+| `/files/{id}` | HEAD | 获取文件元信息 |
+| `/health` | GET | 健康检查 |
+| `/.well-known/drlms-relay.json` | GET | 公钥发现 |
+| `/merkle/*` | GET/POST | Merkle 一致性 |
+
+### 代理与工具
+
+位置: `src/agent/`, `src/tools/`
+
+| 工具 | 功能 |
+|------|------|
+| `log_agent` | 日志采集上传 |
+| `ipc_sender` | IPC 发送测试 |
+| `log_consumer` | IPC 消费（tail） |
+| `proc_launcher` | 进程拉起 |
+
+### 存储结构
+
+```
+<DRLMS_DATA_DIR>/
+├── rooms/
+│   └── <room_name>/
+│       └── <instance_id>/    # M5 分片实例
+│           ├── events.log    # 事件索引日志
+│           ├── texts/        # 文本消息 payload
+│           └── files/        # 上传文件
+├── logs/
+│   └── audit.log.jsonl       # JSON Lines 审计日志
+├── users.txt                 # 用户凭证（Argon2id hash）
+├── drlms.db                  # SQLite 数据库
+└── drlms.yaml                # 可选：联邦配置
+```
+
+---
+
+## 核心流程
+
+### M-Proto-v2 认证流程
+
+```
+客户端                                 服务器
+   │                                     │
+   │  1. AUTH_CHALLENGE_REQUEST          │
+   │────────────────────────────────────►│
+   │                                     │
+   │  2. AUTH_CHALLENGE_RESPONSE (nonce) │
+   │◄────────────────────────────────────│
+   │                                     │
+   │  3. AUTH_REQUEST (hash(pwd+nonce))  │
+   │────────────────────────────────────►│
+   │                                     │
+   │  4. AUTH_RESPONSE (JWT + Refresh)   │
+   │◄────────────────────────────────────│
+```
+
+### 房间订阅与历史回放
+
+```
+客户端                                 服务器
+   │                                     │
+   │  200: ROOM_SUB_REQUEST              │
+   │────────────────────────────────────►│
+   │                                     │
+   │          SQLite 查询历史            │
+   │                                     │
+   │  202: ROOM_EVENT (历史回放)         │
+   │◄────────────────────────────────────│
+   │  ...                                │
+   │◄────────────────────────────────────│
+   │                                     │
+   │  202: ROOM_EVENT (完成)             │
+   │◄────────────────────────────────────│
+```
+
+### 消息发布与扇出
+
+```
+发送者                  服务器                  订阅者A/B/C
+   │                     │                        │
+   │  201: ROOM_PUB_REQ  │                        │
+   │────────────────────►│                        │
+   │                     │                        │
+   │              持久化事件                      │
+   │                     │                        │
+   │                     │  202: ROOM_EVENT       │
+   │                     │───────────────────────►│
+   │                     │───────────────────────►│
+   │                     │───────────────────────►│
+```
+
+### Relay 事件同步
+
+```
+客户端                                 Relay
+   │                                     │
+   │  GET /events?room=X&since_seq=100   │
+   │────────────────────────────────────►│
+   │                                     │
+   │  [CipherEvent, CipherEvent, ...]    │
+   │◄────────────────────────────────────│
+   │                                     │
+   │  本地解密 + 验签                    │
+   │                                     │
+```
+
+---
+
+## 安全架构
+
+### 层级防御
+
+| 层级 | 技术 | 功能 |
+|------|------|------|
+| 传输层 | TLS 1.3（可选） | 通道加密 |
+| 认证层 | Argon2id + Challenge-Response | 身份验证 |
+| 会话层 | JWT (15min) + Refresh Token | 会话管理 |
+| 消息层 | Signal Protocol (Double Ratchet) | E2EE |
+| 签名层 | XEdDSA | 消息完整性 |
+
+### 密钥体系
+
+```
+身份密钥 (X25519)
+├── 签名密钥 (XEdDSA)
+├── 签名预密钥 (Signed PreKey)
+└── 一次性预密钥 (OPK)
+```
+
+---
+
+## 部署模式
+
+### MP2 模式（传统）
+
+```
+┌──────────┐      MP2协议      ┌──────────────┐
+│ 客户端A  │◄───────────────► │              │
+└──────────┘                   │   C 服务器   │
+┌──────────┐      MP2协议      │              │
+│ 客户端B  │◄───────────────► └──────────────┘
+└──────────┘
+```
+
+### Relay 模式（去中心化）
+
+```
+┌──────────┐                   ┌──────────┐
+│ 客户端A  │◄─────────────────►│ Relay 1  │
+└──────────┘     HTTP/JSON     └──────────┘
+                                    │
+                               Merkle 同步
+                                    │
+┌──────────┐                   ┌──────────┐
+│ 客户端B  │◄─────────────────►│ Relay 2  │
+└──────────┘     HTTP/JSON     └──────────┘
+```
+
+### Hybrid 模式（混合）
+
+房间级别选择后端，兼容两种模式。
+
+---
+
+## 性能优化
+
+### C 服务器
+
+- TCP Keepalive 超时管理
+- 上传/下载字节级节流（`DRLMS_RATE_UP_BPS` / `DRLMS_RATE_DOWN_BPS`）
+- 连接池（计划中）
+- 事件扇出批量处理（计划中）
+
+### Python 客户端
+
+- 离线队列 + 指数退避重试
+- Merkle 增量同步
+- 本地缓存 + SQLite 持久化
+
+### Relay 服务器
+
+- 多 Relay 并行写入
+- 健康检查 + 自动降级
+- 存储回执签名验证
+
+---
+
+## 相关文档
+
+<Columns cols={2}>
+  <Card title="M-Proto-v2 协议" icon="code" href="/zh/architecture/m-proto-v2">
+    二进制分帧与消息类型详解
+  </Card>
+  <Card title="Relay 联邦" icon="globe" href="/zh/architecture/relay-federation">
+    去中心化同步机制
+  </Card>
+  <Card title="Signal 协议" icon="lock" href="/zh/architecture/signal-protocol">
+    端到端加密实现
+  </Card>
+  <Card title="C 服务器" icon="server" href="/zh/architecture/c-server">
+    服务器内部架构
+  </Card>
+</Columns>

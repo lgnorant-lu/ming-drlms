@@ -1,0 +1,200 @@
+---
+title: "文件 API"
+description: "Relay 服务器文件端点详细参考"
+---
+
+## 概述
+
+文件 API 用于上传和下载文件附件。文件存储在 `DRLMS_FILES_DIR` 指定的目录中（默认 `relay_files`）。
+
+---
+
+## POST /files
+
+上传文件到 Relay。
+
+### 请求
+
+```http
+POST /files
+Content-Type: multipart/form-data
+```
+
+### 表单字段
+
+| 字段 | 类型 | 必需 | 说明 |
+|------|------|------|------|
+| `file` | file | 是 | 文件内容 |
+| `room` | string | 否 | 关联房间 ID |
+
+### 响应
+
+```json
+{
+  "file_id": 1,
+  "filename": "document.pdf",
+  "size_bytes": 1024,
+  "sha256_hex": "a591a6d40bf420404a011733cfb7b190d62c65bf0bcda32b57b277d9ad9f146e",
+  "ts": 1702300000
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `file_id` | integer | 文件唯一 ID（数据库自增主键） |
+| `filename` | string | 原始文件名 |
+| `size_bytes` | integer | 文件大小（字节） |
+| `sha256_hex` | string | 文件 SHA256 哈希（hex 编码） |
+| `ts` | integer | 上传时间戳（秒） |
+
+### 示例
+
+<Tabs>
+  <Tab title="curl">
+    ```bash
+    curl -X POST http://localhost:8081/files \
+      -F "file=@document.pdf" \
+      -F "room=general"
+    ```
+  </Tab>
+  <Tab title="PowerShell">
+    ```powershell
+    $form = @{
+        file = Get-Item -Path "document.pdf"
+        room = "general"
+    }
+    Invoke-RestMethod -Uri "http://localhost:8081/files" -Method Post -Form $form
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## GET /files/{file_id}
+
+下载文件。
+
+### 请求
+
+```http
+GET /files/{file_id}
+```
+
+### 路径参数
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `file_id` | integer | 文件 ID |
+
+### 响应
+
+文件二进制内容，以 `FileResponse` 返回。
+
+### 示例
+
+<Tabs>
+  <Tab title="curl">
+    ```bash
+    curl -O http://localhost:8081/files/1
+    ```
+  </Tab>
+  <Tab title="PowerShell">
+    ```powershell
+    Invoke-WebRequest -Uri "http://localhost:8081/files/1" -OutFile "downloaded_file"
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## HEAD /files/{file_id}
+
+获取文件元信息（不下载内容）。
+
+### 请求
+
+```http
+HEAD /files/{file_id}
+```
+
+### 响应头
+
+| 响应头 | 说明 |
+|--------|------|
+| `X-DRLMS-Filename` | 原始文件名 |
+| `X-DRLMS-Size` | 文件大小（字节） |
+| `X-DRLMS-SHA256` | SHA256 哈希 |
+| `X-DRLMS-Ephemeral` | 是否为临时文件（0/1） |
+| `Content-Length` | 文件大小 |
+
+### 示例
+
+<Tabs>
+  <Tab title="curl">
+    ```bash
+    curl -I http://localhost:8081/files/1
+    ```
+  </Tab>
+  <Tab title="PowerShell">
+    ```powershell
+    Invoke-WebRequest -Uri "http://localhost:8081/files/1" -Method Head
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## 错误响应
+
+### 400 Bad Request
+
+```json
+{
+  "detail": "file is required"
+}
+```
+
+### 404 Not Found
+
+```json
+{
+  "detail": "not found"
+}
+```
+
+或文件记录存在但磁盘文件缺失：
+
+```json
+{
+  "detail": "file missing"
+}
+```
+
+### 500 Internal Server Error
+
+```json
+{
+  "detail": "database error"
+}
+```
+
+其他 500 错误示例：
+
+```json
+{
+  "detail": "init error"
+}
+```
+
+```json
+{
+  "detail": "write failed"
+}
+```
+
+---
+
+## 相关文档
+
+- [API 概述](/zh/api-reference/overview) - API 总览
+- [事件 API](/zh/api-reference/events) - 事件端点

@@ -1,0 +1,310 @@
+---
+title: "信任模型"
+description: "DRLMS 多级信任机制详解"
+---
+
+## 概述
+
+DRLMS 实现多级信任模型，平衡安全性与易用性。用户可根据需求选择不同的信任策略。
+
+---
+
+## 信任级别
+
+### 级别定义
+
+| 级别 | 名称 | 值 | 说明 |
+|------|------|------|------|
+| UNKNOWN | 未知 | -1 | 从未交互 |
+| TOFU | 首次信任 | 0 | Trust On First Use |
+| MANUAL | 手动验证 | 1 | 指纹比对确认 |
+| SOCIAL | 社交担保 | 2 | 已验证联系人担保 |
+| ANCHORED | 外部锚定 | 3 | DNS/HTTPS/GitHub 验证 |
+
+### 信任流转
+
+```
+UNKNOWN ──首次交互──► TOFU
+                        │
+                        ├──手动验证──► MANUAL
+                        │
+                        ├──社交担保──► SOCIAL
+                        │
+                        └──外部锚定──► ANCHORED
+```
+
+---
+
+## TOFU（首次信任）
+
+### 工作原理
+
+首次与新公钥交互时自动记录并信任：
+
+```
+1. 收到新公钥 PK
+2. 检查本地记录
+3. 如果不存在:
+   - 记录 PK
+   - 设置信任级别为 TOFU
+   - 允许通信
+4. 如果存在但不同:
+   - 触发密钥变更警告
+```
+
+### 适用场景
+
+- 初次建立联系
+- 低风险通信
+- 便利优先
+
+### 风险
+
+首次连接可能被中间人攻击。建议尽快升级验证。
+
+---
+
+## 手动验证
+
+### 验证方式
+
+通过安全渠道比对指纹：
+
+1. **面对面**: 直接对比屏幕
+2. **视频通话**: 确认身份后读取
+3. **电话**: 使用数字格式读取
+
+### 指纹格式
+
+```bash
+# 分组格式（默认）- 6 组 4 字符
+ming-drlms identity fingerprint
+# 7A3F 9B2C 4E1D 8F5A 2C7B 1D9E
+
+# 紧凑格式
+ming-drlms identity fingerprint --format compact
+# 7A3F9B2C4E1D8F5A2C7B1D9E
+
+# 数字格式（适合语音）
+ming-drlms identity fingerprint --format numeric
+
+# Emoji 格式（快速视觉对比）
+ming-drlms identity fingerprint --format emoji
+```
+
+### 执行验证
+
+```bash
+ming-drlms trust verify <pubkey> --fingerprint "1234 5678..."
+```
+
+---
+
+## 社交担保
+
+### 工作原理
+
+已验证的联系人可以为其他人担保：
+
+```
+Alice (MANUAL) ──担保──► Bob
+                         │
+                         ▼
+                    Bob 升级为 SOCIAL
+```
+
+### 担保链
+
+```
+你 ←─MANUAL─ Alice ←─SOCIAL─ Bob ←─SOCIAL─ Carol
+```
+
+最多跳数：2（防止信任传递过远）
+
+### 社交担保验证
+
+社交担保需要至少 2 个已手动验证的联系人担保（由 TrustStore 内部处理）。
+
+<Note>
+当前 CLI 未提供直接的 `vouch` 命令，社交担保通过 API 实现。
+</Note>
+
+---
+
+## 外部锚定
+
+### DNS 验证
+
+在域名 TXT 记录中发布公钥：
+
+```
+_drlms.example.com TXT "v=drlms1; pubkey=<hex or base64>"
+```
+
+验证：
+
+```bash
+ming-drlms trust anchor <pubkey> --type dns --id example.com
+```
+
+### HTTPS Well-Known
+
+在网站发布公钥：
+
+```
+GET https://example.com/.well-known/drlms.json
+```
+
+响应：
+
+```json
+{
+  "version": 1,
+  "identity_pubkey": "<hex or base64>",
+  "updated_at": "2025-01-01T00:00:00Z"
+}
+```
+
+验证：
+
+```bash
+ming-drlms trust anchor <pubkey> --type https --id example.com
+```
+
+### GitHub
+
+通过 GitHub gist 发布公钥（文件名 `drlms-identity.json`）：
+
+```bash
+ming-drlms trust anchor <pubkey> --type github --id username
+```
+
+---
+
+## 密钥变更检测
+
+### 检测机制
+
+每次收到消息时检查发送者公钥：
+
+```python
+def on_message(sender_pubkey, message):
+    record = trust_store.get(sender_pubkey)
+    if record and record.key != sender_pubkey:
+        raise KeyChangeDetected(old=record.key, new=sender_pubkey)
+```
+
+### 处理策略
+
+| 策略 | 行为 |
+|------|------|
+| `warn` | 警告用户，等待决定（默认） |
+| `block` | 自动屏蔽，直到手动验证 |
+| `reset` | 重置为 TOFU 状态 |
+
+配置：
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    export DRLMS_KEY_CHANGE_ACTION=warn
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    $env:DRLMS_KEY_CHANGE_ACTION = "warn"
+    ```
+  </Tab>
+</Tabs>
+
+### 处理命令
+
+```bash
+# 接受变更
+ming-drlms trust accept <pubkey>
+
+# 屏蔽联系人
+ming-drlms trust block <pubkey>
+```
+
+---
+
+## 信任策略
+
+### 可用策略
+
+| 策略 | 说明 | 适用场景 |
+|------|------|----------|
+| `tofu` | 首次信任 | 普通用户、便利优先 |
+| `manual_only` | 仅手动验证 | 高安全需求 |
+| `anchored_only` | 仅外部锚定 | 最高安全需求 |
+
+### 配置
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    export DRLMS_TRUST_POLICY=tofu
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    $env:DRLMS_TRUST_POLICY = "tofu"
+    ```
+  </Tab>
+</Tabs>
+
+或在 `config.toml`：
+
+```toml
+[trust]
+default_policy = "tofu"
+key_change_action = "warn"
+```
+
+---
+
+## 信任存储
+
+### 存储位置
+
+| 平台 | 路径 |
+|------|------|
+| Linux/macOS | `~/.config/drlms/trust_store.json` |
+| Windows | `%APPDATA%\DRLMS\trust_store.json` |
+
+### 数据结构
+
+```json
+{
+  "version": 1,
+  "records": {
+    "7A3F9B2C4E1D8F5A2C7B1D9E": {
+      "public_key": "hex_encoded_32_bytes",
+      "display_name": "Alice",
+      "trust_level": 1,
+      "first_seen": "2025-12-01T10:00:00",
+      "last_seen": "2025-12-11T15:30:00",
+      "blocked": false,
+      "blocked_reason": "",
+      "verifications": [
+        {
+          "method": "manual",
+          "details": "fingerprint comparison",
+          "verified_at": "2025-12-01T10:30:00",
+          "expires_at": null
+        }
+      ],
+      "key_history": []
+    }
+  }
+}
+```
+
+---
+
+## 相关文档
+
+- [信任验证](/zh/guides/trust-verification) - 使用指南
+- [身份管理](/zh/guides/identity-management) - 身份配置
+- [安全概述](/zh/security/overview) - 安全架构

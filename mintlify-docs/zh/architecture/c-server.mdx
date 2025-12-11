@@ -1,0 +1,429 @@
+---
+title: "C 服务器"
+description: "log_collector_server 内部架构详解"
+---
+
+## 概述
+
+`log_collector_server` 是 DRLMS 的核心服务器组件，使用 C 语言实现，提供高性能的多线程 TCP 服务。主入口为 `log_collector_main.c`。
+
+---
+
+## 架构设计
+
+### 组件结构
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    Main Thread                          │
+│                  (server_core.c)                        │
+│                    Accept Loop                          │
+└───────────────────────────┬─────────────────────────────┘
+                            │
+            ┌───────────────┼───────────────┐
+            │               │               │
+            ▼               ▼               ▼
+    ┌───────────┐   ┌───────────┐   ┌───────────┐
+    │ Worker 1  │   │ Worker 2  │   │ Worker N  │
+    │ (Thread)  │   │ (Thread)  │   │ (Thread)  │
+    │ MP2/Legacy│   │ MP2/Legacy│   │ MP2/Legacy│
+    └───────────┘   └───────────┘   └───────────┘
+            │               │               │
+            └───────────────┼───────────────┘
+                            │
+                            ▼
+              ┌─────────────────────────────────┐
+              │       Shared Resources          │
+              │  - rooms.c (Room + Instance)    │
+              │  - server_users.c               │
+              │  - sqlite_storage.c             │
+              │  - audit_log.c                  │
+              └─────────────────────────────────┘
+```
+
+### 线程模型
+
+采用 thread-per-connection 模型：
+
+- **主线程**：Accept 新连接，通过 `server_core_accept_loop()` 实现
+- **工作线程**：`handle_client()` 处理单个连接的全部生命周期
+- **协议检测**：首次连接时通过 `detect_mp2_protocol_on_socket()` 检测 MP2 或 Legacy 协议
+- 最大连接数：可配置（默认 128）
+
+---
+
+## 核心模块
+
+### 主入口 (`log_collector_main.c`)
+
+会话结构：
+
+```c
+typedef struct {
+    platform_socket_t fd;
+    char user[64];
+    int authenticated;
+    int auth_strict;
+    const char *data_dir;
+    long long rate_up_bps;
+    long long rate_down_bps;
+} LegacySession;
+```
+
+### MP2 协议解析 (`mp2_protocol.c`)
+
+```c
+int mp2_protocol_read_frame(platform_socket_t fd, mp2_frame_t *frame);
+int mp2_protocol_send_frame(platform_socket_t fd, const mp2_frame_t *frame);
+```
+
+功能：
+- MP2 二进制帧分隔（Magic: `0xDEADBEEF`）
+- Protobuf 消息解码
+- 消息类型路由
+
+### 认证模块 (`mp2_auth.c`)
+
+```c
+int mp2_auth_handle_challenge(platform_socket_t fd);
+int mp2_auth_handle_auth_request(platform_socket_t fd,
+                                 const unsigned char *payload,
+                                 uint32_t payload_len,
+                                 const mp2_auth_config_t *cfg);
+int mp2_auth_verify_access_token(const char *token, const char *secret,
+                                 char *sub_out, size_t sub_cap,
+                                 unsigned long long *exp_out);
+```
+
+功能：
+- Challenge-Response 流程
+- Argon2id 密码验证
+- JWT AccessToken / RefreshToken 签发与验证
+
+### 房间管理 (`rooms.c` + `rooms_*.c`)
+
+房间采用 **Room + RoomInstance** 分离架构（M5 分片机制）：
+
+```c
+typedef struct InstanceUUID {
+    unsigned char bytes[16];  // UUID v4
+} InstanceUUID;
+
+typedef enum {
+    ROOM_STORAGE_PERSISTENT = 0,
+    ROOM_STORAGE_EPHEMERAL = 1
+} RoomStoragePolicy;
+```
+
+主要 API：
+
+```c
+Room *rooms_get_or_create(const char *name, int *out_created);
+RoomAssignResult rooms_assign_instance(Room *room, const char *preferred_instance_hex,
+                                       InstanceUUID *out_uuid,
+                                       RoomInstance **out_instance,
+                                       int *is_new_instance);
+int rooms_add_subscriber(Room *room, RoomInstance *instance,
+                         platform_socket_t fd, const char *username);
+int rooms_store_text(RoomInstance *instance, const char *room_name, ...);
+int rooms_fanout_text(RoomInstance *instance, const char *room_name, ...);
+```
+
+功能：
+- 房间分片（同名房间多实例）
+- 订阅管理（含 presence token、display token）
+- 消息扇出
+- 阅后即焚（ephemeral）模式
+- M5 "点火"（Ignite）与好友关系
+
+### 事件持久化 (`sqlite_storage.c`)
+
+```c
+int sqlite_store_text(SQLiteStorage *storage, const char *room_name,
+                      const char *user, const char *display_token,
+                      const char *instance_id, const char *timestamp,
+                      const unsigned char *payload, size_t len,
+                      const char *sha_hex, uint64_t *out_event_id);
+int sqlite_get_history(SQLiteStorage *storage, const char *room_name,
+                       uint64_t since_id, size_t limit, ...);
+```
+
+功能：
+- SQLite 事件存储
+- 历史查询（支持实例级别）
+- 文件附件管理
+- 好友关系与备注存储
+
+---
+
+## 数据流
+
+### 消息发布流程
+
+```
+┌────────────┐    ┌────────────┐    ┌────────────┐    ┌────────────┐
+│  Client    │    │mp2_protocol│    │rooms.c +   │    │sqlite_     │
+│            │    │mp2_rooms   │    │instance    │    │storage     │
+└─────┬──────┘    └─────┬──────┘    └─────┬──────┘    └─────┬──────┘
+      │                 │                 │                 │
+      │ MP2 PUB_REQUEST │                 │                 │
+      │────────────────►│                 │                 │
+      │                 │ dispatch        │                 │
+      │                 │────────────────►│                 │
+      │                 │                 │ rooms_store_text│
+      │                 │                 │────────────────►│
+      │                 │                 │◄────────────────│
+      │                 │                 │rooms_fanout_text│
+      │                 │◄────────────────│                 │
+      │ PUB_ACK         │                 │                 │
+      │◄────────────────│                 │                 │
+```
+
+**关键函数调用路径**：
+1. `mp2_dispatcher_handle_frame()` → 解析 Protobuf
+2. `mp2_rooms_handle_pub_request()` → 验证权限、分配实例
+3. `rooms_store_text()` → SQLite 持久化 + 文件落盘
+4. `rooms_fanout_text()` → 向实例内所有订阅者广播
+
+---
+
+## 存储结构
+
+### 目录布局
+
+```
+<DRLMS_DATA_DIR>/
+├── drlms.db              # SQLite 主数据库
+├── users.txt             # 用户凭证（Argon2id hash）
+├── logs/
+│   └── audit.log.jsonl   # JSON Lines 格式审计日志
+├── drlms.yaml            # 可选的联邦配置
+└── rooms/
+    └── <room_name>/
+        └── <instance_id>/
+            ├── events.log    # 事件索引日志
+            ├── texts/        # 文本消息 payload
+            └── files/        # 上传文件
+```
+
+### SQLite Schema
+
+房间信息结构 (`SQLiteRoomInfo`)：
+
+```c
+typedef struct {
+    char name[65];
+    char owner[65];
+    int policy;                     // 0=retain, 1=delegate, 2=teardown
+    unsigned long long last_event_id;
+    time_t created_at;
+    time_t updated_at;
+    int storage_policy_template;    // 0=persistent, 1=ephemeral
+    int max_capacity_per_instance;
+    int max_instances;
+    size_t total_instances;
+    size_t total_subs;
+    int max_ephemeral_events;
+} SQLiteRoomInfo;
+```
+
+主要表结构：
+
+```sql
+-- 房间表
+CREATE TABLE rooms (
+    name TEXT PRIMARY KEY,
+    owner TEXT,
+    policy INTEGER DEFAULT 1,
+    ownership_type INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_activity DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_event_id INTEGER DEFAULT 0,
+    storage_policy_template INTEGER DEFAULT 0,
+    max_capacity_per_instance INTEGER DEFAULT 50,
+    max_instances INTEGER DEFAULT 20,
+    total_instances INTEGER DEFAULT 0,
+    total_subs INTEGER DEFAULT 0,
+    max_ephemeral_events INTEGER DEFAULT 1000
+);
+
+-- 房间实例表
+CREATE TABLE room_instances (
+    instance_id TEXT PRIMARY KEY,
+    room_name TEXT NOT NULL,
+    storage_policy INTEGER DEFAULT 0,
+    max_capacity INTEGER DEFAULT 50,
+    state INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_active_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    destroyed_at DATETIME,
+    last_event_id INTEGER DEFAULT 0,
+    FOREIGN KEY (room_name) REFERENCES rooms(name) ON DELETE CASCADE
+);
+
+-- 事件表
+CREATE TABLE events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    room_name TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    user_name TEXT NOT NULL,
+    display_token TEXT NOT NULL,
+    timestamp TEXT NOT NULL,
+    content_hash TEXT,
+    content_length INTEGER,
+    content BLOB,
+    file_path TEXT,
+    file_size INTEGER,
+    instance_id TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 好友关系表
+CREATE TABLE friendships (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_a TEXT NOT NULL,
+    user_b TEXT NOT NULL,
+    generated_name TEXT NOT NULL,
+    word_bank_version TEXT,
+    established_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_a, user_b),
+    CHECK(user_a < user_b)
+);
+
+-- RefreshToken 表
+CREATE TABLE auth_refresh_tokens (
+    token TEXT PRIMARY KEY,
+    user_name TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    issued_at INTEGER DEFAULT (strftime('%s','now'))
+);
+
+-- 客户端身份表 (Phase 14C)
+CREATE TABLE client_identities (
+    user_name TEXT NOT NULL,
+    device_id INTEGER NOT NULL,
+    pubkey BLOB NOT NULL,
+    registration_id INTEGER,
+    device_guid TEXT,
+    platform TEXT,
+    app_version TEXT,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY(user_name, device_id)
+);
+```
+
+---
+
+## 安全机制
+
+### 密码存储
+
+使用 Argon2id：
+
+```c
+#define ARGON2_T_COST 2
+#define ARGON2_M_COST 65536  // 64 MB
+#define ARGON2_PARALLELISM 1
+```
+
+### JWT Token
+
+| 属性 | 值 |
+|------|------|
+| 算法 | HS256 |
+| Access Token 有效期 | 15 分钟 |
+| Refresh Token 有效期 | 7 天 |
+
+### 速率限制
+
+通过环境变量配置带宽限制：
+
+- `DRLMS_RATE_UP_BPS`：上传速率限制（字节/秒，0=不限制）
+- `DRLMS_RATE_DOWN_BPS`：下载速率限制（字节/秒，0=不限制）
+
+认证失败处理由 `mp2_auth.c` 的 Challenge-Response 机制控制。
+
+---
+
+## 配置
+
+### 环境变量
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `DRLMS_PORT` | 15034 | 监听端口 |
+| `DRLMS_MAX_CONN` | 128 | 最大连接数 |
+| `DRLMS_DATA_DIR` | `.` | 数据目录（存放 rooms/、logs/、drlms.db 等） |
+| `DRLMS_AUTH_STRICT` | 1 | 严格认证模式（0=允许空密码登录） |
+| `DRLMS_RATE_UP_BPS` | 0 | 上传速率限制（字节/秒，0=不限制） |
+| `DRLMS_RATE_DOWN_BPS` | 0 | 下载速率限制（字节/秒，0=不限制） |
+| `DRLMS_TCP_KEEPALIVE` | 1 | 启用 TCP Keepalive |
+| `DRLMS_TCP_KEEPIDLE` | 60 | Keepalive 空闲时间（秒） |
+| `DRLMS_TCP_KEEPINTVL` | 10 | Keepalive 间隔（秒） |
+| `DRLMS_TCP_KEEPCNT` | 3 | Keepalive 探测次数 |
+
+### 认证相关环境变量
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `DRLMS_JWT_SECRET` | `dev-secret` | JWT 签名密钥 |
+| `DRLMS_SERVER_SALT` | `mp2` | 服务器盐值（域分隔） |
+| `DRLMS_ARGON2_T_COST` | 2 | Argon2 迭代次数（1-10） |
+| `DRLMS_ARGON2_M_COST` | 65536 | Argon2 内存 KiB（1024-1048576） |
+| `DRLMS_ARGON2_PARALLELISM` | 1 | Argon2 并行度（1-8） |
+| `DRLMS_REQUIRE_IDENTITY_SIG` | 0 | 强制要求客户端身份签名 |
+| `DRLMS_IDENTITY_SIG_MAX_SKEW` | 300 | 身份签名时间戳最大偏差（秒） |
+
+### 编译选项
+
+使用 CMake 构建：
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    cmake -S . -B build
+    cmake --build build --target log_collector_server
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    cmake -S . -B build -G "Visual Studio 17 2022"
+    cmake --build build --config Release --target log_collector_server
+    ```
+  </Tab>
+</Tabs>
+
+主要 CMake 选项见 `src/server/CMakeLists.txt`。
+
+---
+
+## 性能优化
+
+<Note>
+以下优化措施为计划中功能，当前版本尚未实现。
+</Note>
+
+### 连接池（计划中）
+
+预分配连接结构，减少动态分配。
+
+### 零拷贝发送（计划中）
+
+使用 `sendfile()` 发送大文件。
+
+### 批量广播（计划中）
+
+合并同房间多条消息。
+
+### 当前实现
+
+当前版本采用 thread-per-connection 模型，每个连接由独立线程处理。速率限制通过环境变量 `DRLMS_RATE_UP_BPS` 和 `DRLMS_RATE_DOWN_BPS` 配置。
+
+---
+
+## 相关文档
+
+- [M-Proto-v2 协议](/zh/architecture/m-proto-v2) - 协议规范
+- [架构概述](/zh/architecture/overview) - 系统架构
+- [部署指南](/zh/operations/relay-server) - 服务器部署

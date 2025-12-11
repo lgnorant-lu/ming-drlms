@@ -1,0 +1,307 @@
+---
+title: "WSL 配置"
+description: "Windows Subsystem for Linux 环境下的 DRLMS 配置指南"
+---
+
+## 概述
+
+WSL（Windows Subsystem for Linux）提供了在 Windows 上运行 Linux 环境的能力。DRLMS 在 WSL 中运行良好，推荐 WSL 2。
+
+---
+
+## WSL 安装
+
+### 安装 WSL 2
+
+```powershell
+# 以管理员身份运行 PowerShell
+wsl --install
+
+# 或指定发行版
+wsl --install -d Ubuntu-22.04
+```
+
+### 验证版本
+
+```powershell
+wsl --list --verbose
+```
+
+确保 VERSION 列显示 `2`。
+
+---
+
+## Linux 环境配置
+
+### 更新系统
+
+```bash
+sudo apt update && sudo apt upgrade -y
+```
+
+### 安装 Python
+
+```bash
+sudo apt install python3 python3-pip python3-venv -y
+```
+
+### 安装 uv
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# 重新加载 shell
+source ~/.bashrc
+```
+
+### 安装 DRLMS
+
+```bash
+uv tool install ming-drlms
+
+# 验证
+ming-drlms --version
+```
+
+---
+
+## 路径处理
+
+### Windows 路径访问
+
+WSL 可以通过 `/mnt/` 访问 Windows 文件系统：
+
+| Windows 路径 | WSL 路径 |
+|-------------|---------|
+| `C:\Users\Me` | `/mnt/c/Users/Me` |
+| `D:\Projects` | `/mnt/d/Projects` |
+
+### 项目路径建议
+
+为获得最佳性能，建议将项目放在 WSL 文件系统内：
+
+```bash
+# 推荐：WSL 原生路径
+cd ~/projects/drlms
+
+# 不推荐：Windows 挂载路径（I/O 较慢）
+cd /mnt/d/projects/drlms
+```
+
+### 环境变量路径
+
+```bash
+# 使用 WSL 路径风格
+export MING_DRLMS_CONFIG_DIR=~/.config/drlms
+export DRLMS_CONFIG_FILE=~/.config/drlms/config.toml
+
+# 或使用挂载路径访问 Windows 文件
+export MING_DRLMS_CONFIG_DIR=/mnt/d/drlms/config
+```
+
+---
+
+## 环境变量配置
+
+### 临时设置
+
+```bash
+export DRLMS_BACKEND_MODE=relay
+export DRLMS_DEFAULT_RELAYS=http://localhost:8081
+```
+
+### 永久设置
+
+编辑 `~/.bashrc` 或 `~/.zshrc`：
+
+```bash
+# DRLMS 配置
+export DRLMS_BACKEND_MODE=relay
+export DRLMS_DEFAULT_RELAYS=http://localhost:8081
+export DRLMS_LOG_LEVEL=INFO
+```
+
+应用更改：
+
+```bash
+source ~/.bashrc
+```
+
+### 使用 .env 文件
+
+```bash
+# 加载 .env 文件
+export $(grep -v '^#' .env.local | xargs)
+```
+
+---
+
+## 网络配置
+
+### WSL 2 网络模式
+
+WSL 2 使用虚拟网络，localhost 转发默认启用。
+
+从 Windows 访问 WSL 服务：
+
+```powershell
+# Windows 侧（使用 PowerShell）
+Invoke-RestMethod http://localhost:8081/health
+
+# 或使用 curl（需安装）
+curl http://localhost:8081/health
+```
+
+从 WSL 访问 Windows 服务：
+
+```bash
+# 获取 Windows 主机 IP
+cat /etc/resolv.conf | grep nameserver | awk '{print $2}'
+
+# 或使用 host.docker.internal（需要配置）
+```
+
+### 端口转发
+
+如果需要从外部访问 WSL 服务：
+
+```powershell
+# PowerShell（管理员）
+netsh interface portproxy add v4tov4 listenport=8081 listenaddress=0.0.0.0 connectport=8081 connectaddress=$(wsl hostname -I | cut -d' ' -f1)
+```
+
+---
+
+## TUI 配置
+
+### 终端选择
+
+推荐使用 Windows Terminal 运行 WSL：
+
+1. 打开 Windows Terminal
+2. 点击下拉菜单选择 Ubuntu/WSL
+
+### 字体配置
+
+确保安装支持 Unicode 的字体：
+
+```bash
+# 检查 locale
+locale
+
+# 设置 UTF-8
+export LANG=en_US.UTF-8
+export LC_ALL=en_US.UTF-8
+```
+
+### 颜色支持
+
+```bash
+# 确保 TERM 变量正确
+export TERM=xterm-256color
+```
+
+---
+
+## 构建 C 服务器（可选）
+
+### 安装依赖
+
+```bash
+sudo apt install build-essential cmake git libsqlite3-dev libssl-dev -y
+```
+
+### 构建
+
+```bash
+cd ming-drlms
+mkdir build && cd build
+cmake ..
+make -j$(nproc)
+```
+
+---
+
+## 与 Windows 互操作
+
+### 从 WSL 调用 Windows 程序
+
+```bash
+# 打开 Windows 资源管理器
+explorer.exe .
+
+# 调用 Windows 程序
+/mnt/c/Windows/notepad.exe file.txt
+```
+
+### 从 Windows 调用 WSL 命令
+
+```powershell
+# 在 WSL 中运行命令
+wsl ming-drlms --version
+
+# 指定发行版
+wsl -d Ubuntu-22.04 ming-drlms tui
+```
+
+### 共享 Git 配置
+
+```bash
+# WSL 中使用 Windows Git 凭据管理器
+git config --global credential.helper "/mnt/c/Program\ Files/Git/mingw64/bin/git-credential-manager.exe"
+```
+
+---
+
+## 常见问题
+
+### 文件权限问题
+
+```bash
+# 修复 Windows 挂载路径权限
+sudo mount -o remount,rw,uid=1000,gid=1000 /mnt/c
+```
+
+或在 `/etc/wsl.conf` 中配置：
+
+```ini
+[automount]
+options = "metadata,umask=22,fmask=11"
+```
+
+### DNS 解析问题
+
+```bash
+# 检查 DNS
+cat /etc/resolv.conf
+
+# 手动设置 DNS
+echo "nameserver 8.8.8.8" | sudo tee /etc/resolv.conf
+```
+
+### 性能优化
+
+避免在 `/mnt/` 路径下进行大量 I/O 操作。将项目和数据放在 WSL 原生文件系统中。
+
+### 内存限制
+
+创建 `%USERPROFILE%\.wslconfig`：
+
+```ini
+[wsl2]
+memory=4GB
+processors=2
+```
+
+重启 WSL 生效：
+
+```powershell
+wsl --shutdown
+```
+
+---
+
+## 相关文档
+
+- [Windows 配置](/zh/setup/windows) - 原生 Windows 环境
+- [环境变量](/zh/setup/environment-variables) - 完整环境变量参考

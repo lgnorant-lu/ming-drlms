@@ -1,0 +1,104 @@
+---
+title: "tui"
+description: "TUI 终端界面命令"
+---
+
+## 概述
+
+`tui` 命令启动 DRLMS 的终端用户界面。
+
+```bash
+ming-drlms tui --help
+```
+
+---
+
+## 语法
+
+```bash
+ming-drlms tui
+```
+
+<Note>
+`tui` 命令不接受命令行选项，配置通过环境变量或配置文件控制。
+</Note>
+
+---
+
+## 示例
+
+```bash
+# 默认启动（MP2 模式）
+ming-drlms tui
+
+# Relay 模式启动
+DRLMS_BACKEND_MODE=relay ming-drlms tui
+```
+
+---
+
+## 模式说明
+
+### MP2 模式
+
+启动后显示登录界面，需要：
+1. 输入服务器地址和端口
+2. 输入用户名和密码
+3. 登录后进入聊天界面
+
+### Relay 模式
+
+启动后显示 Relay 启动界面，需要：
+1. 确认本地身份
+2. 确认 Relay 服务器配置
+3. 点击"进入聊天"
+
+---
+
+## 快捷键
+
+启动 TUI 后可用的全局快捷键：
+
+| 快捷键 | 功能 |
+|--------|------|
+| `Ctrl+C` / `Ctrl+Q` | 退出 |
+| `F1` / `Ctrl+L` | 打开日志 |
+| `F2` / `Ctrl+,` | 打开设置 |
+| `F3` | 服务器/Relay 配置 |
+
+详细快捷键参见 [TUI 快捷键](/zh/guides/tui-keybindings)。
+
+---
+
+## 故障排查
+
+### 界面显示异常
+
+1. 使用支持 Unicode 的终端（推荐 Windows Terminal）
+2. 设置等宽字体
+3. 确保终端尺寸足够（120x30+）
+
+### 颜色不正确
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    # 设置终端颜色支持
+    export TERM=xterm-256color
+    ```
+  </Tab>
+  <Tab title="Windows">
+    使用 Windows Terminal 即可自动支持 256 色。如使用传统 CMD：
+    ```powershell
+    # 启用虚拟终端处理
+    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## 相关文档
+
+- [TUI 使用指南](/zh/guides/tui-usage) - 完整使用指南
+- [TUI 快捷键](/zh/guides/tui-keybindings) - 快捷键参考

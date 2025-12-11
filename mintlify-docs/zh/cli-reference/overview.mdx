@@ -1,0 +1,216 @@
+---
+title: "CLI 概述"
+description: "DRLMS 命令行工具完整参考"
+---
+
+## 概述
+
+`ming-drlms` 是 DRLMS 的命令行客户端，提供多个命令组和顶层命令，涵盖从身份管理到消息发送的全部功能。
+
+```bash
+ming-drlms --help
+```
+
+---
+
+## 命令结构
+
+```
+ming-drlms [全局选项] <命令组> <子命令> [选项]
+```
+
+### 全局选项
+
+| 选项 | 说明 |
+|------|------|
+| `--version`, `-V` | 显示版本号 |
+| `--log-level` | 覆盖日志级别 |
+| `--log-dir` | 覆盖日志目录 |
+| `--log-console/--no-log-console` | 启用/禁用控制台日志 |
+
+---
+
+## 命令组分类
+
+### 核心命令（Relay 模式）
+
+| 命令组 | 说明 | 模式标注 |
+|--------|------|----------|
+| `identity` | 本地身份管理 | [Relay Only] |
+| `trust` | 联系人信任管理 | [Relay Only] |
+| `chat` | Relay 聊天命令 | [Relay Only] |
+| `relay-room` | Relay 原生房间管理 | [Relay Only] |
+
+### 核心命令（MP2 模式）
+
+| 命令组 | 说明 | 模式标注 |
+|--------|------|----------|
+| `room` | MP2 房间管理 | [MP2 Only] |
+| `e2ee` | 端到端加密管理 | [MP2 Only] |
+
+### 进阶命令
+
+| 命令组 | 说明 | 模式标注 |
+|--------|------|----------|
+| `server` | 服务器管理 | - |
+| `relay` | Relay 底层调试命令 | [Advanced] |
+| `client` | 客户端文件传输 | - |
+| `space` | 房间化空间命令 | - |
+| `config` | 配置管理 | - |
+
+### 工具命令
+
+| 命令组 | 说明 |
+|--------|------|
+| `user` | 用户管理 |
+| `ipc` | 共享内存 IPC 工具 |
+| `help` | 教学式帮助 |
+| `demo` | 演示脚本 |
+| `tui` | 启动 TUI 界面 |
+| `dev` | 开发者工具 |
+
+---
+
+## 顶层命令
+
+除命令组外，还有以下顶层命令：
+
+| 命令 | 说明 |
+|------|------|
+| `login` | 登录 MP2 服务器 |
+| `tui` | 启动 TUI 界面 |
+| `xeddsa-selftest` | XEdDSA 签名自检 |
+| `server-up` | 启动服务器（别名） |
+| `server-down` | 停止服务器（别名） |
+| `server-status` | 服务器状态（别名） |
+| `server-logs` | 服务器日志（别名） |
+
+---
+
+## 快速参考
+
+### 身份管理
+
+```bash
+# 创建身份
+ming-drlms identity create --name "Alice"
+
+# 显示身份
+ming-drlms identity show
+
+# 显示指纹
+ming-drlms identity fingerprint
+```
+
+### 信任管理
+
+```bash
+# 列出联系人
+ming-drlms trust list
+
+# 手动验证联系人
+ming-drlms trust verify <pubkey>
+
+# 设为信任锚点
+ming-drlms trust anchor <pubkey>
+```
+
+### 聊天（Relay 模式）
+
+```bash
+# 发布密钥包
+ming-drlms chat publish-bundle
+
+# 发送消息
+ming-drlms chat send --to <pubkey> --message "Hello"
+
+# 接收消息
+ming-drlms chat recv --room general
+```
+
+### 房间管理（MP2 模式）
+
+```bash
+# 创建房间
+ming-drlms room create -r myroom
+
+# 订阅房间
+ming-drlms room sub -r myroom
+
+# 发布消息
+ming-drlms room pub -r myroom -t "Hello"
+```
+
+### 服务器管理
+
+```bash
+# 启动服务器（默认端口 8080）
+ming-drlms server-up --port 8080 -d server_files
+
+# 检查状态
+ming-drlms server-status
+
+# 停止服务器
+ming-drlms server-down
+```
+
+---
+
+## 帮助系统
+
+### 命令帮助
+
+```bash
+# 命令组帮助
+ming-drlms identity --help
+
+# 子命令帮助
+ming-drlms identity create --help
+```
+
+### 教学式帮助
+
+```bash
+# 主题式教学帮助
+ming-drlms help show user
+ming-drlms help show space
+ming-drlms help show server
+ming-drlms help show ipc
+ming-drlms help show room
+```
+
+---
+
+## 输出格式
+
+大多数命令使用 Rich 渲染彩色输出：
+
+- **绿色**: 成功
+- **黄色**: 警告
+- **红色**: 错误
+- **蓝色**: 信息
+
+可通过设置环境变量 `NO_COLOR=1` 禁用彩色输出：
+
+```bash
+NO_COLOR=1 ming-drlms identity show
+```
+
+---
+
+## 后续章节
+
+<Columns cols={2}>
+  <Card title="identity" icon="id-card" href="/zh/cli-reference/identity">
+    本地身份管理
+  </Card>
+  <Card title="trust" icon="shield-check" href="/zh/cli-reference/trust">
+    联系人信任管理
+  </Card>
+  <Card title="chat" icon="message" href="/zh/cli-reference/chat">
+    Relay 聊天命令
+  </Card>
+  <Card title="room" icon="door-open" href="/zh/cli-reference/room">
+    MP2 房间管理
+  </Card>
+</Columns>

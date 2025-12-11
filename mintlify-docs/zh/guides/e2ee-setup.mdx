@@ -1,0 +1,324 @@
+---
+title: "E2EE 设置指南"
+description: "端到端加密配置与使用完整指南"
+---
+
+## 概述
+
+DRLMS 实现基于 Signal 协议的端到端加密（E2EE），确保消息只有发送者和接收者能够解密。
+
+---
+
+## 加密原理
+
+### Signal 协议
+
+DRLMS 使用 Signal 协议实现 E2EE：
+
+- **X3DH**: 密钥协商协议
+- **Double Ratchet**: 消息加密算法
+- **XEdDSA**: 签名算法
+
+### 密钥体系
+
+```
+身份密钥对 (Identity Key)
+├── 签名预密钥 (Signed PreKey)
+│   └── 预密钥签名 (Signature)
+└── 一次性预密钥 (One-Time PreKey)
+    └── OPK 1, 2, 3, ...
+```
+
+| 密钥类型 | 生命周期 | 用途 |
+|----------|----------|------|
+| 身份密钥 | 永久 | 身份标识、签名 |
+| 签名预密钥 | 中期（周/月） | 会话建立 |
+| 一次性预密钥 | 单次使用 | 前向安全 |
+
+---
+
+## MP2 模式 E2EE
+
+### 生成密钥
+
+```bash
+ming-drlms e2ee generate-keys --user <用户名> --host <服务器> --port <端口>
+```
+
+示例：
+
+```bash
+ming-drlms e2ee generate-keys -u alice -H 127.0.0.1 -p 8080
+```
+
+### 获取预密钥包
+
+```bash
+ming-drlms e2ee prekey-bundle --user <用户名> --target-user <目标用户> --host <服务器> --port <端口>
+```
+
+选项说明：
+
+| 选项 | 简写 | 默认值 | 说明 |
+|------|------|--------|------|
+| `--user` | `-u` | - | 认证用户名（必需） |
+| `--target-user` | - | 与 --user 相同 | 目标用户 |
+| `--host` | `-H` | `127.0.0.1` | 服务器地址 |
+| `--port` | `-p` | `8080` | 服务器端口 |
+
+### 会话建立
+
+首次与新用户通信时，系统自动：
+
+1. 获取对方的预密钥包
+2. 执行 X3DH 密钥协商
+3. 建立 Double Ratchet 会话
+
+---
+
+## Relay 模式 E2EE
+
+### 创建身份
+
+```bash
+ming-drlms identity create --name "你的名字"
+```
+
+### 发布密钥包
+
+```bash
+ming-drlms chat publish-bundle
+```
+
+此命令发布 PreKeyBundle 到 Keyserver 房间，包含：
+
+- 身份公钥
+- 签名预密钥
+- 一次性预密钥（默认 10 个）
+
+### 发送加密消息
+
+```bash
+ming-drlms chat send --to <接收者公钥> --message "你好！"
+```
+
+系统自动：
+
+1. 从 Keyserver 获取接收者的 PreKeyBundle
+2. 建立 Signal 会话
+3. 加密并发送消息
+
+---
+
+## 密钥存储
+
+### 存储位置
+
+| 平台 | 路径 |
+|------|------|
+| Linux/macOS | `~/.config/drlms/e2ee_keys.json` |
+| Windows | `%APPDATA%\DRLMS\e2ee_keys.json` |
+
+<Note>
+可通过 `MING_DRLMS_CONFIG_DIR` 环境变量覆盖默认配置目录。
+</Note>
+
+### 备份与恢复
+
+#### Relay 模式
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    # 导出身份
+    ming-drlms identity export --output ~/backup.json
+    
+    # 恢复身份
+    ming-drlms identity import ~/backup.json
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    # 导出身份
+    ming-drlms identity export --output "$env:USERPROFILE\backup.json"
+    
+    # 恢复身份
+    ming-drlms identity import "$env:USERPROFILE\backup.json"
+    ```
+  </Tab>
+</Tabs>
+
+#### MP2 模式
+
+直接备份 `e2ee_keys.json` 文件。
+
+---
+
+## 安全最佳实践
+
+### 密钥保护
+
+1. **不要共享私钥**: 身份私钥只应存在于你的设备上
+2. **加密备份**: 使用强密码加密备份文件
+3. **安全删除**: 更换设备时安全删除旧密钥
+
+### 验证身份
+
+验证联系人身份防止中间人攻击：
+
+```bash
+# 显示你的指纹
+ming-drlms identity fingerprint
+
+# 验证对方指纹
+ming-drlms trust verify <公钥> --fingerprint "7A3F 9B2C 4E1D..."
+```
+
+### 信任策略
+
+| 策略 | 安全级别 | 说明 |
+|------|----------|------|
+| `tofu` | 中 | 首次信任，后续验证变更 |
+| `manual_only` | 高 | 仅手动验证的联系人 |
+| `anchored_only` | 最高 | 仅外部锚定验证 |
+
+配置：
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    export DRLMS_TRUST_POLICY=manual_only
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    $env:DRLMS_TRUST_POLICY = "manual_only"
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## TUI 中的 E2EE
+
+### 查看状态
+
+在聊天界面按 `Ctrl+E` 显示：
+
+- 当前房间加密状态
+- 会话密钥信息
+- 参与者指纹
+
+### 状态指示器
+
+| 图标 | 含义 |
+|------|------|
+| 锁定 | E2EE 已启用 |
+| 开锁 | E2EE 未启用 |
+| 警告 | 密钥变更警告 |
+
+---
+
+## 故障排查
+
+### 会话建立失败
+
+```
+错误: 无法获取接收者的密钥包
+```
+
+解决：
+
+1. 确认接收者已生成/发布密钥
+2. 检查 Keyserver/服务器连接
+3. 重新发布你的密钥包
+
+### 解密失败
+
+```
+错误: 消息解密失败
+```
+
+可能原因：
+
+1. 会话状态不同步
+2. 密钥已过期或更换
+
+解决：
+
+```bash
+# 重置会话（MP2）
+ming-drlms e2ee generate-keys -u <用户名> --force
+
+# 重新发布（Relay）
+ming-drlms chat publish-bundle
+```
+
+### 密钥变更警告
+
+收到警告时：
+
+1. 通过安全渠道确认对方身份
+2. 如果确认安全，接受变更：
+   ```bash
+   ming-drlms trust accept <公钥>
+   ```
+3. 如果可疑，屏蔽联系人：
+   ```bash
+   ming-drlms trust block <公钥>
+   ```
+
+---
+
+## 技术细节
+
+### 加密流程
+
+```
+发送方                                     接收方
+   │                                         │
+   │  1. 获取 PreKeyBundle                   │
+   │◄────────────────────────────────────────│
+   │                                         │
+   │  2. X3DH 密钥协商                       │
+   │     DH1 = DH(IK_A, SPK_B)               │
+   │     DH2 = DH(EK_A, IK_B)                │
+   │     DH3 = DH(EK_A, SPK_B)               │
+   │     DH4 = DH(EK_A, OPK_B)               │
+   │     SK = KDF(DH1 || DH2 || DH3 || DH4)  │
+   │                                         │
+   │  3. Double Ratchet 初始化               │
+   │     RK = SK                             │
+   │                                         │
+   │  4. 加密消息                            │
+   │     MK = KDF(CK)                        │
+   │     ciphertext = AEAD(MK, plaintext)    │
+   │                                         │
+   │  5. 发送                                │
+   │────────────────────────────────────────►│
+   │                                         │
+   │                         6. 解密         │
+   │                            plaintext =  │
+   │                            AEAD^-1(...) │
+```
+
+### 消息格式
+
+```json
+{
+  "type": "encrypted_message",
+  "sender": "<base64 公钥>",
+  "recipient": "<base64 公钥>",
+  "ciphertext": "<base64 密文>",
+  "message_type": 3,
+  "timestamp": 1702300000
+}
+```
+
+---
+
+## 相关文档
+
+- [Signal 协议](/zh/architecture/signal-protocol) - 协议详解
+- [XEdDSA 签名](/zh/security/xeddsa) - 签名算法详解
+- [信任模型](/zh/security/trust-model) - 信任机制详解

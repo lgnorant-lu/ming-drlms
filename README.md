@@ -1,65 +1,94 @@
-## DRLMS - 分布式实时日志监控（C 服务器 + Python CLI）
+# DRLMS - 端到端加密的去中心化数据传输基础设施
 
-面向教学与演示的分布式实时日志系统：C 实现的多线程 TCP 服务器与共享内存 IPC，配套 Python CLI（ming-drlms）提供“房间化共享空间（SUB/PUB/HISTORY）”与易用的运维指令。
+**DRLMS (Decentralized Relay Linked Messaging System)** 是一个端到端加密的去中心化数据传输基础设施。
 
----
-
-## 核心特性（Features）
-- 多线程 TCP 服务器：LOGIN/LIST/UPLOAD/DOWNLOAD + 房间（SUB/UNSUB/HISTORY/PUBT/PUBF）
-- 用户文件（users.txt）与 Argon2id 认证，原子写入，兼容旧格式并透明升级
-- 共享内存 IPC 工具链（ipc_sender/log_consumer）与 C/Python 测试
-- Python CLI 友好交互：断点续传、本地状态、教学式帮助（Rich 渲染）
-- 开发者命令组：`ming-drlms dev test|coverage|pkg|artifacts`
+> **项目定位**：核心是传输协议与加密层，而非垂直的聊天应用。当前的 CLI/TUI 是协议栈的概念演示，未来可具象化为 AI Agent 通信总线、分布式日志同步、安全文件传输等任意形态。
 
 ---
 
-## 5 分钟上手（Quick Start）
+## 核心资产
+
+| 组件 | 说明 |
+|------|------|
+| **Signal E2EE** | 端到端加密隧道，服务器不可见明文 |
+| **XEdDSA 签名** | 消息完整性与不可否认性 |
+| **M-Proto-v2** | 高效二进制分帧传输协议 |
+| **Relay 联邦** | 去中心化事件转发，多 Relay 故障转移 |
+| **Local-First** | 本地 SQLite 持久化，离线可访问 |
+
+---
+
+## 快速开始
+
 ```bash
-# 1) 安装（推荐 pipx）
+# 1) 安装
 pipx install ming-drlms
 export PATH="$HOME/.local/bin:$PATH"
 
-# 2) 一键体验（会自动启动/停止服务器）
-ming-drlms demo quickstart
+# 2) 创建身份（生成本地 Signal 密钥对）
+export DRLMS_BACKEND_MODE=relay
+ming-drlms identity create --name "YourName"
 
-# 3) 可选：本地构建 C 产物以启用文件传输与协议脚本
-make all
+# 3) 启动 TUI 演示
+ming-drlms tui
+
+# 或 CLI 加密传输
+ming-drlms chat send --to <recipient_pubkey> --message "<any_payload>"
 ```
 
-说明：若未构建 `log_agent`，`client upload/download` 与部分 demo 步骤会被自动跳过并给出提示（不影响基础体验）。
+---
+
+## 传输模式
+
+### Relay 模式（推荐）
+
+去中心化事件转发，Relay 仅存储/转发密文：
+
+```bash
+export DRLMS_BACKEND_MODE=relay
+export DRLMS_DEFAULT_RELAYS=http://localhost:8081
+```
+
+### MP2 模式（传统）
+
+直连 C 服务器，集中式部署：
+
+```bash
+export DRLMS_BACKEND_MODE=mp2
+ming-drlms login -u alice -H 127.0.0.1 -p 15035
+```
 
 ---
 
-## 常用命令速查（Usage）
-- 服务器：
-  - 启动：`ming-drlms server-up --no-strict -d server_files -p 8080`
-  - 状态：`ming-drlms server-status -p 8080`
-  - 停止：`ming-drlms server-down`
-- 用户管理：`ming-drlms user add|passwd|del|list -d server_files`
-- 空间（房间）：
-  - 订阅：`ming-drlms space join -r demo -H 127.0.0.1 -p 8080 -R -j`
-  - 发布：`ming-drlms space send -r demo -t "hello"` 或 `-f <file>`
-  - 历史：`ming-drlms space history -r demo -n 10 -s 0`
-- 教学式帮助：`ming-drlms help show user|space|server|ipc|client|room|dev`
+## CLI 命令速查
+
+```bash
+# 身份管理
+ming-drlms identity create --name "Name"
+ming-drlms identity show
+
+# 加密通信
+ming-drlms chat publish-bundle
+ming-drlms chat send --to <pubkey> --message "data"
+ming-drlms chat recv --room general
+
+# TUI 演示界面
+ming-drlms tui
+
+# 帮助
+ming-drlms --help
+```
 
 ---
 
-## 故障排查（Troubleshooting）
-- pipx 命令不可用：`python3 -m pipx ensurepath` 后重启终端
-- WSL/路径：使用 `/mnt/d/...` 访问 Windows 盘符；必要时设置 `DRLMS_ROOT`
-- 端口占用：更换 `--port` 或停止占用进程
-- 关闭更新检查（测试/CI）：`export DRLMS_UPDATE_CHECK=0`
+## 文档
+
+- **在线文档**: [mintlify-docs](./mintlify-docs/zh/)
+- **贡献指南**: [CONTRIBUTING.md](./docs/CONTRIBUTING.md)
+- **安全策略**: [SECURITY.md](./docs/SECURITY.md)
 
 ---
 
-## 文档导航（Docs）
-- 贡献指南：`docs/CONTRIBUTING.md`（先决条件、本地演示、测试/覆盖率、CI/CD、钩子）
-- 设计文档：`docs/Design.md`（CLI 架构、房间策略与协议、落盘结构）
-- 变更索引：`docs/Log.md`（v0.3.0 迁移清单）
-- 行为准则：`docs/CODE_OF_CONDUCT.md`
-- 安全策略：`docs/SECURITY.md`
+## 许可
 
----
-
-## 许可（License）
 MIT

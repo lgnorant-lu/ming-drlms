@@ -1,0 +1,251 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "maple",
+  "name": "DRLMS",
+  "description": "分布式实时日志监控系统 - 端到端加密通信协议",
+  "colors": {
+    "primary": "#5C9E31",
+    "light": "#7CBA4D",
+    "dark": "#4ECDC4"
+  },
+  "appearance": {
+    "default": "system",
+    "background": {
+      "decoration": "gradient",
+      "color": {
+        "light": "#FDFCF7",
+        "dark": "#1E2D24"
+      }
+    }
+  },
+  "styling": {
+    "codeblocks": {
+      "theme": {
+        "light": "github-light",
+        "dark": "nord"
+      }
+    }
+  },
+  "favicon": "/favicon.svg",
+  "navigation": {
+    "languages": [
+      {
+        "language": "zh",
+        "tabs": [
+          {
+            "tab": "指南",
+            "groups": [
+              {
+                "group": "开始使用",
+                "icon": "rocket",
+                "pages": [
+                  "zh/index",
+                  "zh/quickstart",
+                  "zh/installation"
+                ]
+              },
+              {
+                "group": "环境配置",
+                "icon": "gear",
+                "pages": [
+                  "zh/setup/environment-variables",
+                  "zh/setup/config-file",
+                  "zh/setup/windows",
+                  "zh/setup/wsl"
+                ]
+              },
+              {
+                "group": "使用指南",
+                "icon": "book",
+                "pages": [
+                  "zh/guides/cli-basics",
+                  "zh/guides/tui-usage",
+                  "zh/guides/tui-keybindings",
+                  "zh/guides/relay-mode",
+                  "zh/guides/mp2-mode",
+                  "zh/guides/e2ee-setup",
+                  "zh/guides/rooms",
+                  "zh/guides/identity-management",
+                  "zh/guides/trust-verification"
+                ]
+              },
+              {
+                "group": "架构设计",
+                "icon": "sitemap",
+                "pages": [
+                  "zh/architecture/overview",
+                  "zh/architecture/m-proto-v2",
+                  "zh/architecture/relay-federation",
+                  "zh/architecture/signal-protocol",
+                  "zh/architecture/c-server"
+                ]
+              }
+            ]
+          },
+          {
+            "tab": "CLI 参考",
+            "groups": [
+              {
+                "group": "核心命令",
+                "icon": "terminal",
+                "pages": [
+                  "zh/cli-reference/overview",
+                  "zh/cli-reference/identity",
+                  "zh/cli-reference/trust",
+                  "zh/cli-reference/chat",
+                  "zh/cli-reference/room",
+                  "zh/cli-reference/relay-room",
+                  "zh/cli-reference/e2ee"
+                ]
+              },
+              {
+                "group": "进阶命令",
+                "icon": "screwdriver-wrench",
+                "pages": [
+                  "zh/cli-reference/server",
+                  "zh/cli-reference/relay",
+                  "zh/cli-reference/client",
+                  "zh/cli-reference/space",
+                  "zh/cli-reference/config"
+                ]
+              },
+              {
+                "group": "工具命令",
+                "icon": "toolbox",
+                "pages": [
+                  "zh/cli-reference/user",
+                  "zh/cli-reference/ipc",
+                  "zh/cli-reference/help",
+                  "zh/cli-reference/demo",
+                  "zh/cli-reference/tui",
+                  "zh/cli-reference/dev"
+                ]
+              }
+            ]
+          },
+          {
+            "tab": "API 参考",
+            "groups": [
+              {
+                "group": "Relay 服务器 API",
+                "icon": "server",
+                "pages": [
+                  "zh/api-reference/overview",
+                  "zh/api-reference/events",
+                  "zh/api-reference/files",
+                  "zh/api-reference/health",
+                  "zh/api-reference/merkle"
+                ]
+              }
+            ]
+          },
+          {
+            "tab": "运维",
+            "groups": [
+              {
+                "group": "部署",
+                "icon": "cloud-arrow-up",
+                "pages": [
+                  "zh/operations/relay-server",
+                  "zh/operations/docker",
+                  "zh/operations/logging"
+                ]
+              },
+              {
+                "group": "安全",
+                "icon": "shield-halved",
+                "pages": [
+                  "zh/security/overview",
+                  "zh/security/xeddsa",
+                  "zh/security/trust-model",
+                  "zh/security/key-lifecycle"
+                ]
+              },
+              {
+                "group": "开发",
+                "icon": "code",
+                "pages": [
+                  "zh/development/contributing",
+                  "zh/development/testing",
+                  "zh/development/building"
+                ]
+              }
+            ]
+          },
+          {
+            "tab": "更新日志",
+            "groups": [
+              {
+                "group": "版本记录",
+                "icon": "clock-rotate-left",
+                "pages": [
+                  "zh/changelog/index",
+                  "zh/changelog/roadmap"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "language": "en",
+        "tabs": [
+          {
+            "tab": "Guides",
+            "groups": [
+              {
+                "group": "Getting Started",
+                "icon": "rocket",
+                "pages": [
+                  "en/index",
+                  "en/quickstart",
+                  "en/installation"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "global": {
+      "anchors": [
+        {
+          "anchor": "GitHub",
+          "href": "https://github.com/lgnorant-lu/ming-drlms",
+          "icon": "github"
+        }
+      ]
+    }
+  },
+  "logo": {
+    "light": "/logo/light.svg",
+    "dark": "/logo/dark.svg"
+  },
+  "navbar": {
+    "links": [
+      {
+        "label": "GitHub",
+        "href": "https://github.com/lgnorant-lu/ming-drlms"
+      }
+    ],
+    "primary": {
+      "type": "button",
+      "label": "快速开始",
+      "href": "https://github.com/lgnorant-lu/ming-drlms"
+    }
+  },
+  "contextual": {
+    "options": [
+      "copy",
+      "view",
+      "chatgpt",
+      "claude",
+      "cursor"
+    ]
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/lgnorant-lu/ming-drlms"
+    }
+  }
+}

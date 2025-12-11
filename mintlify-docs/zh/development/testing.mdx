@@ -1,0 +1,425 @@
+---
+title: "测试指南"
+description: "DRLMS 测试策略与执行指南"
+---
+
+## 概述
+
+DRLMS 采用多层测试策略，包括单元测试、集成测试和端到端测试。
+
+---
+
+## 测试结构
+
+```
+tests/
+├── python/                  # Python 测试（50+ 文件）
+│   ├── test_cli_*.py        # CLI 命令测试
+│   ├── test_relay_*.py      # Relay 模块测试
+│   ├── test_phase18_*.py    # Phase 18 测试
+│   ├── test_phase19_*.py    # Phase 19 测试
+│   ├── test_mp2_*.py        # MP2 协议测试
+│   ├── test_e2ee_*.py       # E2EE 测试
+│   └── conftest.py
+├── integration/             # Shell 集成测试
+│   └── ...
+├── test_e2ee_core.py        # E2EE 核心测试
+├── test_server_protocol.py  # 服务器协议测试
+└── integration_protocol.sh  # 协议集成测试脚本
+```
+
+---
+
+## 运行测试
+
+### 运行所有测试
+
+```bash
+pytest
+```
+
+### 运行特定目录
+
+```bash
+# Python 测试
+pytest tests/python/
+
+# 特定模块测试
+pytest tests/python/test_relay_*.py
+```
+
+### 运行特定文件
+
+```bash
+pytest tests/python/test_relay_merkle.py
+```
+
+### 运行特定测试
+
+```bash
+pytest tests/python/test_relay_merkle.py::test_merkle_proof -v
+```
+
+### 带详细输出
+
+```bash
+pytest -v --tb=short
+```
+
+---
+
+## 覆盖率
+
+### 生成覆盖率报告
+
+```bash
+pytest --cov=src/ming_drlms --cov-report=html
+```
+
+### 查看报告
+
+```bash
+open htmlcov/index.html  # macOS
+start htmlcov/index.html  # Windows
+```
+
+### 最低覆盖率要求
+
+CI 要求覆盖率 >= 75%
+
+---
+
+## Fixtures
+
+### 内置 Fixtures
+
+`tests/python/conftest.py` 提供基本的路径设置：
+
+```python
+# conftest.py
+
+@pytest.fixture(autouse=True)
+def ensure_pythonpath():
+    """确保 src 目录在 sys.path 中"""
+    root = Path(__file__).resolve().parents[2]
+    src_dir = root / "src"
+    if str(src_dir) not in sys.path:
+        sys.path.insert(0, str(src_dir))
+    yield
+```
+
+### 常用 Fixture 模式
+
+```python
+# 临时目录（pytest 内置）
+def test_with_temp(tmp_path):
+    config_file = tmp_path / "config.toml"
+    ...
+
+# 模拟 HTTP 请求
+import responses
+
+@responses.activate
+def test_fetch_events():
+    responses.add(
+        responses.GET,
+        "http://localhost:8081/health",
+        json={"status": "ok"},
+    )
+    ...
+
+# 环境变量
+def test_with_env(monkeypatch):
+    monkeypatch.setenv("DRLMS_BACKEND_MODE", "relay")
+    ...
+```
+
+---
+
+## Mock 策略
+
+### HTTP 请求 Mock
+
+```python
+import responses
+
+@responses.activate
+def test_fetch_events():
+    responses.add(
+        responses.GET,
+        "http://localhost:8081/events",
+        json=[{"event_id": "e1", "ciphertext": "..."}],
+    )
+    
+    # 测试代码
+    ...
+```
+
+### 环境变量 Mock
+
+```python
+def test_with_env(monkeypatch):
+    monkeypatch.setenv("DRLMS_BACKEND_MODE", "relay")
+    
+    # 测试代码
+    ...
+```
+
+### 时间 Mock
+
+```python
+from freezegun import freeze_time
+
+@freeze_time("2025-12-11 10:00:00")
+def test_timestamp():
+    ...
+```
+
+---
+
+## 异步测试
+
+### 使用 pytest-asyncio
+
+```python
+import pytest
+
+@pytest.mark.asyncio
+async def test_async_sync():
+    result = await sync_manager.sync()
+    assert result.success
+```
+
+---
+
+## TUI 测试
+
+### 使用 Textual 测试框架
+
+```python
+from textual.testing import AppTester
+
+async def test_tui_login():
+    app = DRLMSApp()
+    async with AppTester(app) as pilot:
+        await pilot.press("tab")
+        await pilot.type("testuser")
+        await pilot.press("enter")
+        
+        assert app.query_one("#username").value == "testuser"
+```
+
+---
+
+## 测试标记
+
+### 使用 pytest marks
+
+```python
+import pytest
+
+@pytest.mark.integration
+def test_relay_connection():
+    """集成测试（需要外部服务器）"""
+    ...
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Unix only")
+def test_unix_socket():
+    ...
+```
+
+### 已定义的标记
+
+项目在 `pyproject.toml` 中定义了以下标记：
+
+| 标记 | 说明 |
+|------|------|
+| `integration` | 需要外部服务器二进制的测试 |
+
+### 运行特定标记
+
+```bash
+# 仅运行集成测试
+pytest -m integration
+
+# 跳过集成测试
+pytest -m "not integration"
+```
+
+---
+
+## CI 配置
+
+### GitHub Actions
+
+```yaml
+# .github/workflows/test.yml
+name: Tests
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -e ".[dev]"
+      - run: pytest --cov=src/ming_drlms
+```
+
+---
+
+## 调试测试
+
+### 使用 pdb
+
+```python
+def test_debug():
+    import pdb; pdb.set_trace()
+    # 或使用 breakpoint()
+    ...
+```
+
+### 详细输出
+
+```bash
+pytest -v --tb=long -s
+```
+
+### 失败时进入调试
+
+```bash
+pytest --pdb
+```
+
+---
+
+## 环境变量速查
+
+测试时常用的环境变量：
+
+| 变量 | 用途 | 测试常用值 |
+|------|------|------------|
+| `DRLMS_BACKEND_MODE` | 后端类型 | `mp2` 或 `relay` |
+| `DRLMS_MP2_HOST` | MP2 服务器地址 | `127.0.0.1` |
+| `DRLMS_MP2_PORT` | MP2 服务器端口 | `15035` |
+| `DRLMS_DEFAULT_RELAYS` | Relay 服务地址 | `http://127.0.0.1:8081` |
+| `DRLMS_LOG_LEVEL` | 日志级别 | `DEBUG` |
+| `DRLMS_UPDATE_CHECK` | 更新检查 | `0`（测试时关闭） |
+| `MING_DRLMS_CONFIG_DIR` | 配置目录 | `$(pwd)/.drlms` |
+| `DRLMS_USER` | 当前用户名 | `alice` |
+
+设置示例：
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    export DRLMS_BACKEND_MODE=relay
+    export DRLMS_DEFAULT_RELAYS=http://127.0.0.1:8081
+    export DRLMS_LOG_LEVEL=DEBUG
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    $env:DRLMS_BACKEND_MODE = "relay"
+    $env:DRLMS_DEFAULT_RELAYS = "http://127.0.0.1:8081"
+    $env:DRLMS_LOG_LEVEL = "DEBUG"
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## 常见测试场景
+
+### 场景 A: MP2 后端测试
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    # 1. 设置环境
+    export DRLMS_BACKEND_MODE=mp2
+    export DRLMS_MP2_HOST=127.0.0.1
+    export DRLMS_MP2_PORT=15035
+    
+    # 2. 启动 MP2 服务器（另一终端）
+    ./build/log_collector_server
+    
+    # 3. 运行测试
+    pytest tests/python/test_mp2_*.py -v
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    # 1. 设置环境
+    $env:DRLMS_BACKEND_MODE = "mp2"
+    $env:DRLMS_MP2_HOST = "127.0.0.1"
+    $env:DRLMS_MP2_PORT = "15035"
+    
+    # 2. 启动 MP2 服务器（另一终端）
+    .\build\Release\log_collector_server.exe
+    
+    # 3. 运行测试
+    pytest tests/python/test_mp2_*.py -v
+    ```
+  </Tab>
+</Tabs>
+
+### 场景 B: Relay 后端测试
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    # 1. 设置环境
+    export DRLMS_BACKEND_MODE=relay
+    export DRLMS_DEFAULT_RELAYS=http://127.0.0.1:8081
+    export DRLMS_USER=alice
+    
+    # 2. 启动 Relay 服务器（另一终端）
+    python -m ming_drlms.relay.server
+    
+    # 3. 运行测试
+    pytest tests/python/test_relay_*.py -v
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    # 1. 设置环境
+    $env:DRLMS_BACKEND_MODE = "relay"
+    $env:DRLMS_DEFAULT_RELAYS = "http://127.0.0.1:8081"
+    $env:DRLMS_USER = "alice"
+    
+    # 2. 启动 Relay 服务器（另一终端）
+    python -m ming_drlms.relay.server
+    
+    # 3. 运行测试
+    pytest tests/python/test_relay_*.py -v
+    ```
+  </Tab>
+</Tabs>
+
+### 场景 C: E2EE 端到端测试
+
+```bash
+# 运行 E2E 测试
+pytest tests/python/test_e2e_relay_signal_encrypt_sync.py -v
+```
+
+---
+
+## 详细文档
+
+更多测试详情参见项目内文档：
+
+- `docs/local_test_guide.md` - 完整本地测试指南（Windows/WSL 双环境）
+- `docs/ci_cd_guide.md` - CI/CD 工作流详解（GitHub Actions）
+
+---
+
+## 相关文档
+
+- [贡献指南](/zh/development/contributing) - 贡献流程
+- [构建指南](/zh/development/building) - 构建详情

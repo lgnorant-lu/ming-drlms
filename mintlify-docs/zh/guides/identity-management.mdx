@@ -1,0 +1,345 @@
+---
+title: "身份管理"
+description: "DRLMS 本地身份创建、备份与恢复指南"
+---
+
+## 概述
+
+在 Relay 模式下，DRLMS 使用本地自主身份。用户完全控制自己的身份密钥，无需依赖中心服务器。
+
+---
+
+## 身份组成
+
+### 密钥对
+
+每个身份包含一对 X25519 密钥：
+
+| 类型 | 用途 | 长度 |
+|------|------|------|
+| 私钥 | 签名、解密 | 32 字节 |
+| 公钥 | 标识、加密 | 32 字节 |
+
+### 身份属性
+
+| 属性 | 说明 |
+|------|------|
+| `public_key` | 公钥（十六进制） |
+| `fingerprint` | 公钥指纹（便于人工验证） |
+| `display_name` | 显示名称 |
+| `registration_id` | Signal 注册 ID |
+| `device_id` | 设备 ID |
+| `created_at` | 创建时间 |
+
+---
+
+## 创建身份
+
+### 基本创建
+
+```bash
+ming-drlms identity create --name "你的名字"
+```
+
+### 完整选项
+
+```bash
+ming-drlms identity create \
+  --name "Alice" \
+  --user alice
+```
+
+| 选项 | 说明 |
+|------|------|
+| `-n`, `--name` | 显示名称 |
+| `-u`, `--user` | 用户名（用于 LocalKeyStore 兼容） |
+| `-f`, `--force` | 强制覆盖已有身份 |
+
+### 输出示例
+
+```
+身份创建成功！
+
+公钥指纹:
+  7A3F 9B2C 4E1D 8F5A 2C7B 1D9E
+
+公钥 (hex):
+  0x1234567890abcdef...
+
+显示名称: Alice
+
+提示: 使用 'ming-drlms identity export' 备份身份
+```
+
+---
+
+## 查看身份
+
+### 显示详情
+
+```bash
+ming-drlms identity show
+```
+
+输出：
+
+```
+          本地身份
+┌───────────────┬──────────────────────────┐
+│ 属性          │ 值                       │
+├───────────────┼──────────────────────────┤
+│ 公钥指纹      │ 7A3F 9B2C 4E1D 8F5A...   │
+│ 公钥 (hex)    │ 0x1234567890abcdef...    │
+│ 显示名称      │ Alice                    │
+│ Registration ID│ 12345                   │
+│ Device ID     │ 1                        │
+│ 创建时间      │ 2025-12-11 10:30:00      │
+│ 数字指纹      │ 12345-67890-12345...     │
+└───────────────┴──────────────────────────┘
+```
+
+### 显示指纹
+
+```bash
+# 默认分组格式
+ming-drlms identity fingerprint
+
+# 紧凑格式
+ming-drlms identity fingerprint --format compact
+
+# 数字格式
+ming-drlms identity fingerprint --format numeric
+
+# Emoji 格式（视觉对比）
+ming-drlms identity fingerprint --format emoji
+```
+
+指纹格式：
+
+| 格式 | 示例 | 用途 |
+|------|------|------|
+| `groups` | `7A3F 9B2C 4E1D 8F5A 2C7B 1D9E` | 默认显示 |
+| `compact` | `123456789ABCDEF0...` | 复制粘贴 |
+| `lines` | 两行显示 | 对比验证 |
+| `numeric` | `12345-67890-12345...` | 语音验证 |
+| `emoji` | 表情符号序列 | 快速视觉对比 |
+
+### 生成二维码数据
+
+```bash
+ming-drlms identity qr
+```
+
+输出可用于生成验证二维码的数据。
+
+---
+
+## 备份身份
+
+### 导出
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    ming-drlms identity export --output ~/backup/identity.json
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    ming-drlms identity export --output "$env:USERPROFILE\backup\identity.json"
+    ```
+  </Tab>
+</Tabs>
+
+导出文件包含完整的身份信息（包括私钥）。
+
+### 安全警告
+
+导出文件包含私钥，必须妥善保管：
+
+- 使用强密码加密存储
+- 不要上传到公共存储
+- 不要通过不安全渠道传输
+- 定期更换存储位置
+
+### 加密备份（推荐）
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    # 导出并加密
+    ming-drlms identity export --output - | gpg -c > identity.gpg
+    
+    # 解密并导入
+    gpg -d identity.gpg | ming-drlms identity import -
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    # 导出并使用 7-Zip 加密
+    ming-drlms identity export --output identity.json
+    7z a -p identity.7z identity.json
+    Remove-Item identity.json
+    
+    # 解密并导入
+    7z x identity.7z
+    ming-drlms identity import identity.json
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## 恢复身份
+
+### 从备份导入
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    ming-drlms identity import ~/backup/identity.json
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    ming-drlms identity import "$env:USERPROFILE\backup\identity.json"
+    ```
+  </Tab>
+</Tabs>
+
+### 导入选项
+
+| 选项 | 简写 | 说明 |
+|------|------|------|
+| `--user` | `-u` | 用户名（用于 LocalKeyStore 兼容） |
+| `--force` | `-f` | 强制覆盖已有身份 |
+
+### 强制覆盖
+
+如果已存在身份：
+
+```bash
+ming-drlms identity import --force ~/backup/identity.json
+```
+
+### 验证恢复
+
+```bash
+ming-drlms identity show
+```
+
+确认指纹与备份时一致。
+
+---
+
+## 多设备支持
+
+当前版本暂不支持多设备同步。每个设备需要独立的身份。
+
+### 计划功能
+
+- 设备链接
+- 密钥同步
+- 消息同步
+
+---
+
+## 身份存储
+
+### 存储位置
+
+| 平台 | 路径 |
+|------|------|
+| Linux/macOS | `~/.config/drlms/e2ee_keys.json` |
+| Windows | `%APPDATA%\DRLMS\e2ee_keys.json` |
+
+<Note>
+可通过 `MING_DRLMS_CONFIG_DIR` 环境变量覆盖默认配置目录。
+</Note>
+
+### 文件格式
+
+```json
+{
+  "identity_key": {
+    "public": "base64_encoded",
+    "private": "base64_encoded"
+  },
+  "registration_id": 12345,
+  "device_id": 1,
+  "display_name": "Alice",
+  "created_at": "2025-12-11T10:30:00Z"
+}
+```
+
+### 权限
+
+确保文件权限正确：
+
+```bash
+chmod 600 ~/.config/drlms/e2ee_keys.json
+```
+
+---
+
+## 身份更换
+
+### 何时需要更换
+
+- 私钥泄露
+- 设备丢失
+- 安全审计要求
+
+### 更换步骤
+
+1. 通知联系人（通过安全渠道）
+2. 创建新身份：
+   ```bash
+   ming-drlms identity create --name "Alice" --force
+   ```
+3. 重新发布密钥包：
+   ```bash
+   ming-drlms chat publish-bundle
+   ```
+4. 联系人需要重新验证你的新身份
+
+---
+
+## 故障排查
+
+### 身份创建失败
+
+```
+错误: 已存在本地身份
+```
+
+使用 `--force` 覆盖，或先备份现有身份。
+
+### 导入失败
+
+```
+错误: 导入失败 - 文件格式错误
+```
+
+检查备份文件完整性和格式。
+
+### 权限错误
+
+```
+错误: 无法写入身份文件
+```
+
+检查目录权限：
+
+```bash
+mkdir -p ~/.config/drlms
+chmod 700 ~/.config/drlms
+```
+
+---
+
+## 相关文档
+
+- [信任验证](/zh/guides/trust-verification) - 验证联系人身份
+- [E2EE 设置](/zh/guides/e2ee-setup) - 加密配置
+- [Relay 模式](/zh/guides/relay-mode) - Relay 模式详解

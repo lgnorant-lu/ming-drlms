@@ -1,0 +1,283 @@
+---
+title: "chat"
+description: "[Relay Only] Relay 模式聊天命令"
+---
+
+## 概述
+
+`chat` 命令组用于在 Relay 模式下发送和接收端到端加密消息。无需 MP2 服务器，直接通过 Relay 网络通信。
+
+```bash
+ming-drlms chat --help
+```
+
+---
+
+## 前置条件
+
+1. 配置 Relay 模式
+
+   <Tabs>
+     <Tab title="Linux/WSL">
+       ```bash
+       export DRLMS_BACKEND_MODE=relay
+       export DRLMS_DEFAULT_RELAYS=http://localhost:8081
+       ```
+     </Tab>
+     <Tab title="Windows">
+       ```powershell
+       $env:DRLMS_BACKEND_MODE = "relay"
+       $env:DRLMS_DEFAULT_RELAYS = "http://localhost:8081"
+       ```
+     </Tab>
+   </Tabs>
+
+2. 创建本地身份
+   ```bash
+   ming-drlms identity create --name "YourName"
+   ```
+
+3. 发布密钥包（用于接收消息）
+   ```bash
+   ming-drlms chat publish-bundle
+   ```
+
+---
+
+## 命令列表
+
+| 命令 | 说明 |
+|------|------|
+| `send` | 发送加密消息 |
+| `recv` | 接收并解密消息 |
+| `publish-bundle` | 发布 PreKeyBundle 供他人发现 |
+
+---
+
+## chat send
+
+发送端到端加密消息到 Relay。
+
+### 语法
+
+```bash
+ming-drlms chat send [选项]
+```
+
+### 选项
+
+| 选项 | 简写 | 必需 | 说明 |
+|------|------|------|------|
+| `--to` | `-t` | 是 | 接收者公钥（hex）或指纹前缀 |
+| `--message` | `-m` | 是 | 消息内容 |
+| `--room` | `-r` | 否 | 房间 ID（可选，默认自动生成） |
+
+### 示例
+
+```bash
+# 发送消息（使用完整公钥）
+ming-drlms chat send --to 0x1234567890abcdef... --message "你好！"
+
+# 使用指纹前缀
+ming-drlms chat send --to 1234 --message "Hello!"
+
+# 指定房间
+ming-drlms chat send --to 1234 --message "Hello!" --room myroom
+```
+
+### 工作流程
+
+1. 获取本地身份
+2. 从 Keyserver 获取接收者的 PreKeyBundle
+3. 建立 Signal 会话并加密消息
+4. 投递到 Relay 服务器
+
+### 输出示例
+
+```
+发送者: 1234 5678 9ABC DEF0...
+接收者: ABCD EF01 2345 6789...
+正在获取接收者密钥包...
+获取到密钥包: device_id=1
+正在加密消息...
+加密完成: 128 字节
+正在投递到 Relay...
+消息已投递到 http://localhost:8081
+
+消息发送成功
+房间: dm_1234_ABCD
+```
+
+---
+
+## chat recv
+
+从 Relay 接收并解密消息。
+
+### 语法
+
+```bash
+ming-drlms chat recv [选项]
+```
+
+### 选项
+
+| 选项 | 简写 | 默认值 | 说明 |
+|------|------|--------|------|
+| `--room` | `-r` | - | 房间 ID（不指定则列出所有房间） |
+| `--limit` | `-n` | 20 | 消息数量限制 |
+| `--since` | `-s` | - | 起始序号 |
+
+### 示例
+
+```bash
+# 列出可用房间
+ming-drlms chat recv
+
+# 接收指定房间的消息
+ming-drlms chat recv --room myroom
+
+# 限制数量
+ming-drlms chat recv --room myroom --limit 10
+
+# 从特定序号开始
+ming-drlms chat recv --room myroom --since 100
+```
+
+### 输出示例（列出房间）
+
+```
+本地身份: 1234 5678 9ABC DEF0...
+
+          可用房间
+┌──────────────────┬──────────┐
+│ 房间 ID          │ 名称     │
+├──────────────────┼──────────┤
+│ dm_1234_ABCD...  │ (未命名) │
+│ general...       │ 公共聊天 │
+└──────────────────┴──────────┘
+
+使用 --room <room_id> 接收指定房间的消息
+```
+
+### 输出示例（接收消息）
+
+```
+正在查询房间 myroom... 的消息
+从 http://localhost:8081 获取到 3 条消息
+
+          消息列表
+┌────────────┬─────────┬────────────────────────┐
+│ 时间       │ 发送者  │ 内容                   │
+├────────────┼─────────┼────────────────────────┤
+│ 10:30:00   │ Alice   │ 你好！                 │
+│ 10:31:15   │ Bob     │ 早上好                 │
+│ 10:32:30   │ Alice   │ 今天天气不错           │
+└────────────┴─────────┴────────────────────────┘
+```
+
+---
+
+## chat publish-bundle
+
+发布 PreKeyBundle 到 Keyserver，使其他用户能够向你发送加密消息。
+
+### 语法
+
+```bash
+ming-drlms chat publish-bundle
+```
+
+### 说明
+
+PreKeyBundle 包含：
+- 身份公钥
+- 签名预密钥
+- 一次性预密钥（OPK）
+- 注册 ID 和设备 ID
+
+### 示例
+
+```bash
+ming-drlms chat publish-bundle
+```
+
+### 输出示例
+
+```
+发布者: 1234 5678 9ABC DEF0...
+正在生成密钥包...
+正在发布到 Keyserver...
+密钥包已发布到 2/2 个 Relay
+
+其他用户现在可以向你发送加密消息
+```
+
+### 注意事项
+
+- 每次更换设备或重新生成身份后需要重新发布
+- OPK 会被消费，定期运行此命令补充
+
+---
+
+## Signal 协议集成
+
+### 加密流程
+
+```
+发送方                                接收方
+   │                                    │
+   │  1. 获取 PreKeyBundle              │
+   │◄───────────────────────────────────│
+   │                                    │
+   │  2. 建立 Signal 会话               │
+   │                                    │
+   │  3. 加密消息                       │
+   │                                    │
+   │  4. 投递到 Relay                   │
+   │──────────────────────────────────►│
+   │                                    │
+   │                   5. 从 Relay 获取 │
+   │◄───────────────────────────────────│
+   │                                    │
+   │                   6. 解密消息      │
+   │                                    │
+```
+
+### 消息格式
+
+投递到 Relay 的加密消息格式：
+
+```json
+{
+  "type": "encrypted_message",
+  "sender": "<base64 公钥>",
+  "recipient": "<base64 公钥>",
+  "ciphertext": "<base64 密文>",
+  "message_type": 1,
+  "timestamp": 1702300000
+}
+```
+
+`message_type` 取值：
+- `1` = PreKey 消息（首次通信）
+- `2` = Whisper 消息（后续通信）
+
+---
+
+## 错误处理
+
+| 错误 | 原因 | 解决方案 |
+|------|------|----------|
+| "未找到本地身份" | 尚未创建身份 | 运行 `identity create` |
+| "无法获取接收者的密钥包" | 接收者未发布 bundle | 请接收者运行 `publish-bundle` |
+| "所有 Relay 投递失败" | 网络或 Relay 问题 | 检查 Relay 连接 |
+| "未配置 Relay" | 未设置环境变量 | 设置 `DRLMS_DEFAULT_RELAYS` |
+
+---
+
+## 相关命令
+
+- [identity](/zh/cli-reference/identity) - 本地身份管理
+- [trust](/zh/cli-reference/trust) - 联系人信任管理
+- [relay-room](/zh/cli-reference/relay-room) - Relay 房间管理

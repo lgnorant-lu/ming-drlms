@@ -1,0 +1,272 @@
+---
+title: "事件 API"
+description: "Relay 服务器事件端点详细参考"
+---
+
+## 概述
+
+事件 API 用于向 Relay 服务器投递和获取加密事件。
+
+---
+
+## POST /events
+
+投递新事件到 Relay。
+
+### 请求
+
+```http
+POST /events
+Content-Type: application/json
+```
+
+### 请求体
+
+```json
+{
+  "room": "room_id",
+  "ciphertext": "base64_encoded_encrypted_data",
+  "content_len": 128,
+  "client_event_hash": "sha256_hex_hash",
+  "client_ts": 1702300000
+}
+```
+
+| 字段 | 类型 | 必需 | 说明 |
+|------|------|------|------|
+| `room` | string | 是 | 房间 ID |
+| `ciphertext` | string | 是 | Base64 编码的事件信封（见下方信封格式） |
+| `content_len` | integer | 否 | 明文内容长度（字节） |
+| `client_event_hash` | string | 否 | 客户端计算的事件哈希（用于 Merkle 树和回执签名）。计算公式：`sha256(sender_pubkey_32bytes + content + timestamp_ms_8bytes_bigendian)` |
+| `client_ts` | integer | 否 | 客户端时间戳（秒）。注意：当前版本未持久化此字段 |
+
+### ciphertext 信封格式
+
+`ciphertext` 字段内容是 Base64 编码的 JSON 信封：
+
+```json
+{
+  "sender_id": "alice",
+  "device_id": 1,
+  "ts": 1702300000,
+  "content_type": "text",
+  "content_bytes_b64": "<base64_encoded_content>",
+  "signature_hex": "<64_bytes_xeddsa_signature_hex>",
+  "sender_pubkey_hex": "<32_bytes_x25519_pubkey_hex>",
+  "event_id": "<sha256_event_id>"
+}
+```
+
+<Note>
+Relay 服务器不解析此信封，仅原样存储和转发。客户端负责解析和验证签名。
+</Note>
+
+### 响应
+
+```json
+{
+  "server_seq": 1,
+  "server_ts": 1702300000,
+  "relay_id": "relay-default",
+  "xeddsa_signature": "hex_encoded_64_bytes_signature",
+  "relay_pubkey": "hex_encoded_32_bytes_ed25519_pubkey"
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `server_seq` | integer | 服务器分配的单调递增序号 |
+| `server_ts` | integer | 服务器时间戳（秒） |
+| `relay_id` | string | Relay 标识符（总是返回） |
+| `xeddsa_signature` | string | XEdDSA 回执签名（64 字节 hex），签名内容为 `event_id\|room\|server_seq\|server_ts\|relay_id` |
+| `relay_pubkey` | string | Relay 的 Ed25519 公钥（32 字节 hex），用于验证签名 |
+
+`relay_id` 总是返回。`xeddsa_signature` 和 `relay_pubkey` 仅当 Relay 配置了 `DRLMS_RELAY_SIGNING_PRIVKEY` 且请求体包含 `client_event_hash` 时返回。
+
+### 示例
+
+<Tabs>
+  <Tab title="curl">
+    ```bash
+    curl -X POST http://localhost:8081/events \
+      -H "Content-Type: application/json" \
+      -d '{
+        "room": "general",
+        "ciphertext": "SGVsbG8gV29ybGQ=",
+        "content_len": 11,
+        "client_event_hash": "a591a6d40bf420404a011733cfb7b190d62c65bf0bcda32b57b277d9ad9f146e",
+        "client_ts": 1702300000
+      }'
+    ```
+  </Tab>
+  <Tab title="PowerShell">
+    ```powershell
+    $body = @{
+        room = "general"
+        ciphertext = "SGVsbG8gV29ybGQ="
+        content_len = 11
+        client_event_hash = "a591a6d40bf420404a011733cfb7b190d62c65bf0bcda32b57b277d9ad9f146e"
+        client_ts = 1702300000
+    } | ConvertTo-Json
+
+    Invoke-RestMethod -Uri "http://localhost:8081/events" -Method Post -Body $body -ContentType "application/json"
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## GET /events
+
+获取房间事件列表。
+
+### 请求
+
+```http
+GET /events?room={room_id}&since_seq={seq}&limit={limit}
+```
+
+### 查询参数
+
+| 参数 | 类型 | 必需 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| `room` | string | 是 | - | 房间 ID |
+| `since_seq` | integer | 否 | `0` | 起始序号（不包含，返回 > since_seq 的事件） |
+| `limit` | integer | 否 | `100` | 返回数量限制（1-1000） |
+
+### 响应
+
+```json
+[
+  {
+    "room": "general",
+    "server_seq": 1,
+    "server_ts": 1702300000,
+    "ciphertext": "base64_encrypted_data",
+    "client_hash": "sha256_hex_hash",
+    "content_len": 128
+  }
+]
+```
+
+### 响应字段
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `room` | string | 房间 ID |
+| `server_seq` | integer | 服务器分配的序号 |
+| `server_ts` | integer | 服务器时间戳（秒） |
+| `ciphertext` | string | Base64 编码的加密数据 |
+| `client_hash` | string | 客户端事件哈希（即请求中的 `client_event_hash`，可选） |
+| `content_len` | integer | 明文内容长度（可选） |
+
+### 示例
+
+<Tabs>
+  <Tab title="curl">
+    ```bash
+    curl "http://localhost:8081/events?room=general&since_seq=0&limit=50"
+    ```
+  </Tab>
+  <Tab title="PowerShell">
+    ```powershell
+    Invoke-RestMethod "http://localhost:8081/events?room=general&since_seq=0&limit=50"
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## GET /events/by-ids
+
+按 `client_hash` 批量获取事件。
+
+### 请求
+
+```http
+GET /events/by-ids?room={room_id}&ids={hash1},{hash2},{hash3}
+```
+
+### 查询参数
+
+| 参数 | 类型 | 必需 | 说明 |
+|------|------|------|------|
+| `room` | string | 是 | 房间 ID |
+| `ids` | string | 是 | 逗号分隔的 `client_hash` 值 |
+
+### 响应
+
+同 `GET /events`，返回匹配的事件列表（按 `server_seq` 升序）。
+
+### 示例
+
+<Tabs>
+  <Tab title="curl">
+    ```bash
+    curl "http://localhost:8081/events/by-ids?room=general&ids=a591a6d4...,b692b7e5..."
+    ```
+  </Tab>
+  <Tab title="PowerShell">
+    ```powershell
+    Invoke-RestMethod "http://localhost:8081/events/by-ids?room=general&ids=a591a6d4...,b692b7e5..."
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## 错误响应
+
+### 400 Bad Request
+
+```json
+{
+  "detail": "room is required"
+}
+```
+
+其他常见 400 错误示例：
+
+```json
+{
+  "detail": "ciphertext is required"
+}
+```
+
+```json
+{
+  "detail": "ids is required"
+}
+```
+
+```json
+{
+  "detail": "no valid ids provided"
+}
+```
+
+当房间不存在或没有任何事件时，`GET /events` 返回 `200` 且响应为 `[]`（不会返回 404）。
+
+### 500 Internal Server Error
+
+```json
+{
+  "detail": "database error"
+}
+```
+
+---
+
+## 字段命名说明
+
+| 请求字段 | 响应字段 | 说明 |
+|----------|----------|------|
+| `client_event_hash` | `client_hash` | 相同内容，不同命名 |
+
+---
+
+## 相关文档
+
+- [API 概述](/zh/api-reference/overview) - API 总览
+- [文件 API](/zh/api-reference/files) - 文件端点
+- [Merkle API](/zh/api-reference/merkle) - 一致性校验端点

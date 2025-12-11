@@ -1,0 +1,266 @@
+---
+title: "安装指南"
+description: "安装 DRLMS 端到端加密传输工具"
+---
+
+<Note>
+DRLMS 是端到端加密的去中心化数据传输基础设施。以下安装的是 CLI/TUI 客户端（协议栈的概念演示）。
+</Note>
+
+## 系统要求
+
+| 要求 | 最低 | 推荐 |
+|------|------|------|
+| Python | 3.10 | 3.11+ |
+| 操作系统 | Windows 10, Linux, macOS | Windows 11, Ubuntu 22.04+ |
+| 内存 | 512 MB | 2 GB |
+| 磁盘 | 100 MB | 500 MB |
+
+---
+
+## 安装方式
+
+### uv（推荐）
+
+uv 是新一代 Python 包管理器，速度快且功能全面：
+
+```bash
+# 安装 uv（如果尚未安装）
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# 安装 DRLMS CLI（隔离环境）
+uv tool install ming-drlms
+
+# 验证安装
+ming-drlms --version
+```
+
+<Note>
+Windows 用户可使用 `powershell -c "irm https://astral.sh/uv/install.ps1 | iex"` 安装 uv。
+</Note>
+
+### pip
+
+标准 pip 安装：
+
+```bash
+pip install ming-drlms
+```
+
+### pipx（备选）
+
+pipx 也可以隔离安装 CLI 工具：
+
+```bash
+pipx install ming-drlms
+```
+
+### 源码安装
+
+用于开发或获取最新特性：
+
+```bash
+git clone https://github.com/lgnorant-lu/ming-drlms.git
+cd ming-drlms
+uv pip install -e ".[dev]"
+```
+
+### 可选依赖
+
+安装额外功能：
+
+```bash
+# 开发工具（测试、代码检查）
+pip install ming-drlms[dev]
+
+# Relay 服务器依赖
+pip install ming-drlms[relay]
+
+# 所有可选依赖
+pip install ming-drlms[dev,relay]
+```
+
+---
+
+## 平台特定说明
+
+### Windows
+
+<Tabs>
+  <Tab title="PowerShell（推荐）">
+    ```powershell
+    # 安装 uv
+    powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+    
+    # 重启 PowerShell，然后安装 DRLMS
+    uv tool install ming-drlms
+    
+    # 验证
+    ming-drlms --version
+    ```
+  </Tab>
+  <Tab title="pip">
+    ```powershell
+    pip install ming-drlms
+    ```
+  </Tab>
+</Tabs>
+
+### WSL（Windows 子系统 Linux）
+
+```bash
+# 安装 uv
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source ~/.bashrc
+
+# 安装 DRLMS
+uv tool install ming-drlms
+```
+
+### Linux
+
+```bash
+# 安装 uv
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source ~/.bashrc  # 或 source ~/.zshrc
+
+# 安装 DRLMS
+uv tool install ming-drlms
+```
+
+### macOS
+
+```bash
+# 使用 Homebrew 安装 uv
+brew install uv
+
+# 或直接安装
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# 安装 DRLMS
+uv tool install ming-drlms
+```
+
+---
+
+## 构建 C 服务器（可选）
+
+C 服务器是 MP2 模式必需的。Relay 模式可以不需要。
+
+### 前置条件
+
+- CMake 3.18+
+- C 编译器（GCC、Clang 或 MSVC）
+- vcpkg（用于依赖管理）
+
+### 构建步骤
+
+<Tabs>
+  <Tab title="Linux/macOS">
+    ```bash
+    cd ming-drlms
+    mkdir build && cd build
+    cmake ..
+    make -j$(nproc)
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    cd ming-drlms
+    mkdir build
+    cd build
+    cmake .. -G "Visual Studio 17 2022"
+    cmake --build . --config Release
+    ```
+  </Tab>
+</Tabs>
+
+详细构建说明请参阅 [从源码构建](/zh/development/building)。
+
+---
+
+## 验证安装
+
+### 检查 CLI 版本
+
+```bash
+ming-drlms --version
+```
+
+预期输出：
+```
+ming-drlms CLI version: 0.3.x
+```
+
+### 运行自检
+
+```bash
+# 首先创建身份
+ming-drlms identity create --name "TestUser"
+
+# 运行 XEdDSA 加密自检
+ming-drlms xeddsa-selftest --user TestUser
+```
+
+预期输出：
+```
+xeddsa self-test ok
+```
+
+### 列出可用命令
+
+```bash
+ming-drlms --help
+```
+
+---
+
+## 升级
+
+### uv
+
+```bash
+uv tool upgrade ming-drlms
+```
+
+### pip
+
+```bash
+pip install --upgrade ming-drlms
+```
+
+### 源码
+
+```bash
+cd ming-drlms
+git pull
+uv pip install -e ".[dev]"
+```
+
+---
+
+## 卸载
+
+### uv
+
+```bash
+uv tool uninstall ming-drlms
+```
+
+### pip
+
+```bash
+pip uninstall ming-drlms
+```
+
+---
+
+## 后续步骤
+
+<Card
+  title="配置环境变量"
+  icon="gear"
+  href="/zh/setup/environment-variables"
+>
+  根据使用场景配置环境变量
+</Card>

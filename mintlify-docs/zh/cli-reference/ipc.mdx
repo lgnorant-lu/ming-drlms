@@ -1,0 +1,96 @@
+---
+title: "ipc"
+description: "[Advanced] IPC 进程间通信命令"
+---
+
+## 概述
+
+`ipc` 命令组提供进程间通信（IPC）功能，用于与 C 服务器的共享内存交互。
+
+```bash
+ming-drlms ipc --help
+```
+
+---
+
+## 命令列表
+
+| 命令 | 说明 |
+|------|------|
+| `send` | 通过共享内存发送消息 |
+| `tail` | 监听共享内存消息 |
+
+---
+
+## ipc send
+
+通过共享内存发送消息。
+
+### 语法
+
+```bash
+ming-drlms ipc send [选项]
+```
+
+### 选项
+
+| 选项 | 简写 | 说明 |
+|------|------|------|
+| `--text` | - | 消息内容（与 --file/--interactive 互斥） |
+| `--file` | - | 文件路径 |
+| `--interactive` | `-i` | 交互式模式（从 stdin 逐行读取） |
+| `--key` | - | DRLMS_SHM_KEY（如 0x4c4f4755） |
+| `--chunk` | - | 分块字节数（用于流式传输） |
+
+### 示例
+
+```bash
+ming-drlms ipc send --text "Hello via IPC" --key 0x4c4f4755
+ming-drlms ipc send --file /path/to/file.txt
+ming-drlms ipc send --interactive
+```
+
+---
+
+## ipc tail
+
+监听共享内存消息。
+
+### 语法
+
+```bash
+ming-drlms ipc tail [选项]
+```
+
+### 选项
+
+| 选项 | 简写 | 说明 |
+|------|------|------|
+| `--key` | - | DRLMS_SHM_KEY |
+| `--max` | `-n` | 最大接收消息数 |
+
+### 示例
+
+```bash
+ming-drlms ipc tail --key 0x4c4f4755 --max 100
+```
+
+---
+
+## IPC 配置
+
+### 环境变量
+
+| 变量 | 说明 |
+|------|------|
+| `DRLMS_SHM_KEY` | 共享内存密钥（如 `0x4c4f4755`） |
+
+<Note>
+`--key` 选项会设置 `DRLMS_SHM_KEY` 环境变量传递给底层 C 二进制文件。
+</Note>
+
+---
+
+## 相关命令
+
+- [server](/zh/cli-reference/server) - 服务器管理

@@ -1,0 +1,273 @@
+---
+title: "identity"
+description: "[Relay Only] 本地身份管理命令"
+---
+
+## 概述
+
+`identity` 命令组用于管理本地身份密钥对。这是 Relay 模式的核心功能，用于创建、显示、导出和导入身份。
+
+```bash
+ming-drlms identity --help
+```
+
+---
+
+## 命令列表
+
+| 命令 | 说明 |
+|------|------|
+| `create` | 创建新的本地身份 |
+| `show` | 显示当前身份信息 |
+| `fingerprint` | 显示指纹（用于手动验证） |
+| `export` | 导出身份到文件 |
+| `import` | 从备份导入身份 |
+| `qr` | 生成身份验证二维码数据 |
+
+---
+
+## identity create
+
+创建新的本地身份密钥对。
+
+### 语法
+
+```bash
+ming-drlms identity create [选项]
+```
+
+### 选项
+
+| 选项 | 简写 | 说明 |
+|------|------|------|
+| `--name` | `-n` | 显示名称 |
+| `--user` | `-u` | 用户名（用于 LocalKeyStore 兼容） |
+| `--force` | `-f` | 强制覆盖已有身份 |
+
+### 示例
+
+```bash
+# 创建身份并设置名称
+ming-drlms identity create --name "Alice"
+
+# 指定用户名（兼容 LocalKeyStore）
+ming-drlms identity create --name "Alice" --user alice
+
+# 强制覆盖已有身份
+ming-drlms identity create --name "Alice" --force
+```
+
+### 输出示例
+
+```
+身份创建成功！
+
+公钥指纹:
+  1234 5678 9ABC DEF0 1234 5678 9ABC DEF0
+
+公钥 (hex):
+  0x1234567890abcdef...
+
+显示名称: Alice
+
+提示: 使用 'ming-drlms identity export' 备份身份
+```
+
+---
+
+## identity show
+
+显示当前身份的详细信息。
+
+### 语法
+
+```bash
+ming-drlms identity show
+```
+
+### 输出示例
+
+```
+          本地身份
+┌───────────────┬────────────────────────┐
+│ 属性          │ 值                      │
+├───────────────┼────────────────────────┤
+│ 公钥指纹      │ 1234 5678 9ABC DEF0... │
+│ 公钥 (hex)    │ 0x1234567890abcdef...  │
+│ 显示名称      │ Alice                  │
+│ Registration ID│ 12345                  │
+│ Device ID     │ 1                      │
+│ 创建时间      │ 2025-12-11 10:30:00    │
+│ 数字指纹      │ 12345-67890-12345...   │
+└───────────────┴────────────────────────┘
+```
+
+---
+
+## identity fingerprint
+
+显示公钥指纹，用于手动验证身份。
+
+### 语法
+
+```bash
+ming-drlms identity fingerprint [选项]
+```
+
+### 选项
+
+| 选项 | 简写 | 说明 |
+|------|------|------|
+| `--format` | `-f` | 输出格式 |
+
+### 格式选项
+
+| 格式 | 说明 | 示例 |
+|------|------|------|
+| `groups` | 分组格式（默认） | `1234 5678 9ABC DEF0...` |
+| `compact` | 紧凑格式 | `123456789ABCDEF0...` |
+| `lines` | 两行格式 | 适合显示 |
+| `numeric` | 数字格式 | `12345-67890-12345...` |
+| `emoji` | Emoji 格式 | 适合视觉对比 |
+
+### 示例
+
+```bash
+# 默认分组格式
+ming-drlms identity fingerprint
+
+# 数字格式
+ming-drlms identity fingerprint --format numeric
+
+# Emoji 格式（视觉对比）
+ming-drlms identity fingerprint --format emoji
+```
+
+---
+
+## identity export
+
+导出身份密钥到文件用于备份。
+
+### 语法
+
+```bash
+ming-drlms identity export [选项]
+```
+
+### 选项
+
+| 选项 | 简写 | 默认值 | 说明 |
+|------|------|--------|------|
+| `--output` | `-o` | `identity_backup.json` | 输出文件路径 |
+
+### 示例
+
+```bash
+# 导出到默认文件
+ming-drlms identity export
+
+# 指定输出路径
+ming-drlms identity export --output ~/backup/my_identity.json
+```
+
+### 安全警告
+
+导出文件包含私钥，请妥善保管：
+- 不要上传到公共存储
+- 使用强密码加密存储
+- 定期更换备份位置
+
+---
+
+## identity import
+
+从备份文件导入身份。
+
+### 语法
+
+```bash
+ming-drlms identity import [选项] <文件路径>
+```
+
+### 选项
+
+| 选项 | 简写 | 说明 |
+|------|------|------|
+| `--user` | `-u` | 用户名（用于 LocalKeyStore 兼容） |
+| `--force` | `-f` | 强制覆盖已有身份 |
+
+### 示例
+
+```bash
+# 导入身份
+ming-drlms identity import ~/backup/my_identity.json
+
+# 指定用户名（兼容 LocalKeyStore）
+ming-drlms identity import ~/backup/my_identity.json --user alice
+
+# 强制覆盖
+ming-drlms identity import --force ~/backup/my_identity.json
+```
+
+---
+
+## identity qr
+
+生成身份验证二维码数据，可用于生成二维码图片供他人扫描验证。
+
+### 语法
+
+```bash
+ming-drlms identity qr
+```
+
+### 输出示例
+
+```
+二维码数据:
+drlms-identity:1234567890abcdef...
+
+提示: 使用二维码生成工具将此数据转为二维码图片
+例如: echo 'drlms-identity:...' | qrencode -o identity.png
+```
+
+### 使用场景
+
+- 面对面验证身份时，生成二维码供对方扫描
+- 在聚会或会议中快速交换公钥信息
+
+---
+
+## 相关概念
+
+### 身份密钥
+
+DRLMS 使用 X25519 密钥对：
+- **私钥**: 32 字节，用于签名和解密
+- **公钥**: 32 字节（或 33 字节含类型前缀）
+
+### 指纹
+
+公钥的 SHA-256 哈希摘要，用于人工验证身份真实性。
+
+### 信任链
+
+身份与信任管理配合使用，参见 [trust 命令](/zh/cli-reference/trust)。
+
+---
+
+## 错误处理
+
+| 错误 | 原因 | 解决方案 |
+|------|------|----------|
+| "未找到本地身份" | 尚未创建身份 | 运行 `identity create` |
+| "已存在本地身份" | 身份已存在 | 使用 `--force` 覆盖 |
+| "导入失败" | 文件格式错误 | 检查备份文件完整性 |
+
+---
+
+## 相关命令
+
+- [trust](/zh/cli-reference/trust) - 联系人信任管理
+- [chat](/zh/cli-reference/chat) - Relay 聊天命令

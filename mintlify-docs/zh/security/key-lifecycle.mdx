@@ -1,0 +1,368 @@
+---
+title: "密钥生命周期"
+description: "DRLMS 密钥生成、存储、轮换与销毁管理"
+---
+
+## 概述
+
+密钥生命周期管理是安全系统的关键环节。本文档描述 DRLMS 中各类密钥的生命周期。
+
+---
+
+## 密钥类型
+
+| 密钥 | 生命周期 | 存储 | 用途 |
+|------|----------|------|------|
+| 身份密钥 | 永久 | 本地文件 | 身份标识、签名 |
+| 签名预密钥 | 中期 | 本地文件 | 会话建立 |
+| 一次性预密钥 | 单次 | 本地文件 | 前向安全 |
+| 会话密钥 | 会话期 | 内存 | 消息加密 |
+| JWT 密钥 | 配置期 | 环境变量 | Token 签名 |
+
+---
+
+## 身份密钥
+
+### 生成
+
+```bash
+ming-drlms identity create --name "Alice"
+```
+
+生成过程：
+1. 生成 32 字节随机数作为私钥
+2. 计算 X25519 公钥
+3. 生成 Registration ID
+4. 记录创建时间
+
+### 存储
+
+**本地身份文件**（Relay 模式）：
+
+| 平台 | 路径 |
+|------|------|
+| Linux/macOS | `~/.config/drlms/local_identity.json` |
+| Windows | `%APPDATA%\DRLMS\local_identity.json` |
+
+**E2EE 密钥文件**（Signal 协议兼容）：
+
+| 平台 | 路径 |
+|------|------|
+| Linux/macOS | `~/.config/drlms/e2ee_keys.json` |
+| Windows | `%APPDATA%\DRLMS\e2ee_keys.json` |
+
+```json
+{
+  "version": 1,
+  "private_key": "hex_32_bytes",
+  "public_key": "hex_32_or_33_bytes",
+  "registration_id": 12345,
+  "device_id": 1,
+  "display_name": "Alice",
+  "created_at": "2025-12-11T10:00:00"
+}
+```
+
+权限要求：`600`（仅所有者可读写）
+
+### 备份
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    # 导出
+    ming-drlms identity export --output ~/backup/identity.json
+    
+    # 加密备份
+    ming-drlms identity export -o - | gpg -c > identity.gpg
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    # 导出
+    ming-drlms identity export --output "$env:USERPROFILE\backup\identity.json"
+    
+    # 加密备份（使用 7-Zip）
+    ming-drlms identity export --output identity.json
+    7z a -p identity.7z identity.json
+    Remove-Item identity.json
+    ```
+  </Tab>
+</Tabs>
+
+### 恢复
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    ming-drlms identity import ~/backup/identity.json
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    ming-drlms identity import "$env:USERPROFILE\backup\identity.json"
+    ```
+  </Tab>
+</Tabs>
+
+### 轮换
+
+身份密钥通常不轮换。需要轮换时：
+
+1. 通知所有联系人
+2. 创建新身份
+3. 重新建立信任关系
+
+```bash
+ming-drlms identity create --force
+ming-drlms chat publish-bundle
+```
+
+---
+
+## 签名预密钥
+
+### 生成
+
+随身份一起生成，或定期补充：
+
+```python
+signed_prekey = generate_x25519_keypair()
+signature = xeddsa_sign(identity_private, signed_prekey.public)
+```
+
+### 有效期
+
+建议：1 周 - 1 个月
+
+### 轮换
+
+定期生成新的签名预密钥并发布：
+
+```bash
+ming-drlms chat publish-bundle
+```
+
+---
+
+## 一次性预密钥（OPK）
+
+### 生成
+
+批量生成：
+
+```python
+opks = [generate_x25519_keypair() for _ in range(100)]
+```
+
+### 消费
+
+每次会话建立消费一个 OPK：
+
+```
+PreKeyBundle:
+  OPK_1 ← 消费
+  OPK_2 ← 消费
+  OPK_3 
+  ...
+```
+
+### 补充
+
+当 OPK 数量低于阈值时自动补充：
+
+```python
+if len(opks) < MIN_OPK_COUNT:
+    new_opks = generate_opks(TARGET_OPK_COUNT - len(opks))
+    publish_opks(new_opks)
+```
+
+配置：
+
+```toml
+[keyserver]
+min_opk_count = 10
+target_opk_count = 100
+```
+
+---
+
+## 会话密钥
+
+### Double Ratchet 密钥链
+
+```
+Root Key (RK)
+    │
+    ├─► Chain Key (CK_1)
+    │       │
+    │       ├─► Message Key (MK_1)
+    │       ├─► Message Key (MK_2)
+    │       └─► ...
+    │
+    └─► Chain Key (CK_2) [DH Ratchet]
+            │
+            └─► ...
+```
+
+### 密钥派生
+
+```python
+# Symmetric Ratchet
+CK_new, MK = KDF(CK_old)
+
+# DH Ratchet
+RK_new, CK = KDF(RK, DH(dh_local, dh_remote))
+```
+
+### 存储
+
+会话状态与身份密钥一同存储在 E2EE 密钥文件中：
+
+```
+e2ee_keys.json 中的 sender_keys 字段
+```
+
+<Note>
+当前版本会话状态存储在 `e2ee_keys.json`，未来版本可能迁移至独立 SQLite 数据库。
+</Note>
+
+---
+
+## JWT 密钥
+
+### 服务器端
+
+生成强随机密钥：
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    export DRLMS_JWT_SECRET=$(openssl rand -hex 32)
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    $env:DRLMS_JWT_SECRET = -join ((48..57) + (97..102) | Get-Random -Count 64 | ForEach-Object {[char]$_})
+    ```
+  </Tab>
+</Tabs>
+
+### Token 生命周期
+
+| Token 类型 | 有效期 | 刷新方式 |
+|------------|--------|----------|
+| Access Token | 15 分钟 | 使用 Refresh Token |
+| Refresh Token | 7 天 | 重新登录 |
+
+### 轮换
+
+更换 JWT 密钥会使所有现有 Token 失效：
+
+1. 设置新密钥
+2. 重启服务器
+3. 所有客户端需重新登录
+
+---
+
+## Relay 签名密钥
+
+### 生成
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    export DRLMS_RELAY_SIGNING_PRIVKEY=$(python -c "import secrets; print(secrets.token_hex(32))")
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    $env:DRLMS_RELAY_SIGNING_PRIVKEY = python -c "import secrets; print(secrets.token_hex(32))"
+    ```
+  </Tab>
+</Tabs>
+
+### 公钥发现
+
+通过 Well-Known 端点：
+
+```
+GET /.well-known/drlms-relay.json
+```
+
+响应：
+
+```json
+{
+  "version": 2,
+  "relay_id": "relay-01",
+  "signature_schemes": ["xeddsa"],
+  "pubkey": "<hex_encoded>",
+  "pubkey_type": "ed25519"
+}
+```
+
+---
+
+## 密钥销毁
+
+### 身份密钥销毁
+
+```bash
+# 安全删除（覆写后删除）
+shred -u ~/.config/drlms/e2ee_keys.json
+
+# 或手动
+rm -P ~/.config/drlms/e2ee_keys.json  # macOS
+```
+
+### 会话清理
+
+```bash
+# 清除所有会话（会话存储在 e2ee_keys.json 中）
+# 删除整个密钥文件会同时清除身份和会话
+shred -u ~/.config/drlms/e2ee_keys.json
+```
+
+### 内存密钥
+
+程序退出时自动清除。敏感密钥使用安全内存：
+
+```c
+// 退出前覆写
+memset(key_buffer, 0, KEY_SIZE);
+```
+
+---
+
+## 安全建议
+
+### 密钥保护
+
+1. **权限控制**: 密钥文件权限设为 600
+2. **加密备份**: 备份时使用强密码加密
+3. **安全删除**: 不再使用的密钥安全删除
+
+### 轮换建议
+
+| 密钥类型 | 建议轮换周期 |
+|----------|--------------|
+| 身份密钥 | 仅在泄露时 |
+| 签名预密钥 | 1-4 周 |
+| OPK | 按需补充 |
+| JWT 密钥 | 3-6 个月 |
+
+### 泄露响应
+
+1. 立即生成新密钥
+2. 通知受影响用户
+3. 撤销旧密钥/Token
+4. 审计可能的影响
+
+---
+
+## 相关文档
+
+- [E2EE 设置](/zh/guides/e2ee-setup) - 加密配置
+- [身份管理](/zh/guides/identity-management) - 身份操作
+- [安全概述](/zh/security/overview) - 安全架构

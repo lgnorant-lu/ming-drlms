@@ -1,0 +1,362 @@
+---
+title: "Signal 协议"
+description: "端到端加密 Signal 协议实现详解"
+---
+
+## 概述
+
+DRLMS 实现 Signal 协议进行端到端加密，确保只有通信双方能够读取消息内容。
+
+---
+
+## 协议组成
+
+### X3DH（Extended Triple Diffie-Hellman）
+
+密钥协商协议，用于建立初始共享密钥：
+
+```
+Alice                                   Bob
+  │                                      │
+  │  获取 Bob 的 PreKeyBundle            │
+  │◄─────────────────────────────────────│
+  │  IK_B, SPK_B, Sig_B, OPK_B           │
+  │                                      │
+  │  生成临时密钥对 EK_A                  │
+  │                                      │
+  │  计算 DH 输出:                        │
+  │  DH1 = DH(IK_A, SPK_B)               │
+  │  DH2 = DH(EK_A, IK_B)                │
+  │  DH3 = DH(EK_A, SPK_B)               │
+  │  DH4 = DH(EK_A, OPK_B)               │
+  │                                      │
+  │  SK = KDF(DH1 || DH2 || DH3 || DH4)  │
+  │                                      │
+  │  发送初始消息 + EK_A                  │
+  │─────────────────────────────────────►│
+  │                                      │
+  │                 Bob 执行相同计算得到 SK│
+```
+
+### Double Ratchet
+
+消息加密算法，提供前向安全和后向安全：
+
+```
+发送方                              接收方
+  │                                   │
+  │  Ratchet Step:                    │
+  │  DHR = DH(DH_s, DH_r)             │
+  │  RK, CK = KDF(RK, DHR)            │
+  │                                   │
+  │  Message Key:                     │
+  │  MK, CK = KDF(CK)                 │
+  │                                   │
+  │  Encrypt:                         │
+  │  ct = AEAD(MK, pt, AD)            │
+  │                                   │
+  │  Send (Header, ct)                │
+  │──────────────────────────────────►│
+  │                                   │
+  │                  对称执行 Ratchet  │
+  │                  解密消息          │
+```
+
+---
+
+## 密钥体系
+
+### 长期密钥
+
+| 密钥 | 生命周期 | 用途 |
+|------|----------|------|
+| Identity Key (IK) | 永久 | 身份标识 |
+| Signed PreKey (SPK) | 中期 | 会话建立 |
+| One-Time PreKey (OPK) | 单次 | 前向安全增强 |
+
+### 会话密钥
+
+| 密钥 | 更新频率 | 用途 |
+|------|----------|------|
+| Root Key (RK) | DH Ratchet | 派生链密钥 |
+| Chain Key (CK) | 每条消息 | 派生消息密钥 |
+| Message Key (MK) | 每条消息 | 加密消息 |
+
+---
+
+## PreKeyBundle
+
+### 发布结构（存储到服务器）
+
+```json
+{
+  "identity_key": "33_bytes_with_type_prefix",
+  "signed_pre_key_id": 1,
+  "signed_pre_key_public": "33_bytes_with_type_prefix",
+  "signed_pre_key_signature": "64_bytes_signature",
+  "pre_keys": [
+    {"id": 1, "public_key": "33_bytes_with_type_prefix"},
+    {"id": 2, "public_key": "33_bytes_with_type_prefix"}
+  ],
+  "registration_id": 12345,
+  "device_id": 1
+}
+```
+
+### 获取响应（E2EEPreKeyBundle）
+
+```python
+@dataclass
+class E2EEPreKeyBundle:
+    code: int
+    message: str
+    identity_key: bytes | None
+    registration_id: int
+    device_id: int
+    pre_key_id: int               # 单个 OPK ID
+    pre_key_public: bytes | None  # 单个 OPK 公钥
+    signed_pre_key_id: int
+    signed_pre_key_public: bytes | None
+    signed_pre_key_signature: bytes | None
+```
+
+### 发布
+
+```bash
+ming-drlms chat publish-bundle
+```
+
+### 获取
+
+系统在发送消息时自动获取接收者的 PreKeyBundle。
+
+---
+
+## 加密流程
+
+### 发送消息
+
+```python
+from ming_drlms.core.pysignal.store import SignalStore
+from ming_drlms.core.pysignal.types import Ciphertext
+
+# 1. 检查是否有会话记录
+record = store.get_session_record(recipient, device_id)
+if record is None:
+    # 2. 获取并处理 PreKeyBundle
+    bundle = client.e2ee_fetch_prekey_bundle(username, recipient)
+    store.process_prekey_bundle(
+        name=recipient,
+        device_id=bundle.device_id,
+        registration_id=bundle.registration_id,
+        identity_key=bundle.identity_key,
+        pre_key_id=bundle.pre_key_id,
+        pre_key_public=bundle.pre_key_public,
+        signed_pre_key_id=bundle.signed_pre_key_id,
+        signed_pre_key_public=bundle.signed_pre_key_public,
+        signed_pre_key_signature=bundle.signed_pre_key_signature,
+    )
+
+# 3. 加密消息
+result: Ciphertext = store.encrypt(recipient, device_id, plaintext)
+# result.message_type: 1=PreKey, 2=Whisper
+# result.ciphertext: 加密后的字节
+```
+
+### 接收消息
+
+```python
+from ming_drlms.core.pysignal.types import Ciphertext, DecryptResult
+
+# 构造 Ciphertext 对象
+payload = Ciphertext(
+    ciphertext=encrypted_bytes,
+    message_type=msg_type,  # 1=PreKey, 2=Whisper
+    registration_id=sender_reg_id,
+    pre_key_id=pre_key_id,  # PreKey 消息时有值
+    signed_pre_key_id=signed_pre_key_id,
+)
+
+# 解密
+result: DecryptResult = store.decrypt(sender, device_id, payload)
+plaintext = result.plaintext
+```
+
+---
+
+## 消息类型
+
+### PreKey Message (Type 1)
+
+首次通信或会话重置时发送（`SIGNAL_CIPHERTEXT_TYPE_PREKEY = 1`）：
+
+```
+┌─────────────────────────────────────┐
+│ PreKey Message                      │
+├─────────────────────────────────────┤
+│ Registration ID (4 bytes)           │
+│ PreKey ID (4 bytes)                 │
+│ Signed PreKey ID (4 bytes)          │
+│ Base Key (33 bytes)                 │
+│ Identity Key (33 bytes)             │
+│ Whisper Message (variable)          │
+└─────────────────────────────────────┘
+```
+
+### Whisper Message (Type 2)
+
+后续消息（`SIGNAL_CIPHERTEXT_TYPE_MESSAGE = 2`）：
+
+```
+┌─────────────────────────────────────┐
+│ Whisper Message                     │
+├─────────────────────────────────────┤
+│ Ratchet Key (33 bytes)              │
+│ Counter (4 bytes)                   │
+│ Previous Counter (4 bytes)          │
+│ Ciphertext (variable)               │
+│ MAC (8 bytes)                       │
+└─────────────────────────────────────┘
+```
+
+---
+
+## AEAD 加密
+
+使用 AES-256-CBC + HMAC-SHA256：
+
+```
+AD = concat(protocol_version, sender_ik, receiver_ik)
+ct = AES-256-CBC(MK, plaintext)
+mac = HMAC-SHA256(MK, AD || ct)
+result = ct || mac
+```
+
+---
+
+## 安全属性
+
+| 属性 | 说明 |
+|------|------|
+| **前向安全** | 密钥泄露不影响历史消息 |
+| **后向安全** | 密钥泄露后，新密钥重新安全 |
+| **可否认性** | 无法证明消息由特定人发送 |
+| **异步** | 不需要双方同时在线 |
+
+---
+
+## 实现细节
+
+### 密钥存储
+
+Python 封装（`pysignal/store.py`）：
+
+```python
+class SignalStore:
+    def set_identity(self, *, public_key, private_key, registration_id, device_id)
+    def put_pre_key_record(self, key_id: int, record: bytes)
+    def put_signed_pre_key_record(self, key_id: int, record: bytes)
+    def put_session_record(self, name: str, device_id: int, record: bytes)
+    def get_session_record(self, name: str, device_id: int) -> bytes | None
+    def process_prekey_bundle(self, *, name, device_id, ...)
+    def encrypt(self, name: str, device_id: int, plaintext: bytes) -> Ciphertext
+    def decrypt(self, name: str, device_id: int, payload: Ciphertext) -> DecryptResult
+```
+
+### 密文结构
+
+```python
+@dataclass
+class Ciphertext:
+    ciphertext: bytes
+    message_type: int  # 1=PreKey, 2=Whisper
+    registration_id: int
+    pre_key_id: Optional[int]
+    signed_pre_key_id: Optional[int]
+
+@dataclass
+class DecryptResult:
+    plaintext: bytes
+    info: Ciphertext
+```
+
+---
+
+## 群组加密（Sender Key）
+
+DRLMS 支持基于 Signal 的 Sender Key 协议进行群组加密：
+
+### 核心类
+
+```python
+from ming_drlms.core.pysignal.group import (
+    GroupSessionBuilder,
+    GroupCipher,
+    SenderKeyName,
+    SenderKeyDistribution,
+)
+```
+
+### 分发流程
+
+```python
+# 1. 创建 sender key name
+name = SenderKeyName(
+    group_id=room_name,
+    sender=username,
+    device_id=device_id,
+)
+
+# 2. 创建群组会话并生成分发消息
+builder = GroupSessionBuilder(store, context)
+distribution = builder.create_session(name)
+# distribution.raw_bytes: 分发给其他成员
+
+# 3. 其他成员处理分发消息
+builder.process_session(name, distribution_bytes)
+```
+
+### 加解密
+
+```python
+cipher = GroupCipher(store)
+
+# 加密
+result = cipher.encrypt(name, plaintext)
+# result.ciphertext: 群组密文
+
+# 解密
+result = cipher.decrypt(name, ciphertext)
+# result.plaintext: 明文
+```
+
+---
+
+## 与 XEdDSA 集成
+
+DRLMS 使用 XEdDSA 实现 X25519 密钥的签名功能：
+
+- 身份密钥既用于 DH 又用于签名
+- 无需维护两套密钥
+- 与 Signal 规范兼容
+- 通过 `IdentityManager` 统一管理
+
+```python
+from ming_drlms.core.identity_manager import IdentityManager
+
+manager = IdentityManager(username="alice")
+if manager.has_identity():
+    signature = manager.sign(data)  # 64-byte XEdDSA signature
+    pubkey = manager.get_pubkey()   # 32-byte X25519 public key
+    verified = manager.verify(data, signature, pubkey)
+```
+
+详见 [XEdDSA 签名](/zh/security/xeddsa)。
+
+---
+
+## 相关文档
+
+- [E2EE 设置](/zh/guides/e2ee-setup) - 使用指南
+- [XEdDSA 签名](/zh/security/xeddsa) - 签名算法
+- [密钥生命周期](/zh/security/key-lifecycle) - 密钥管理

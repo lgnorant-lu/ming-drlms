@@ -1,0 +1,226 @@
+---
+title: "更新日志"
+description: "DRLMS 版本历史与更新记录"
+---
+
+## 版本概览
+
+| 版本 | 日期 | 主要特性 |
+|------|------|----------|
+| v0.4.0 | 开发中 | 前 Phase 14-20: E2EE、Relay 联邦、文档站点 |
+| v0.3.2 | 2024-09 | 紧急安全修复、测试架构增强 |
+| v0.3.1 | 2024-09 | 核心功能稳定版 |
+| v0.3.0 | 2024-09 | 架构重构、模块化 |
+| v0.2.3 | 2024-09 | 帮助系统、版本检查 |
+| v0.2.2 | 2024-09 | 用户管理、Dependabot |
+
+---
+
+## v0.4.0（开发中）
+
+<Warning>
+此版本尚未正式发布。以下内容来自 Phase 14-20 的开发进度，包含约 120+ 个 commits。
+</Warning>
+
+### Phase 20: 文档站点
+
+- **Mintlify 文档**: 双语（中文/英文）完整文档
+- **CLI 参考**: 17 个命令组完整参考
+- **API 参考**: Relay 服务器 OpenAPI 规范
+- **架构文档**: 系统设计详解
+
+### Phase 18-19: Relay 去中心化核心
+
+- **本地身份自举**: 完全去中心化身份管理
+- **多级信任模型**: TOFU / 手动验证 / 社交担保 / 外部锚定
+- **Relay-Native 房间**: 私有、公开、未列出三种可见性
+- **CLI 完整 Relay 流程**: identity / trust / chat / relay-room 命令组
+- **TUI Relay 模式**: 启动界面、聊天视图、消息同步
+- 测试覆盖: 113 个测试
+
+### Phase 17: XEdDSA 非对称签名
+
+- XEdDSA 签名/验证完整实现
+- 移除 HMAC 对称签名（Phase 17C）
+- 回执签名验证（RCV-01）
+- 公钥通过 Well-Known 自动发现
+
+### Phase 16: 多 Relay 联邦
+
+- **多 Relay 发现**: 静态配置 / 缓存 / DNS / Well-Known / Bootstrap 五层发现
+- **健康检查**: 综合评分系统（延迟加权 + 失败降级）
+- **事件去重**: 滚动窗口 + event_id 完全去重
+- **Merkle 一致性**: 增量构建、根交换、证明验证
+- **同步协议**: 增量 / Merkle / 完整三种模式
+- **离线队列**: SQLite 持久化 + 指数退避重试
+
+### Phase 14-15.5: 基础 E2EE 与 Relay
+
+- **XEdDSA 端到端签名**: C 桥接 + Python 验签
+- **Relay 文件事件链路**: 上传/下载/TUI 文件气泡
+- **Signal Protocol 集成**: Double Ratchet、X3DH
+- **TUI 身份显示**: 身份解析与信任标记
+
+### 新增 CLI 命令
+
+```bash
+# 身份管理 [Relay Only]
+ming-drlms identity create/show/fingerprint/export/import
+
+# 信任管理 [Relay Only]
+ming-drlms trust list/verify/anchor/accept/block
+
+# Relay 房间 [Relay Only]
+ming-drlms relay-room create/list/invite/join/leave/discover/info
+
+# Relay 聊天 [Relay Only]
+ming-drlms chat send/recv/publish-bundle
+```
+
+### 新增环境变量
+
+| 变量 | 说明 |
+|------|------|
+| `DRLMS_BACKEND_MODE` | 后端模式: mp2 / relay / hybrid |
+| `DRLMS_DEFAULT_RELAYS` | Relay 服务器列表 |
+| `DRLMS_TRUST_POLICY` | 信任策略: tofu / manual_only / anchored_only |
+| `DRLMS_KEY_CHANGE_ACTION` | 密钥变更行为: warn / block / reset |
+
+---
+
+## v0.3.2 (2025-09-24)
+
+**紧急安全修复与测试架构增强**
+
+<Warning>
+🚨 **安全公告**: 严重性高危。强烈建议所有用户立即从 v0.3.1 及更早版本升级至 v0.3.2。
+</Warning>
+
+### 安全修复
+
+- **缓冲区污染**: 修复文件上传/下载时缓冲区被上一次传输残留数据覆盖
+- **路径遍历**: 新增 `is_safe_path` 函数，封堵任意文件访问漏洞
+- **部分写入**: 检查 `fwrite` 返回值，正确处理 I/O 错误
+
+### 测试架构
+
+- 可扩展测试环境管理系统（`test_env_init.sh`, `test_user_mgmt.sh`）
+- 修复 `integration_space.sh` 用户认证逻辑
+- 修复 Argon2 密码升级测试用户名不匹配问题
+
+### CI/CD
+
+- 修复 `release_gui.yml` 触发条件
+- 修复 `make coverage` 路径安全检查导致的 CI 失败
+
+---
+
+## v0.3.1 (2025-09-24)
+
+**核心功能稳定版**
+
+解决 v0.3.0 全面回归测试中发现的所有阻塞性问题。
+
+### 认证与安全
+
+- 修复 Windows CRLF 换行符导致 `users.txt` 解析失败
+- 修复服务器启动时"空缓存"安全漏洞
+- `LOG` 命令必须在认证后使用
+
+### 进程间通信 (IPC)
+
+- `sem_wait` 增加 EINTR 信号中断处理
+- `log_consumer` 退出时正确调用 `shm_cleanup`
+
+### CLI
+
+- 错误响应正确返回非零退出码
+
+### 服务器
+
+- `PUBT/PUBF` 增加 event_id 校验
+
+---
+
+## v0.3.0 (2025-09-24)
+
+**架构重构与未来基石**
+
+以提升项目长期健康度、可维护性和专业性为核心的重大基础架构版本。
+
+### CLI 模块化
+
+- 将 `main.py` 按功能拆分为 `cli/` 子包（src-layout 规范）
+- 开发者命令统一归入 `dev` 子命令组
+- 公共逻辑抽取到 `cli/utils.py`
+
+### 文档体系重构
+
+- `README.md` 重写为 5 分钟快速入门
+- 新增 `CONTRIBUTING.md` 开发者指南
+- 新增 `CODE_OF_CONDUCT.md`, `SECURITY.md`
+- 设计/日志文档迁移到 `docs/`
+
+### Bug 修复
+
+- 修复 `server-down` 僵尸进程问题
+- 修复错误路径返回成功退出码
+- 修复 `user list` 无法识别旧版 legacy 用户格式
+- 增强 `demo quickstart` 健壮性
+
+---
+
+## v0.2.3 (2025-09-23)
+
+**用户体验与易用性**
+
+### 新增功能
+
+- `--version` (`-V`) 版本查询
+- `ming-drlms help show <topic>` 教学式帮助（Rich 渲染 Markdown）
+- 每日一次 PyPI 版本更新提醒
+
+### 体验优化
+
+- 所有命令 `--help` 包含"用法示例"
+- `--password-from-stdin` 新增 `-x` 短参数
+
+### 内部重构
+
+- 帮助文本集中到 `i18n.py` 模块（伪国际化基础）
+
+---
+
+## v0.2.2 (2025-09-23)
+
+**用户管理与 CI/CD**
+
+### user 子命令组
+
+```bash
+ming-drlms user add      # 添加用户（Argon2id 哈希）
+ming-drlms user passwd   # 修改密码
+ming-drlms user del      # 删除用户
+ming-drlms user list     # 列出用户（支持 --json）
+```
+
+### Dependabot 自动化
+
+- 每周自动检查 Python 依赖和 GitHub Actions 更新
+
+### CI/CD 重构
+
+- 解决 setuptools-scm 版本号错误导致 400 Bad Request
+- 统一"先构建、后测试"流程
+
+### 健壮性
+
+- `users.txt` 写入采用"临时文件 + 原子重命名"
+- 失败命令正确返回非零退出码
+- 修复 `user list` 无法识别旧版 legacy 格式
+
+---
+
+## 路线图
+
+参见 [开发路线图](/zh/changelog/roadmap)。

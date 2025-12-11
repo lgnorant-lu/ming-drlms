@@ -1,0 +1,227 @@
+---
+title: "XEdDSA 签名"
+description: "X25519 扩展 EdDSA 签名算法详解"
+---
+
+## 概述
+
+XEdDSA 是一种允许使用 X25519 密钥进行 EdDSA 签名的算法。DRLMS 使用 XEdDSA 实现身份密钥的签名功能，避免维护两套密钥。
+
+---
+
+## 为什么使用 XEdDSA
+
+### 问题背景
+
+- Signal 协议使用 X25519 进行密钥交换
+- EdDSA 签名需要 Ed25519 密钥
+- 两种密钥格式不同，需要两套密钥
+
+### XEdDSA 解决方案
+
+- 将 X25519 私钥转换为 Ed25519 签名密钥
+- 单一身份密钥同时用于 DH 和签名
+- 与 Signal 规范完全兼容
+
+---
+
+## 算法原理
+
+### 密钥转换
+
+X25519 私钥可以转换为 Ed25519 签名密钥：
+
+```
+x25519_private -> ed25519_signing_key
+
+步骤:
+1. 取 X25519 私钥 k
+2. 计算 Ed25519 公钥 A = k * B (B 是基点)
+3. 确保 A 在正确的子群
+4. 使用 k 进行 EdDSA 签名
+```
+
+### 签名过程
+
+```
+XEdDSA_sign(private_key, message):
+    1. a = clamp(private_key)
+    2. A = a * B
+    3. r = hash(prefix || message)
+    4. R = r * B
+    5. h = hash(R || A || message)
+    6. s = r + h * a
+    return (R, s)
+```
+
+### 验证过程
+
+```
+XEdDSA_verify(public_key, message, signature):
+    1. (R, s) = signature
+    2. A = public_key
+    3. h = hash(R || A || message)
+    4. check: s * B == R + h * A
+```
+
+---
+
+## DRLMS 实现
+
+### C 层实现
+
+```c
+// src/ming_drlms/core/drlms_xeddsa.c
+
+// 签名函数 - 使用 Signal store 中的身份私钥
+int drlms_xeddsa_sign_detached(
+    drlms_signal_store *store,    // Signal store containing identity key
+    const uint8_t *msg,
+    size_t msg_len,
+    uint8_t **sig_out,            // Output: 64-byte signature (caller must free)
+    size_t *sig_len               // Output: signature length (always 64)
+);
+
+// 验证函数 - 使用 X25519 公钥
+int drlms_xeddsa_verify_detached(
+    signal_context *ctx,          // Signal context (can be NULL)
+    const uint8_t *pub_key,       // 32-byte X25519 public key
+    size_t pub_len,               // Public key length (must be 32)
+    const uint8_t *msg,
+    size_t msg_len,
+    const uint8_t *sig,           // 64-byte signature
+    size_t sig_len                // Signature length (must be 64)
+);
+```
+
+### Python API
+
+```python
+from ming_drlms.relay.validator import create_xeddsa_verifier
+
+# 创建验证器（推荐方式）
+verifier = create_xeddsa_verifier()
+if verifier:
+    is_valid = verifier(signature, public_key, message)
+
+# 底层 API（需要 SignalContext）
+from ming_drlms.core.pysignal.signature import verify_bytes
+from ming_drlms.core.pysignal.context import create_signal_context
+
+ctx = create_signal_context()
+is_valid = verify_bytes(ctx, public_key=pubkey, data=message, signature=sig)
+```
+
+---
+
+## 使用场景
+
+### 消息签名
+
+每条消息携带发送者签名：
+
+```json
+{
+  "event_id": "...",
+  "ciphertext": "...",
+  "sender_pubkey": "hex_encoded",
+  "signature": "hex_encoded_64_bytes"
+}
+```
+
+### 存储回执
+
+Relay 服务器对存储确认签名：
+
+```json
+{
+  "event_id": "...",
+  "server_seq": 123,
+  "receipt_sig": "relay_xeddsa_signature"
+}
+```
+
+### 身份验证
+
+外部锚定验证时的身份证明。
+
+---
+
+## CLI 自检
+
+```bash
+# 运行 XEdDSA 自检
+ming-drlms xeddsa-selftest --user <username>
+```
+
+输出：
+
+```
+xeddsa self-test ok
+```
+
+---
+
+## 安全属性
+
+| 属性 | 说明 |
+|------|------|
+| **不可伪造** | 只有私钥持有者能生成有效签名 |
+| **不可否认** | 签名者无法否认签名 |
+| **防篡改** | 消息修改导致签名无效 |
+| **确定性** | 相同输入产生相同签名（可选随机化） |
+
+---
+
+## 与 Ed25519 对比
+
+| 方面 | XEdDSA | Ed25519 |
+|------|--------|---------|
+| 密钥格式 | X25519 | Ed25519 |
+| 签名长度 | 64 字节 | 64 字节 |
+| 兼容 Signal | 是 | 需要额外密钥 |
+| 性能 | 略慢 | 更快 |
+
+---
+
+## 配置
+
+### 强制签名验证
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    export DRLMS_RELAY_ENFORCE_SIGNED=1
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    $env:DRLMS_RELAY_ENFORCE_SIGNED = "1"
+    ```
+  </Tab>
+</Tabs>
+
+### 签名私钥（Relay 服务器）
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    # 生成 32 字节随机私钥
+    export DRLMS_RELAY_SIGNING_PRIVKEY=$(python -c "import secrets; print(secrets.token_hex(32))")
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    # 生成 32 字节随机私钥
+    $env:DRLMS_RELAY_SIGNING_PRIVKEY = python -c "import secrets; print(secrets.token_hex(32))"
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## 相关文档
+
+- [Signal 协议](/zh/architecture/signal-protocol) - 加密协议
+- [安全概述](/zh/security/overview) - 安全架构
+- [密钥生命周期](/zh/security/key-lifecycle) - 密钥管理

@@ -1,0 +1,178 @@
+---
+title: "简介"
+description: "DRLMS - 端到端加密的去中心化数据传输基础设施"
+---
+
+## 什么是 DRLMS？
+
+DRLMS (Decentralized Relay Linked Messaging System) 是一个**端到端加密的去中心化数据传输基础设施**。
+
+它提供一个安全、可编程、不受单一巨头控制的数据传输管道。当前的 CLI/TUI 客户端是这个基础设施的**概念演示**，展示协议栈的实际能力。
+
+<Note>
+**项目定位**：核心是传输协议与加密层，而非垂直的聊天应用。未来可具象化为 AI Agent 通信总线、分布式日志同步、安全文件传输等多种形态。
+</Note>
+
+### 核心资产
+
+- **Signal E2EE**: 端到端加密隍道，服务器不可见明文
+- **XEdDSA 签名**: 消息完整性与不可否认性
+- **M-Proto-v2**: 高效二进制分帧传输协议
+- **去中心化 Relay**: 多 Relay 联邦 + 故障转移
+- **Local-First**: 本地 SQLite 持久化，离线可访问
+
+---
+
+## 架构概览
+
+DRLMS 由三个主要组件构成：
+
+### 传输协议层
+
+**M-Proto-v2** - 高效二进制传输协议：
+
+- 分帧传输，支持任意二进制数据
+- 低开销连接管理
+- 可插拔的序列化后端
+
+### 加密层
+
+**Signal Protocol + XEdDSA** - 端到端安全：
+
+- Double Ratchet 前向保密
+- X3DH 密钥协商
+- XEdDSA 消息签名
+- TOFU + 手动验证信任模型
+
+### 路由层
+
+**Relay 联邦** - 去中心化转发：
+
+- 多 Relay 故障转移
+- Merkle Tree 一致性校验
+- 存储回执签名
+- 健康检查与加权选择
+
+### 概念演示层
+
+**CLI/TUI 客户端** - 展示协议能力：
+
+- 完整 CLI 命令集
+- Textual TUI 交互界面
+- 本地持久化存储
+
+---
+
+## 传输模式
+
+### Relay 模式（推荐）
+
+去中心化事件转发，Relay 仅负责存储与转发密文：
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    export DRLMS_BACKEND_MODE=relay
+    export DRLMS_DEFAULT_RELAYS=http://relay1.example.com,http://relay2.example.com
+    
+    # 创建本地身份
+    ming-drlms identity create --name "Alice"
+    
+    # 发送加密数据
+    ming-drlms chat send --to <recipient_pubkey> --message "<any_data>"
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    $env:DRLMS_BACKEND_MODE = "relay"
+    $env:DRLMS_DEFAULT_RELAYS = "http://relay1.example.com,http://relay2.example.com"
+    
+    # 创建本地身份
+    ming-drlms identity create --name "Alice"
+    
+    # 发送加密数据
+    ming-drlms chat send --to <recipient_pubkey> --message "<any_data>"
+    ```
+  </Tab>
+</Tabs>
+
+### MP2 模式（传统）
+
+直连 C 服务器，适用于集中式部署：
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    export DRLMS_BACKEND_MODE=mp2
+    ming-drlms login -u alice -H 127.0.0.1 -p 15035
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    $env:DRLMS_BACKEND_MODE = "mp2"
+    ming-drlms login -u alice -H 127.0.0.1 -p 15035
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## 快速导航
+
+<Columns cols={2}>
+  <Card
+    title="快速开始"
+    icon="rocket"
+    href="/zh/quickstart"
+  >
+    5 分钟上手指南
+  </Card>
+  <Card
+    title="安装指南"
+    icon="download"
+    href="/zh/installation"
+  >
+    通过 pip、pipx 或源码安装
+  </Card>
+  <Card
+    title="CLI 参考"
+    icon="terminal"
+    href="/zh/cli-reference/overview"
+  >
+    完整命令参考文档
+  </Card>
+  <Card
+    title="架构设计"
+    icon="sitemap"
+    href="/zh/architecture/overview"
+  >
+    深入了解系统设计
+  </Card>
+</Columns>
+
+---
+
+## 安全模型
+
+纵深防御架构：
+
+| 层级 | 技术 | 保证 |
+|------|------|------|
+| 传输层 | TLS（可选） | 链路加密 |
+| 认证层 | Argon2id + JWT | 身份验证 |
+| **数据层** | **Signal E2EE** | **服务器不可见明文** |
+| 签名层 | XEdDSA | 完整性 + 不可否认性 |
+| 信任层 | TOFU / 手动验证 | 公钥绑定 |
+
+---
+
+## 项目状态
+
+| 组件 | 版本 | 状态 |
+|------|------|------|
+| 传输协议 (M-Proto-v2) | v2.0 | 稳定 |
+| Relay API | v1.0 | 稳定 |
+| Signal E2EE | - | 稳定 |
+| CLI/TUI 演示 | v0.4.0 | 开发中 |
+
+详细更新日志请参阅 [版本记录](/zh/changelog/index)。

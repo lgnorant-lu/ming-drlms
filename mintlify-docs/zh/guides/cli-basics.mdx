@@ -1,0 +1,415 @@
+---
+title: "CLI 基础"
+description: "DRLMS 命令行工具使用入门"
+---
+
+## 概述
+
+`ming-drlms` 是 DRLMS 的命令行客户端，提供完整的功能覆盖。本指南介绍 CLI 的基本使用方法。
+
+---
+
+## 命令结构
+
+```
+ming-drlms [全局选项] <命令组> <子命令> [命令选项] [参数]
+```
+
+### 示例
+
+```bash
+# 全局选项
+ming-drlms --log-level DEBUG identity create --name "Alice"
+#         └─ 全局选项 ─┘ └─命令组─┘ └子命令┘ └─命令选项─┘
+```
+
+---
+
+## 全局选项
+
+| 选项 | 说明 |
+|------|------|
+| `--version`, `-V` | 显示版本号 |
+| `--help` | 显示帮助信息 |
+| `--log-level` | 覆盖日志级别（DEBUG/INFO/WARN/ERROR） |
+| `--log-dir` | 覆盖日志目录 |
+| `--log-console/--no-log-console` | 启用/禁用控制台日志 |
+
+---
+
+## 获取帮助
+
+### 查看所有命令
+
+```bash
+ming-drlms --help
+```
+
+### 查看命令组帮助
+
+```bash
+ming-drlms identity --help
+ming-drlms trust --help
+ming-drlms room --help
+```
+
+### 查看子命令帮助
+
+```bash
+ming-drlms identity create --help
+ming-drlms trust verify --help
+```
+
+### 教学式帮助
+
+```bash
+# 主题帮助
+ming-drlms help show user
+ming-drlms help show space
+ming-drlms help show server
+ming-drlms help show room
+```
+
+---
+
+## 命令组分类
+
+### 按模式分类
+
+| 标记 | 含义 |
+|------|------|
+| [Relay Only] | 仅 Relay 模式可用 |
+| [MP2 Only] | 仅 MP2 模式可用 |
+| [Advanced] | 高级/调试命令 |
+| 无标记 | 通用命令 |
+
+### Relay 模式命令
+
+```bash
+# 身份管理
+ming-drlms identity create/show/fingerprint/export/import/qr
+
+# 信任管理
+ming-drlms trust list/show/verify/anchor/accept/revoke/block/unblock
+
+# Relay 聊天
+ming-drlms chat send/recv/publish-bundle
+
+# Relay 房间
+ming-drlms relay-room create/list/invite/join/leave/discover/info
+```
+
+### MP2 模式命令
+
+```bash
+# 登录
+ming-drlms login -u <user> -H <host> -p <port>
+
+# 房间管理（MP2）
+ming-drlms room sub/pub/info/create/set-policy/set-storage-policy/transfer/members/download/clear-owner/local-history
+
+# E2EE 管理（MP2）
+ming-drlms e2ee generate-keys/prekey-bundle
+```
+
+### 通用命令
+
+```bash
+# 服务器管理
+ming-drlms server up/down/status/logs
+
+# 配置管理
+ming-drlms config init/init-tui/init-cli/show/validate/apply-tui/apply-cli
+
+# TUI
+ming-drlms tui
+```
+
+---
+
+## 常用工作流
+
+### Relay 模式快速开始
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    # 1. 设置环境
+    export DRLMS_BACKEND_MODE=relay
+    export DRLMS_DEFAULT_RELAYS=http://localhost:8081
+    
+    # 2. 创建身份
+    ming-drlms identity create --name "Alice"
+    
+    # 3. 发布密钥包
+    ming-drlms chat publish-bundle
+    
+    # 4. 发送消息
+    ming-drlms chat send --to <pubkey> --message "Hello!"
+    
+    # 5. 接收消息
+    ming-drlms chat recv --room <room_id>
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    # 1. 设置环境
+    $env:DRLMS_BACKEND_MODE = "relay"
+    $env:DRLMS_DEFAULT_RELAYS = "http://localhost:8081"
+    
+    # 2. 创建身份
+    ming-drlms identity create --name "Alice"
+    
+    # 3. 发布密钥包
+    ming-drlms chat publish-bundle
+    
+    # 4. 发送消息
+    ming-drlms chat send --to <pubkey> --message "Hello!"
+    
+    # 5. 接收消息
+    ming-drlms chat recv --room <room_id>
+    ```
+  </Tab>
+</Tabs>
+
+### MP2 模式快速开始
+
+```bash
+# 1. 启动服务器（指定端口）
+ming-drlms server up --port 15035
+
+# 2. 登录（login 默认端口 15035）
+ming-drlms login -u alice -H 127.0.0.1
+
+# 3. 订阅房间（sub 默认端口 8080，需显式指定）
+ming-drlms room sub -r general -u alice -H 127.0.0.1 -p 15035
+
+# 4. 发布消息（pub 默认端口 15035）
+ming-drlms room pub -r general -t "Hello!" -u alice -H 127.0.0.1
+
+# 5. 查看房间信息（info 默认端口 15035）
+ming-drlms room info -r general -u alice -H 127.0.0.1
+```
+
+<Note>
+不同命令的默认端口可能不同：
+- `login`、`pub`、`info` 等默认端口 `15035`
+- `sub`、`download` 默认端口 `8080`
+
+建议显式指定 `--port` 确保一致性。
+</Note>
+
+---
+
+## 输出控制
+
+### 彩色输出
+
+默认启用彩色输出：
+
+- **绿色**: 成功
+- **黄色**: 警告
+- **红色**: 错误
+- **蓝色/青色**: 信息
+
+禁用彩色：
+
+```bash
+# 方式一：环境变量
+export NO_COLOR=1
+
+# 方式二：管道重定向时自动禁用
+ming-drlms trust list | cat
+```
+
+### JSON 输出
+
+部分命令支持 JSON 输出（用于脚本）：
+
+```bash
+ming-drlms identity show --json
+ming-drlms trust list --json
+```
+
+### 日志级别
+
+```bash
+# 调试模式
+ming-drlms --log-level DEBUG identity create --name "Test"
+
+# 静默模式
+ming-drlms --log-level ERROR room list
+```
+
+---
+
+## 环境变量集成
+
+### 模式切换
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    # Relay 模式
+    export DRLMS_BACKEND_MODE=relay
+    ming-drlms chat send ...
+    
+    # MP2 模式
+    export DRLMS_BACKEND_MODE=mp2
+    ming-drlms room join ...
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    # Relay 模式
+    $env:DRLMS_BACKEND_MODE = "relay"
+    ming-drlms chat send ...
+    
+    # MP2 模式
+    $env:DRLMS_BACKEND_MODE = "mp2"
+    ming-drlms room join ...
+    ```
+  </Tab>
+</Tabs>
+
+### 默认配置
+
+许多选项可通过环境变量设置默认值：
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    export DRLMS_DEFAULT_RELAYS=http://relay.example.com
+    export DRLMS_USER=alice
+    export DRLMS_TRUST_POLICY=tofu
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    $env:DRLMS_DEFAULT_RELAYS = "http://relay.example.com"
+    $env:DRLMS_USER = "alice"
+    $env:DRLMS_TRUST_POLICY = "tofu"
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## 脚本化使用
+
+### Bash 脚本示例
+
+```bash
+#!/bin/bash
+# 批量发送消息
+
+ROOM="announcements"
+MESSAGE="系统维护通知：明天凌晨 2:00-4:00"
+
+ming-drlms chat send --room "$ROOM" --message "$MESSAGE"
+
+if [ $? -eq 0 ]; then
+    echo "消息发送成功"
+else
+    echo "消息发送失败"
+    exit 1
+fi
+```
+
+### PowerShell 脚本示例
+
+```powershell
+# 检查身份
+$identity = ming-drlms identity show --json | ConvertFrom-Json
+
+if ($identity) {
+    Write-Host "当前身份: $($identity.fingerprint)"
+} else {
+    Write-Host "未找到身份，创建新身份..."
+    ming-drlms identity create --name "AutoUser"
+}
+```
+
+---
+
+## 自动补全
+
+### Bash
+
+```bash
+# 生成补全脚本
+ming-drlms --install-completion bash
+source ~/.bashrc
+```
+
+### Zsh
+
+```bash
+ming-drlms --install-completion zsh
+source ~/.zshrc
+```
+
+### PowerShell
+
+```powershell
+ming-drlms --install-completion powershell
+```
+
+---
+
+## 故障排查
+
+### 命令未找到
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    # 检查 PATH
+    which ming-drlms
+    
+    # 检查 uv 安装的工具
+    uv tool list
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    # 检查命令位置
+    Get-Command ming-drlms
+    
+    # 检查 uv 安装的工具
+    uv tool list
+    ```
+  </Tab>
+</Tabs>
+
+### 权限错误
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    # 检查文件权限
+    ls -la ~/.config/drlms/
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    # 检查配置目录
+    Get-ChildItem $env:APPDATA\DRLMS
+    ```
+  </Tab>
+</Tabs>
+
+### 调试模式
+
+```bash
+# 启用详细日志
+ming-drlms --log-level DEBUG --log-console <command>
+```
+
+---
+
+## 相关文档
+
+- [CLI 参考](/zh/cli-reference/overview) - 完整命令参考
+- [TUI 使用](/zh/guides/tui-usage) - 终端界面指南
+- [环境变量](/zh/setup/environment-variables) - 配置参考

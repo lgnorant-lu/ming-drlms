@@ -1,0 +1,306 @@
+---
+title: "房间管理"
+description: "DRLMS 房间创建与管理完整指南"
+---
+
+## 概述
+
+DRLMS 使用房间（Room）作为消息组织的基本单位。用户可以加入多个房间，在房间内发送和接收消息。
+
+---
+
+## 房间类型对比
+
+| 特性 | MP2 房间 | Relay 房间 |
+|------|----------|------------|
+| 命令 | `room` | `relay-room` |
+| 存储 | 服务器 | Relay 网络 |
+| 创建者 | 需授权 | 任意用户 |
+| 历史 | 服务器持久化 | 分布式存储 |
+| 成员管理 | 服务器控制 | 邀请链接 |
+
+---
+
+## MP2 房间管理
+
+### 创建房间
+
+```bash
+ming-drlms room create -r <房间名> [--ephemeral]
+```
+
+选项：
+
+| 选项 | 说明 |
+|------|------|
+| `-r`, `--room` | 房间名称 |
+| `--ephemeral` | 阅后即焚模式 |
+
+### 订阅房间（加入）
+
+```bash
+ming-drlms room sub -r <房间名> -u <用户名>
+```
+
+### 发布消息
+
+```bash
+# 发送文本
+ming-drlms room pub -r <房间名> -t "消息内容"
+
+# 发送文件
+ming-drlms room pub -r <房间名> -f /path/to/file
+
+# 从标准输入读取
+echo "hello" | ming-drlms room pub -r <房间名> --stdin
+
+# 阅后即焚模式
+ming-drlms room pub -r <房间名> -t "秘密消息" --ephemeral
+```
+
+### 查看房间信息
+
+```bash
+ming-drlms room info -r <房间名>
+```
+
+### 查看成员
+
+```bash
+ming-drlms room members -r <房间名>
+```
+
+### 房间策略
+
+| 策略 | 说明 |
+|------|------|
+| `retain` | 保留所有消息历史 |
+| `delegate` | 委托给联邦服务器 |
+| `teardown` | 最后成员离开时销毁 |
+
+### 存储策略
+
+```bash
+ming-drlms room set-storage-policy -r <房间名> --policy <persistent|ephemeral>
+```
+
+| 策略 | 说明 |
+|------|------|
+| `persistent` | 永久存储 |
+| `ephemeral` | 阅后即焚 |
+
+### 其他命令
+
+```bash
+# 转让房间所有权
+ming-drlms room transfer -r <房间名> --new-owner <用户名>
+
+# 下载房间文件
+ming-drlms room download -r <房间名> --event-id <ID> -o <输出路径>
+
+# 清空房间所有者
+ming-drlms room clear-owner -r <房间名> -u <用户名>
+
+# 查看本地历史（离线可用）
+ming-drlms room local-history -r <房间名> --limit 50
+
+# 从指定序号开始查看
+ming-drlms room local-history -r <房间名> --since-seq 100
+
+# JSON 格式输出
+ming-drlms room local-history -r <房间名> --json
+```
+
+---
+
+## Relay 房间管理
+
+### 创建房间
+
+```bash
+ming-drlms relay-room create --name "房间名称" --visibility <可见性>
+```
+
+选项：
+
+| 选项 | 说明 |
+|------|------|
+| `-n`, `--name` | 房间名称 |
+| `-d`, `--desc` | 房间描述 |
+| `-v`, `--visibility` | 可见性（private/unlisted/public） |
+| `-r`, `--relays` | 指定 Relay 列表 |
+
+### 可见性说明
+
+| 可见性 | 说明 |
+|--------|------|
+| `private` | 私有，仅通过邀请链接加入 |
+| `unlisted` | 未列出，链接可访问但不出现在发现列表 |
+| `public` | 公开，可被发现和加入 |
+
+### 邀请用户
+
+```bash
+ming-drlms relay-room invite <房间ID>
+```
+
+输出邀请链接：
+
+```
+drlms://room/rm_1234...?key=AbCdEf...&relays=relay.example.com
+```
+
+### 加入房间
+
+```bash
+ming-drlms relay-room join "drlms://room/rm_1234...?key=..."
+```
+
+### 离开房间
+
+```bash
+ming-drlms relay-room leave <房间ID> [--force]
+```
+
+### 发现公开房间
+
+```bash
+ming-drlms relay-room discover --relays <relay1,relay2>
+```
+
+<Note>
+`discover` 命令需要指定 `--relays` 参数。
+</Note>
+
+### 查看房间信息
+
+```bash
+ming-drlms relay-room info <房间ID>
+```
+
+---
+
+## TUI 中的房间操作
+
+### 切换房间
+
+1. 使用 `Tab` 将焦点切换到房间列表
+2. 使用上/下箭头选择房间
+3. 按 `Enter` 进入
+
+### 创建/加入房间（MP2）
+
+<Note>
+TUI 中的房间创建和加入通过 `/` 命令实现。在输入框中输入 `/help` 查看可用命令。
+</Note>
+
+---
+
+## 房间消息历史
+
+### MP2 模式
+
+服务器自动保存消息历史。订阅房间时自动回放：
+
+```bash
+# 查看本地历史（离线可用）
+ming-drlms room local-history -r <房间名> --limit 50
+```
+
+### Relay 模式
+
+消息存储在 Relay 网络中：
+
+```bash
+# 获取房间消息
+ming-drlms chat recv --room <房间ID> --limit 50
+```
+
+---
+
+## 房间加密
+
+### MP2 房间
+
+- 支持 E2EE（需要所有成员都有密钥）
+- 服务器看不到明文内容
+- 新成员加入时需要重新分发密钥
+
+### Relay 房间
+
+- 默认 E2EE
+- 房间密钥在邀请链接中传递
+- 支持前向安全
+
+---
+
+## 房间配置
+
+### 配置文件
+
+Relay 房间配置存储在 `~/.config/drlms/rooms.json`（Linux）或 `%APPDATA%\DRLMS\rooms.json`（Windows）：
+
+```json
+{
+  "rooms": [
+    {
+      "room_id": "rm_1234567890abcdef",
+      "name": "我的房间",
+      "visibility": "private",
+      "room_key": "base64_encoded_key",
+      "relays": ["https://relay.example.com"],
+      "joined_at": "2025-12-11T10:00:00Z"
+    }
+  ]
+}
+```
+
+### 默认设置
+
+在 `config.toml` 中配置：
+
+```toml
+[rooms]
+default_visibility = "private"
+announcement_channel = "__rooms__"
+```
+
+---
+
+## 故障排查
+
+### 无法创建房间
+
+**MP2**:
+- 检查是否有创建权限
+- 检查房间名是否已存在
+
+**Relay**:
+- 检查身份是否已创建
+- 检查 Relay 连接
+
+### 无法加入房间
+
+**MP2**:
+- 检查房间是否存在
+- 检查是否需要邀请
+
+**Relay**:
+- 检查邀请链接是否完整
+- 检查房间密钥是否正确
+
+### 消息不同步
+
+1. 检查网络连接
+2. 手动触发同步：
+   ```bash
+   ming-drlms chat recv --room <房间ID>
+   ```
+
+---
+
+## 相关文档
+
+- [Relay 模式](/zh/guides/relay-mode) - Relay 模式详解
+- [MP2 模式](/zh/guides/mp2-mode) - MP2 模式详解
+- [E2EE 设置](/zh/guides/e2ee-setup) - 加密配置

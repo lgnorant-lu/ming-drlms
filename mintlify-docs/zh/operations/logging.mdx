@@ -1,0 +1,258 @@
+---
+title: "监控与日志"
+description: "DRLMS 日志配置与监控指南"
+---
+
+## 概述
+
+DRLMS 使用 Python logging 模块进行日志记录，支持多种输出格式和目标。
+
+---
+
+## 日志配置
+
+### 环境变量
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `DRLMS_LOG_LEVEL` | `INFO` | 日志级别 (DEBUG/INFO/WARN/ERROR) |
+| `DRLMS_LOG_DIR` | `~/.drlms/logs` | 日志文件目录 |
+| `DRLMS_LOG_CONSOLE` | `1` | 输出到控制台 (0/1) |
+| `DRLMS_LOG_JSON` | `0` | JSON 格式输出 (0/1) |
+| `DRLMS_LOG_ROTATE` | `size` | 轮转方式 (size/time) |
+| `DRLMS_LOG_MAX_MB` | `10` | 单文件最大 MB |
+| `DRLMS_LOG_KEEP` | `5` | 保留文件数 |
+
+**C 端专用**（优先于通用变量）：
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `DRLMS_C_LOG_LEVEL` | - | C 端日志级别（覆盖 `DRLMS_LOG_LEVEL`） |
+| `DRLMS_C_LOG_DIR` | - | C 端日志目录（覆盖 `DRLMS_LOG_DIR`） |
+| `DRLMS_C_LOG_CONSOLE` | - | C 端控制台输出 |
+| `DRLMS_C_LOG_JSON` | - | C 端 JSON 格式 |
+| `DRLMS_C_LOG_WINDBG` | `0` | Windows OutputDebugString 输出 |
+
+<Note>
+C 端变量优先级：`DRLMS_C_LOG_*` > `DRLMS_LOG_*` > 默认值。通常只需设置通用变量即可。
+</Note>
+
+### 日志级别
+
+| 级别 | 说明 |
+|------|------|
+| `DEBUG` | 详细调试信息 |
+| `INFO` | 一般信息 |
+| `WARNING` | 警告信息 |
+| `ERROR` | 错误信息 |
+| `CRITICAL` | 严重错误 |
+
+---
+
+## 日志格式
+
+### 默认格式
+
+```
+2025-12-11 10:30:00 | INFO     | ming_drlms.relay.server:42 | [MainThread] Server started
+```
+
+格式：`时间 | 级别 | 模块:行号 | [线程名] 消息`
+
+### JSON 格式
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    export DRLMS_LOG_JSON=1
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    $env:DRLMS_LOG_JSON = "1"
+    ```
+  </Tab>
+</Tabs>
+
+输出（写入 `drlms.jsonl`）：
+
+```json
+{"ts": "2025-12-11 10:30:00", "level": "INFO", "name": "ming_drlms.relay.server", "lineno": 42, "thread": "MainThread", "msg": "Server started"}
+```
+
+---
+
+## 日志文件
+
+### 默认位置
+
+| 平台 | 路径 |
+|------|------|
+| Linux/macOS | `~/.drlms/logs/` |
+| Windows | `%USERPROFILE%\.drlms\logs\` |
+
+### 自定义位置
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    export DRLMS_LOG_DIR=/var/log/drlms
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    $env:DRLMS_LOG_DIR = "C:\logs\drlms"
+    ```
+  </Tab>
+</Tabs>
+
+### 日志轮转
+
+默认配置：
+- 单文件最大：10 MB
+- 保留文件数：5
+- 轮转方式：`size`（可改为 `time` 按天轮转）
+
+---
+
+## CLI 日志
+
+### 命令行选项
+
+```bash
+# 设置日志级别
+ming-drlms --log-level DEBUG identity show
+
+# 指定日志目录
+ming-drlms --log-dir /tmp/logs identity create
+
+# 禁用控制台日志
+ming-drlms --no-log-console identity show
+```
+
+---
+
+## TUI 日志
+
+### 查看日志
+
+在 TUI 中按 `F1` 或 `Ctrl+L` 打开日志面板。
+
+### 日志面板功能
+
+- 实时滚动
+- 按级别过滤（DEBUG/INFO/WARN/ERROR）
+- 清除日志（`c`）
+- 保存日志快照（`s`）
+
+---
+
+## Relay 服务器日志
+
+Relay 服务器使用标准 Python logging 格式：
+
+```
+2025-12-11 10:30:00 | INFO     | ming_drlms.relay.server:310 | [MainThread] POST /events: room=general seq=42
+2025-12-11 10:30:01 | DEBUG    | ming_drlms.relay.server:418 | [MainThread] GET /events: room=general since=0 -> 10 items
+```
+
+---
+
+## 审计日志
+
+### C 服务器审计
+
+位置：`$DRLMS_DATA_DIR/logs/audit.log.jsonl`（默认 `./logs/audit.log.jsonl`）
+
+格式：JSON Lines
+
+```json
+{"ts":"2025-12-11T10:30:00Z","ip":"127.0.0.1","user":"alice","action":"AUTH_SUCCESS","filename":"","room":"","event_id":0,"bytes":0,"sha256":"","result":"ok","err":""}
+{"ts":"2025-12-11T10:30:05Z","ip":"127.0.0.1","user":"alice","action":"ROOM_CREATE","filename":"","room":"general","event_id":0,"bytes":0,"sha256":"","result":"ok","err":""}
+```
+
+### Relay 日志
+
+Relay 服务器使用标准 Python logging，日志级别通过 `DRLMS_LOG_LEVEL` 配置。
+
+---
+
+## 监控
+
+### 健康检查端点
+
+<Tabs>
+  <Tab title="curl">
+    ```bash
+    curl http://localhost:8081/health
+    ```
+  </Tab>
+  <Tab title="PowerShell">
+    ```powershell
+    Invoke-RestMethod http://localhost:8081/health
+    ```
+  </Tab>
+</Tabs>
+
+响应：
+
+```json
+{"status": "ok", "timestamp": 1702300000, "version": "0.4.0", "relay_id": "relay-default", ...}
+```
+
+### Prometheus 指标（计划中）
+
+```
+# 事件计数
+drlms_events_total{room="general"} 1234
+
+# 请求延迟
+drlms_request_duration_seconds{endpoint="/events"} 0.015
+```
+
+---
+
+## 故障排查
+
+### 启用调试日志
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    export DRLMS_LOG_LEVEL=DEBUG
+    ming-drlms chat send --to <pubkey> --message "test"
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    $env:DRLMS_LOG_LEVEL = "DEBUG"
+    ming-drlms chat send --to <pubkey> --message "test"
+    ```
+  </Tab>
+</Tabs>
+
+### 常见问题
+
+**日志文件过大**
+
+```bash
+# 检查日志大小
+du -sh ~/.drlms/logs/
+
+# 清理旧日志
+find ~/.drlms/logs/ -name "*.log.*" -mtime +7 -delete
+```
+
+**日志权限问题**
+
+```bash
+chmod 755 ~/.drlms/logs/
+chmod 644 ~/.drlms/logs/*.log
+```
+
+---
+
+## 相关文档
+
+- [Relay 服务器部署](/zh/operations/relay-server) - 服务器部署
+- [Docker 配置](/zh/operations/docker) - Docker 日志

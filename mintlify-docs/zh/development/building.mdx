@@ -1,0 +1,345 @@
+---
+title: "构建指南"
+description: "DRLMS 从源码构建完整指南"
+---
+
+## 概述
+
+DRLMS 包含 Python 客户端和 C 服务器两个主要组件。本指南介绍如何从源码构建。
+
+---
+
+## Python 客户端
+
+### 前置条件
+
+- Python 3.9+
+- pip 或 uv
+
+### 平台隔离原则
+
+<Warning>
+Windows 与 WSL 不能共用同一个 venv（ABI、路径、脚本均不兼容）。
+</Warning>
+
+建议使用两个并行虚拟环境：
+- Windows: `.venv.win`
+- WSL/Linux: `.venv.wsl`
+
+### 开发安装
+
+<Tabs>
+  <Tab title="Windows">
+    ```powershell
+    git clone https://github.com/lgnorant-lu/ming-drlms.git
+    cd ming-drlms
+
+    # 创建 Windows 专用虚拟环境
+    uv venv .venv.win
+    .\.venv.win\Scripts\Activate.ps1
+
+    # 安装依赖
+    uv pip install -e ".[dev,relay]"
+
+    # 验证安装
+    uv pip check
+    ```
+  </Tab>
+  <Tab title="WSL/Linux">
+    ```bash
+    git clone https://github.com/lgnorant-lu/ming-drlms.git
+    cd ming-drlms
+
+    # 创建 WSL 专用虚拟环境
+    uv venv .venv.wsl
+    source .venv.wsl/bin/activate
+
+    # 安装依赖
+    uv pip install -e ".[dev,relay]"
+
+    # 验证安装
+    uv pip check
+    ```
+  </Tab>
+</Tabs>
+
+### 构建 wheel
+
+```bash
+uv pip install build
+python -m build
+```
+
+输出：
+```
+dist/
+├── ming_drlms-0.3.0-py3-none-any.whl
+└── ming_drlms-0.3.0.tar.gz
+```
+
+---
+
+## C 服务器
+
+### 前置条件
+
+- CMake 3.18+
+- C 编译器（GCC、Clang 或 MSVC）
+- vcpkg（依赖管理）
+
+### 安装 vcpkg
+
+```bash
+# Linux/macOS
+git clone https://github.com/Microsoft/vcpkg.git ~/vcpkg
+cd ~/vcpkg
+./bootstrap-vcpkg.sh
+export VCPKG_ROOT=~/vcpkg
+
+# Windows
+git clone https://github.com/Microsoft/vcpkg.git C:\vcpkg
+cd C:\vcpkg
+.\bootstrap-vcpkg.bat
+set VCPKG_ROOT=C:\vcpkg
+```
+
+### 安装依赖
+
+```bash
+vcpkg install sqlite3 openssl argon2 protobuf-c
+```
+
+<Note>
+使用 `protobuf-c` 而非 `protobuf`（C 语言版本）。
+</Note>
+
+### 构建
+
+<Tabs>
+  <Tab title="Linux/macOS">
+    ```bash
+    mkdir build && cd build
+    cmake .. -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake
+    make -j$(nproc)
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    mkdir build
+    cd build
+    cmake .. -G "Visual Studio 17 2022" -DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake
+    cmake --build . --config Release
+    ```
+  </Tab>
+</Tabs>
+
+### 输出
+
+```
+build/
+├── log_collector_server         # 主服务器
+├── libipc.so / libipc.a         # IPC 共享/静态库
+└── libdrlms_signal_bridge.so    # Signal Protocol + XEdDSA 桥接库
+```
+
+<Note>
+Windows 下库文件名为 `ipc.dll` / `ipc.lib` 和 `drlms_signal_bridge.dll`。
+</Note>
+
+---
+
+## Signal Bridge 库（含 XEdDSA）
+
+### 架构说明
+
+XEdDSA 签名功能集成在 `drlms_signal_bridge` 共享库中：
+- 源码：`src/ming_drlms/core/drlms_xeddsa.c`
+- 与 Signal Protocol 库一起编译
+- 通过 CFFI 暴露给 Python
+
+### Python 绑定
+
+Signal Bridge 库通过 CFFI 绑定到 Python：
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    # 设置库路径（指向 cmake 构建目录）
+    export DRLMS_SIGNAL_PREFIX=/path/to/build
+    
+    # 验证签名功能
+    python -c "from ming_drlms.core.pysignal.signature import verify_bytes; print('OK')"
+    
+    # 验证 XEdDSA 自检
+    ming-drlms xeddsa-selftest --user alice
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    # 设置库路径（指向 cmake 构建目录）
+    $env:DRLMS_SIGNAL_PREFIX = "C:\path\to\build"
+    
+    # 验证签名功能
+    python -c "from ming_drlms.core.pysignal.signature import verify_bytes; print('OK')"
+    
+    # 验证 XEdDSA 自检
+    ming-drlms xeddsa-selftest --user alice
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## CMake 选项
+
+| 选项 | 默认值 | 说明 |
+|------|--------|------|
+| `ENABLE_TESTS` | ON | 构建 C 测试二进制 |
+| `BUILD_SERVER` | ON | 构建服务器及其依赖 |
+| `ENABLE_COVERAGE` | OFF | 启用覆盖率插桩 |
+
+使用：
+
+```bash
+cmake .. -DENABLE_TESTS=ON -DENABLE_COVERAGE=ON
+```
+
+---
+
+## Docker 构建
+
+### 构建镜像
+
+```bash
+docker build -t drlms:latest .
+```
+
+### Dockerfile 示例
+
+```dockerfile
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY . .
+RUN pip install --no-cache-dir .
+
+EXPOSE 8081
+
+CMD ["python", "-m", "ming_drlms.relay.server"]
+```
+
+---
+
+## 发布流程
+
+### 版本号
+
+遵循语义化版本：`MAJOR.MINOR.PATCH`
+
+### 发布步骤
+
+1. 更新版本号
+   ```bash
+   # pyproject.toml
+   version = "0.3.1"
+   ```
+
+2. 更新 CHANGELOG
+
+3. 创建标签
+   ```bash
+   git tag -a v0.3.1 -m "Release v0.3.1"
+   git push origin v0.3.1
+   ```
+
+4. 构建并上传
+   ```bash
+   python -m build
+   twine upload dist/*
+   ```
+
+---
+
+## 故障排查
+
+### CMake 找不到依赖
+
+确保 vcpkg 工具链正确配置：
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    cmake .. -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    cmake .. -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake"
+    ```
+  </Tab>
+</Tabs>
+
+### 链接错误
+
+检查库路径：
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    export LD_LIBRARY_PATH=/path/to/libs:$LD_LIBRARY_PATH
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    # Windows 不使用 LD_LIBRARY_PATH，确保 DLL 在 PATH 中
+    $env:PATH = "C:\path\to\libs;$env:PATH"
+    ```
+  </Tab>
+</Tabs>
+
+### Python 扩展加载失败
+
+检查 CFFI 绑定：
+
+```bash
+python -c "from ming_drlms.core.pysignal._ffi import ffi, lib; print(lib)"
+```
+
+---
+
+## 日志配置
+
+### 环境变量
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `DRLMS_LOG_LEVEL` | `INFO` | 日志级别 (DEBUG/INFO/WARN/ERROR) |
+| `DRLMS_LOG_DIR` | `~/.drlms/logs` | 日志目录 |
+| `DRLMS_LOG_CONSOLE` | `1` | 是否输出到控制台 |
+| `DRLMS_LOG_JSON` | `0` | 是否输出 JSON 格式 |
+
+### 日志文件
+
+| 文件 | 说明 |
+|------|------|
+| `drlms.log` | Python 主日志 |
+| `drlms_error.log` | 错误专用日志 |
+| `drlms_c.log` | C 端日志 |
+
+---
+
+## 详细文档
+
+更多构建详情参见项目内文档：
+
+- `docs/Environment.md` - Windows/WSL 双环境规范
+- `docs/WINDOWS_SETUP.md` - Windows 构建详细指南
+- `docs/logging_spec.md` - 日志规范与脱敏原则
+
+---
+
+## 相关文档
+
+- [贡献指南](/zh/development/contributing) - 贡献流程
+- [测试指南](/zh/development/testing) - 测试详情

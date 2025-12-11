@@ -1,0 +1,334 @@
+---
+title: "M-Proto-v2 协议"
+description: "DRLMS 二进制通信协议规范"
+---
+
+## 概述
+
+M-Proto-v2 是 DRLMS 的核心通信协议，用于客户端与 C 服务器之间的通信。采用二进制分帧 + Protobuf 消息格式。
+
+---
+
+## 协议分层
+
+```
+┌─────────────────────────────────────┐
+│        应用层 (Protobuf)            │
+│   认证、房间、消息、联邦消息         │
+├─────────────────────────────────────┤
+│        分帧层 (Binary Frame)        │
+│   Magic + Length + Type + Payload   │
+└─────────────────────────────────────┘
+```
+
+---
+
+## 帧格式
+
+### 帧结构
+
+```
+┌──────────┬──────────┬──────────┬──────────┬──────────────────┐
+│  Magic   │  Version │   Type   │  Length  │    Payload       │
+│  4 bytes │  2 bytes │  2 bytes │  4 bytes │  variable        │
+└──────────┴──────────┴──────────┴──────────┴──────────────────┘
+```
+
+| 字段 | 长度 | 说明 |
+|------|------|------|
+| Magic | 4 bytes | 固定值 `0xDEADBEEF`（网络字节序） |
+| Version | 2 bytes | 协议版本 `0x0002` |
+| Type | 2 bytes | 消息类型 |
+| Length | 4 bytes | Payload 长度 |
+| Payload | variable | Protobuf 编码的消息体 |
+
+定义（`mp2_protocol.h`）：
+
+```c
+#define MP2_PROTOCOL_MAGIC 0xDEADBEEF
+#define MP2_PROTOCOL_VERSION 0x0002
+```
+
+### 最大帧大小
+
+默认最大帧大小：32 MB
+
+### 帧头总长度
+
+12 字节（Magic 4 + Version 2 + Type 2 + Length 4）
+
+---
+
+## 消息类型
+
+### 类型分段
+
+| 范围 | 类别 |
+|------|------|
+| 100-199 | 认证消息 |
+| 200-299 | 房间消息 |
+| 300-399 | 联邦消息 |
+
+### 认证消息 (100-199)
+
+| Type | 名称 | 方向 | 说明 |
+|------|------|------|------|
+| 100 | AUTH_CHALLENGE_REQUEST | C→S | 请求挑战 |
+| 101 | AUTH_CHALLENGE_RESPONSE | S→C | 返回 nonce |
+| 102 | AUTH_REQUEST | C→S | 提交认证 |
+| 103 | AUTH_RESPONSE | S→C | 认证结果 |
+| 104 | REFRESH_TOKEN_REQUEST | C→S | 刷新 Token |
+| 105 | REFRESH_TOKEN_RESPONSE | S→C | 刷新结果 |
+
+### 房间消息 (200-299)
+
+| Type | 名称 | 方向 | 说明 |
+|------|------|------|------|
+| 200 | ROOM_SUB_REQUEST | C→S | 订阅房间 |
+| 201 | ROOM_PUB_REQUEST | C→S | 发布消息 |
+| 202 | ROOM_EVENT | S→C | 房间事件（历史回放/实时推送） |
+| 210 | ROOM_INFO_REQUEST | C→S | 查询房间信息 |
+| 211 | ROOM_INFO_RESPONSE | S→C | 房间信息 |
+| 212 | ROOM_LIST_REQUEST | C→S | 列出房间 |
+| 213 | ROOM_LIST_RESPONSE | S→C | 房间列表 |
+| 214 | ROOM_CREATE_REQUEST | C→S | 创建房间 |
+| 215 | ROOM_CREATE_RESPONSE | S→C | 创建结果 |
+| 216 | ROOM_SET_POLICY_REQUEST | C→S | 设置房间策略 |
+| 217 | ROOM_SET_POLICY_RESPONSE | S→C | 策略设置结果 |
+| 218 | ROOM_SET_STORAGE_POLICY_REQUEST | C→S | 设置存储策略 |
+| 219 | ROOM_SET_STORAGE_POLICY_RESPONSE | S→C | 存储策略设置结果 |
+| 220 | ROOM_TRANSFER_REQUEST | C→S | 转让房间 |
+| 221 | ROOM_TRANSFER_RESPONSE | S→C | 转让结果 |
+| 222 | ROOM_HISTORY_REQUEST | C→S | 请求历史消息 |
+| 223 | ROOM_HISTORY_CHUNK | S→C | 历史消息分块 |
+| 224 | ROOM_HISTORY_DONE | S→C | 历史回放完成 |
+| 225-231 | ROOM_FILE_* | 双向 | 文件上传/下载相关 |
+| 232 | ROOM_MEMBER_LIST_REQUEST | C→S | 请求成员列表 |
+| 233 | ROOM_MEMBER_LIST_RESPONSE | S→C | 成员列表 |
+| 234 | ROOM_CLEAR_OWNER_REQUEST | C→S | 清除房主 |
+| 235 | ROOM_CLEAR_OWNER_RESPONSE | S→C | 清除房主结果 |
+
+### 联邦消息 (300-399)
+
+| Type | 名称 | 方向 | 说明 |
+|------|------|------|------|
+| 300 | S2S_PUB_REQUEST | S→S | 联邦发布 |
+| 301 | S2S_PUB_RESPONSE | S→S | 联邦发布响应 |
+| 302 | S2S_SUB_REQUEST | S→S | 联邦订阅 |
+| 303 | S2S_SUB_RESPONSE | S→S | 联邦订阅响应 |
+
+### 通用控制消息 (400-499)
+
+| Type | 名称 | 方向 | 说明 |
+|------|------|------|------|
+| 400 | ERROR_RESPONSE | S→C | 通用错误响应 |
+| 401 | PING | C→S | 心跳请求 |
+| 402 | PONG | S→C | 心跳响应 |
+
+### E2EE 消息 (500-599)
+
+| Type | 名称 | 方向 | 说明 |
+|------|------|------|------|
+| 500 | E2EE_GENERATE_KEYS_REQUEST | C→S | 生成密钥 |
+| 501 | E2EE_GENERATE_KEYS_RESPONSE | S→C | 密钥生成结果 |
+| 502 | E2EE_PREKEY_BUNDLE_REQUEST | C→S | 请求预密钥包 |
+| 503 | E2EE_PREKEY_BUNDLE_RESPONSE | S→C | 预密钥包 |
+| 504 | E2EE_SENDER_KEY_PUSH | C→S | 推送发送者密钥 |
+
+---
+
+## 认证流程
+
+### Challenge-Response
+
+```
+Client                          Server
+   │                              │
+   │  100: AUTH_CHALLENGE_REQUEST │
+   │─────────────────────────────►│
+   │                              │
+   │  101: AUTH_CHALLENGE_RESPONSE│
+   │◄─────────────────────────────│
+   │      nonce: random_bytes     │
+   │                              │
+   │  102: AUTH_REQUEST           │
+   │─────────────────────────────►│
+   │      username                │
+   │      hash: Argon2id(pwd+nonce)│
+   │                              │
+   │  103: AUTH_RESPONSE          │
+   │◄─────────────────────────────│
+   │      access_token            │
+   │      refresh_token           │
+```
+
+### Token 刷新
+
+```
+Client                          Server
+   │                              │
+   │  104: REFRESH_TOKEN_REQUEST  │
+   │─────────────────────────────►│
+   │      refresh_token           │
+   │                              │
+   │  105: REFRESH_TOKEN_RESPONSE │
+   │◄─────────────────────────────│
+   │      access_token            │
+   │      access_token_expires_in │
+```
+
+<Note>
+注意：RefreshTokenResponse 不返回新的 refresh_token，原 refresh_token 在有效期内可重复使用。
+</Note>
+
+---
+
+## 房间操作
+
+### 订阅与历史回放
+
+```
+Client                          Server
+   │                              │
+   │  200: ROOM_SUB_REQUEST       │
+   │─────────────────────────────►│
+   │      room_name               │
+   │      replay_limit: 50        │
+   │                              │
+   │  202: ROOM_EVENT (历史)      │
+   │◄─────────────────────────────│
+   │      ...                     │
+   │◄─────────────────────────────│
+   │                              │
+   │  202: ROOM_EVENT (完成)      │
+   │◄─────────────────────────────│
+```
+
+### 消息发布与扇出
+
+```
+Sender                Server                Subscribers
+   │                    │                       │
+   │  201: PUB_REQUEST  │                       │
+   │───────────────────►│                       │
+   │                    │  202: ROOM_EVENT      │
+   │                    │──────────────────────►│ A
+   │                    │──────────────────────►│ B
+   │                    │──────────────────────►│ C
+```
+
+---
+
+## Protobuf 定义
+
+定义文件位于 `schema/v2/` 目录。
+
+### 认证消息 (`auth.proto`)
+
+```protobuf
+message AuthChallengeRequest {
+  string username = 1;
+}
+
+message AuthChallengeResponse {
+  string nonce = 1;
+  string server_salt = 2;  // 可选：域分隔盐
+}
+
+message AuthRequest {
+  string username = 1;
+  string response = 2;     // H(password_hash + nonce)
+  ClientInfo client = 3;   // 可选：设备与签名身份
+}
+
+message AuthResponse {
+  string access_token = 1;
+  string refresh_token = 2;
+  int64 access_token_expires_in = 3;
+  int32 accepted_device_id = 4;
+  bool recorded_identity = 5;
+}
+
+// 客户端设备信息（Phase 15.5+ 含 XEdDSA 签名）
+message ClientInfo {
+  int32 device_id = 1;
+  int32 registration_id = 2;
+  bytes identity_pubkey = 3;      // 32字节：X25519 公钥
+  bytes identity_sig = 4;         // 64字节：XEdDSA 签名
+  int64 sig_ts = 5;
+  string device_guid = 6;
+  string platform = 7;
+  string app_version = 8;
+  uint64 capabilities = 9;
+  bytes prev_identity_pubkey = 10; // 可选：轮换前公钥
+  bytes rotation_proof = 11;       // 可选：轮换证明
+  SignatureType signature_type = 12;  // 1=XEdDSA
+}
+```
+
+### 房间消息 (`room.proto`)
+
+```protobuf
+message RoomSubscribeRequest {
+  string room_name = 1;
+  string access_token = 2;
+  int64 since_id = 3;
+  uint32 replay_limit = 4;
+}
+
+message RoomEvent {
+  string room_name = 1;
+  int64 event_id = 2;
+  SignalEncryptedPayload payload = 3;  // E2EE 加密负载
+  string display_token = 4;
+  RoomEventKind kind = 5;
+  RoomFileMetadata file = 6;
+  bool ephemeral = 7;
+  string sha256_hex = 8;
+  string timestamp = 9;           // RFC3339
+  string instance_id = 10;        // M5 分片实例 ID
+  RoomPresenceEvent presence = 11; // 在线状态事件
+}
+
+enum RoomEventKind {
+  ROOM_EVENT_KIND_TEXT = 0;
+  ROOM_EVENT_KIND_FILE = 1;
+  ROOM_EVENT_KIND_MEMBER_JOINED = 2;
+  ROOM_EVENT_KIND_MEMBER_LEFT = 3;
+}
+
+// Signal 加密信封
+message SignalEncryptedPayload {
+  SignalCiphertextType type = 1;
+  bytes ciphertext = 2;
+  string sender = 3;
+  uint32 sender_device_id = 4;
+  uint32 sender_registration_id = 5;
+  uint32 pre_key_id = 6;
+  uint32 signed_pre_key_id = 7;
+  string group_id = 8;              // 群组 ID
+  uint32 sender_key_iteration = 9;  // 发送者密钥迭代
+}
+```
+
+---
+
+## 错误码
+
+| 代码 | 含义 |
+|------|------|
+| 0 | 成功 |
+| 1 | 认证失败 |
+| 2 | Token 过期 |
+| 3 | 权限不足 |
+| 4 | 房间不存在 |
+| 5 | 已订阅 |
+| 6 | 未订阅 |
+| 100 | 内部错误 |
+
+---
+
+## 相关文档
+
+- [C 服务器](/zh/architecture/c-server) - 服务器实现
+- [架构概述](/zh/architecture/overview) - 系统架构

@@ -1,0 +1,91 @@
+---
+title: "help"
+description: "帮助与教学命令"
+---
+
+## 概述
+
+`help` 命令组提供交互式帮助和教学内容。
+
+```bash
+ming-drlms help --help
+```
+
+---
+
+## 命令列表
+
+| 命令 | 说明 |
+|------|------|
+| `show` | 显示主题帮助（引导到 --help） |
+
+---
+
+## help show
+
+显示特定主题的帮助内容。
+
+### 语法
+
+```bash
+ming-drlms help show <主题>
+```
+
+### 可用主题
+
+| 主题 | 说明 |
+|------|------|
+| `user` | 用户管理 |
+| `space` | 命名空间 |
+| `server` | 服务器管理 |
+| `ipc` | IPC 进程间通信 |
+| `client` | 客户端操作 |
+| `room` | 房间管理 |
+| `dev` | 开发工具 |
+
+### 示例
+
+```bash
+ming-drlms help show user
+ming-drlms help show server
+ming-drlms help show dev
+```
+
+### 输出示例
+
+```
+For help on 'user' commands, use:
+  ming-drlms user --help
+
+For specific command help:
+  ming-drlms user <command> --help
+```
+
+<Note>
+`help show` 命令会引导您使用对应命令组的 `--help` 选项获取详细帮助。
+</Note>
+
+---
+
+## 其他帮助方式
+
+### 命令帮助
+
+```bash
+# 查看命令帮助
+ming-drlms <命令> --help
+
+# 示例
+ming-drlms identity --help
+ming-drlms identity create --help
+```
+
+### 在线文档
+
+访问 [DRLMS 文档](/) 获取完整文档。
+
+---
+
+## 相关命令
+
+- [demo](/zh/cli-reference/demo) - 演示脚本

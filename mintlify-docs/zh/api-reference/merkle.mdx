@@ -1,0 +1,297 @@
+---
+title: "Merkle API"
+description: "Relay 服务器 Merkle 一致性端点（Phase 16B）"
+---
+
+## 概述
+
+Merkle API 用于房间事件的一致性验证和差异同步。事件以 `client_event_hash` 作为标识加入 Merkle 树。
+
+---
+
+## GET /merkle/root
+
+获取房间的 Merkle 树根哈希。
+
+### 请求
+
+```http
+GET /merkle/root?room={room_id}
+```
+
+### 查询参数
+
+| 参数 | 类型 | 必需 | 说明 |
+|------|------|------|------|
+| `room` | string | 是 | 房间 ID |
+
+### 响应
+
+```json
+{
+  "room": "general",
+  "root": "a591a6d40bf420404a011733cfb7b190d62c65bf0bcda32b57b277d9ad9f146e",
+  "size": 1234
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `room` | string | 房间 ID |
+| `root` | string | Merkle 根哈希（64 字符 hex） |
+| `size` | integer | 树中事件数量 |
+
+### 示例
+
+<Tabs>
+  <Tab title="curl">
+    ```bash
+    curl "http://localhost:8081/merkle/root?room=general"
+    ```
+  </Tab>
+  <Tab title="PowerShell">
+    ```powershell
+    Invoke-RestMethod "http://localhost:8081/merkle/root?room=general"
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## POST /merkle/diff
+
+计算客户端与服务器 Merkle 树的差异。
+
+### 请求
+
+```http
+POST /merkle/diff
+Content-Type: application/json
+```
+
+### 请求体
+
+```json
+{
+  "room": "general",
+  "local_root": "a591a6d40bf420404a011733cfb7b190d62c65bf0bcda32b57b277d9ad9f146e",
+  "event_ids": ["hash_1", "hash_2", "hash_3"]
+}
+```
+
+| 字段 | 类型 | 必需 | 说明 |
+|------|------|------|------|
+| `room` | string | 是 | 房间 ID |
+| `local_root` | string | 是 | 客户端 Merkle 根（hex） |
+| `event_ids` | array | 否 | 客户端事件哈希列表（用于详细差异计算） |
+
+### 响应
+
+```json
+{
+  "roots_match": false,
+  "local_root": "a591a6d40bf420404a011733cfb7b190d62c65bf0bcda32b57b277d9ad9f146e",
+  "server_root": "b692b7e50cf531515b122844c8c7c800e73c55be1deb43c58c388a42c0c0b257",
+  "missing_event_ids": ["hash_4", "hash_5"],
+  "extra_event_ids": ["hash_x"]
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `roots_match` | boolean | 根哈希是否匹配 |
+| `local_root` | string | 客户端提交的根 |
+| `server_root` | string | 服务器当前根 |
+| `missing_event_ids` | array | 服务器有但客户端没有的事件哈希 |
+| `extra_event_ids` | array | 客户端有但服务器没有的事件哈希 |
+
+### 示例
+
+<Tabs>
+  <Tab title="curl">
+    ```bash
+    curl -X POST http://localhost:8081/merkle/diff \
+      -H "Content-Type: application/json" \
+      -d '{
+        "room": "general",
+        "local_root": "abc123...",
+        "event_ids": ["hash_1", "hash_2"]
+      }'
+    ```
+  </Tab>
+  <Tab title="PowerShell">
+    ```powershell
+    $body = @{
+        room = "general"
+        local_root = "abc123..."
+        event_ids = @("hash_1", "hash_2")
+    } | ConvertTo-Json
+
+    Invoke-RestMethod -Uri "http://localhost:8081/merkle/diff" -Method Post -Body $body -ContentType "application/json"
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## GET /merkle/proof
+
+获取事件的 Merkle 证明。
+
+### 请求
+
+```http
+GET /merkle/proof?room={room_id}&event_id={event_id}
+```
+
+### 查询参数
+
+| 参数 | 类型 | 必需 | 说明 |
+|------|------|------|------|
+| `room` | string | 是 | 房间 ID |
+| `event_id` | string | 是 | 事件哈希（`client_event_hash`） |
+
+### 响应
+
+```json
+{
+  "event_id": "a591a6d40bf420404a011733cfb7b190d62c65bf0bcda32b57b277d9ad9f146e",
+  "leaf_hash": "sha256_of_event_id",
+  "siblings": [
+    {"hash": "sibling_hash_hex", "is_left": true},
+    {"hash": "sibling_hash_hex", "is_left": false}
+  ],
+  "root": "merkle_root_hex"
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `event_id` | string | 事件哈希 |
+| `leaf_hash` | string | 叶子节点哈希（hex） |
+| `siblings` | array | 兄弟节点路径 |
+| `root` | string | Merkle 根 |
+
+### 证明验证
+
+```python
+def verify_proof(event_id, proof, root):
+    current = sha256(event_id.encode()).digest()
+    for sibling in proof["siblings"]:
+        h = bytes.fromhex(sibling["hash"])
+        if sibling["is_left"]:
+            current = sha256(h + current).digest()
+        else:
+            current = sha256(current + h).digest()
+    return current.hex() == root
+```
+
+### 示例
+
+<Tabs>
+  <Tab title="curl">
+    ```bash
+    curl "http://localhost:8081/merkle/proof?room=general&event_id=a591a6d4..."
+    ```
+  </Tab>
+  <Tab title="PowerShell">
+    ```powershell
+    Invoke-RestMethod "http://localhost:8081/merkle/proof?room=general&event_id=a591a6d4..."
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## GET /merkle/events
+
+获取房间 Merkle 树中所有事件 ID（用于完整同步）。
+
+### 请求
+
+```http
+GET /merkle/events?room={room_id}
+```
+
+### 响应
+
+```json
+{
+  "room": "general",
+  "event_ids": ["hash_1", "hash_2", "hash_3"],
+  "root": "merkle_root_hex",
+  "size": 3
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `room` | string | 房间 ID |
+| `event_ids` | array | 所有事件哈希列表 |
+| `root` | string | 当前 Merkle 根 |
+| `size` | integer | 事件数量 |
+
+---
+
+## 错误响应
+
+### 400 Bad Request
+
+```json
+{
+  "detail": "room is required"
+}
+```
+
+其他 400 错误示例：
+
+```json
+{
+  "detail": "event_id is required"
+}
+```
+
+```json
+{
+  "detail": "invalid local_root format"
+}
+```
+
+### 404 Not Found
+
+仅 `/merkle/proof` 端点，事件不在树中时：
+
+```json
+{
+  "detail": "event not found in tree"
+}
+```
+
+---
+
+## 同步流程
+
+### 增量同步
+
+```
+1. GET /merkle/root 获取服务器根
+2. 比较本地根与服务器根
+3. 如果相同，无需同步
+4. 如果不同，POST /merkle/diff 获取差异
+5. GET /events/by-ids 获取 missing_event_ids 中的事件
+```
+
+### 完整同步
+
+```
+1. GET /merkle/events 获取所有事件 ID
+2. 比较本地事件列表
+3. GET /events/by-ids 获取缺少的事件
+```
+
+---
+
+## 相关文档
+
+- [API 概述](/zh/api-reference/overview) - API 总览
+- [Relay 联邦](/zh/architecture/relay-federation) - 联邦架构

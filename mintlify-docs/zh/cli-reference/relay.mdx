@@ -1,0 +1,215 @@
+---
+title: "relay"
+description: "[Advanced] Relay 底层操作命令"
+---
+
+## 概述
+
+`relay` 命令组提供 Relay 服务器的底层操作，用于调试和高级用途。
+
+```bash
+ming-drlms relay --help
+```
+
+---
+
+## 命令列表
+
+| 命令 | 说明 |
+|------|------|
+| `post` | 向 Relay 投递事件（完整选项） |
+| `sync` | 从 Relay 同步事件 |
+| `post-simple` | 简化投递（使用 IdentityManager） |
+| `post-multi` | 多 Relay 投递 |
+| `sync-multi` | 多 Relay 同步 |
+| `identity` | 管理 Relay 身份 |
+
+---
+
+## relay post
+
+[LEGACY] 向 Relay 服务器投递原始事件（使用 LocalKeyStore + CFFI 签名）。
+
+<Note>
+这是遗留命令，建议使用 `relay post-simple` 代替。
+</Note>
+
+### 语法
+
+```bash
+ming-drlms relay post [选项]
+```
+
+### 主要选项
+
+| 选项 | 说明 |
+|------|------|
+| `--room`, `-r` | 目标房间（必需） |
+| `--base-url` | Relay 服务器 URL（默认 http://127.0.0.1:8081） |
+| `--ciphertext`, `-c` | Base64 密文（已加密的消息） |
+| `--content` | 原始消息内容（未加密，需要 DRLMS_USER） |
+| `--content-file` | 从文件读取内容 |
+| `--encrypt/--no-encrypt` | 使用 Signal 加密 |
+| `--peer` | 加密目标用户 |
+| `--peer-bundle-file` | 目标用户的 PreKeyBundle 文件 |
+
+### 示例
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    # 简单投递（需要 DRLMS_USER）
+    export DRLMS_USER=alice
+    ming-drlms relay post -r general --content "Hello" --base-url http://localhost:8081
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    # 简单投递（需要 DRLMS_USER）
+    $env:DRLMS_USER = "alice"
+    ming-drlms relay post -r general --content "Hello" --base-url http://localhost:8081
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## relay sync
+
+从 Relay 同步事件到本地存储。
+
+### 语法
+
+```bash
+ming-drlms relay sync [选项]
+```
+
+### 选项
+
+| 选项 | 默认值 | 说明 |
+|------|--------|------|
+| `--room`, `-r` | 必需 | 房间 ID |
+| `--base-url` | `http://127.0.0.1:8081` | Relay 服务器 URL |
+| `--limit` | `100` | 数量限制 |
+
+### 示例
+
+```bash
+ming-drlms relay sync -r general --limit 50 --base-url http://localhost:8081
+```
+
+---
+
+## relay post-simple
+
+使用 IdentityManager（Phase 15.5 XEdDSA）简化投递。
+
+### 语法
+
+```bash
+ming-drlms relay post-simple -r <房间> -c <内容> [选项]
+```
+
+### 选项
+
+| 选项 | 简写 | 默认值 | 说明 |
+|------|------|--------|------|
+| `--room` | `-r` | - | 目标房间（必需） |
+| `--content` | `-c` | - | 消息内容（必需） |
+| `--base-url` | - | `http://127.0.0.1:8081` | Relay 服务器 URL |
+| `--content-type` | - | `text` | 内容类型 |
+| `--user` | `-u` | DRLMS_USER | 用户名 |
+
+### 示例
+
+```bash
+ming-drlms relay post-simple -r general -c "Hello!" --user alice
+```
+
+---
+
+## relay post-multi
+
+向多个 Relay 并行投递事件（需要 relays.toml 配置）。
+
+### 语法
+
+```bash
+ming-drlms relay post-multi -r <房间> --ciphertext <密文> --client-hash <哈希> [选项]
+```
+
+### 选项
+
+| 选项 | 说明 |
+|------|------|
+| `--room`, `-r` | 目标房间（必需） |
+| `--ciphertext` | Base64 密文（必需） |
+| `--client-hash` | 客户端事件哈希（必需） |
+| `--content-len` | 内容长度 |
+| `--client-ts` | 客户端时间戳 |
+| `--config` | relays.toml 路径 |
+
+---
+
+## relay sync-multi
+
+从多个 Relay 同步房间（使用 MultiRelaySyncManager）。
+
+### 语法
+
+```bash
+ming-drlms relay sync-multi -r <房间> [选项]
+```
+
+### 选项
+
+| 选项 | 说明 |
+|------|------|
+| `--room`, `-r` | 房间 ID（必需） |
+| `--config` | relays.toml 路径 |
+
+---
+
+## relay identity
+
+管理 Relay 客户端身份（Phase 15.5 XEdDSA）。
+
+### 语法
+
+```bash
+ming-drlms relay identity <action> [选项]
+```
+
+### Action 参数
+
+| Action | 说明 |
+|--------|------|
+| `show` | 显示当前身份（默认） |
+| `create` | 创建新的 X25519 身份 |
+| `export` | 导出私钥用于备份 |
+
+### 选项
+
+| 选项 | 简写 | 说明 |
+|------|------|------|
+| `--user` | `-u` | 用户名（或设置 DRLMS_USER） |
+
+### 示例
+
+```bash
+# 查看当前身份
+ming-drlms relay identity show --user alice
+
+# 创建新身份
+ming-drlms relay identity create --user alice
+
+# 导出私钥
+ming-drlms relay identity export --user alice
+```
+
+---
+
+## 相关命令
+
+- [chat](/zh/cli-reference/chat) - 高层聊天命令
+- [relay-room](/zh/cli-reference/relay-room) - 房间管理

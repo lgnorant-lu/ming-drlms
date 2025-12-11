@@ -1,0 +1,208 @@
+---
+title: "配置文件"
+description: "config.toml 配置文件格式参考"
+---
+
+## 概述
+
+DRLMS 支持通过 TOML 格式的配置文件进行配置。
+
+默认路径：
+
+| 平台 | 路径 |
+|------|------|
+| Linux | `~/.config/drlms/config.toml` |
+| Windows | `%APPDATA%\DRLMS\config.toml` |
+
+复制 `config_example.toml` 作为起点：
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    mkdir -p ~/.config/drlms
+    cp config_example.toml ~/.config/drlms/config.toml
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    New-Item -ItemType Directory -Force -Path "$env:APPDATA\DRLMS"
+    Copy-Item config_example.toml "$env:APPDATA\DRLMS\config.toml"
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## 完整配置示例
+
+```toml
+# DRLMS 配置文件
+# Linux: ~/.config/drlms/config.toml
+# Windows: %APPDATA%\DRLMS\config.toml
+
+[general]
+# 通用设置
+language = "zh"
+
+[tui]
+# TUI 界面设置
+
+# 主题："forest"（默认）或自定义主题名
+theme = "forest"
+
+# 文件选择器根目录
+# - 空字符串 ""（默认）：使用当前工作目录
+# - 绝对路径：如 "/home/user/drlms_data" 或 "C:/Users/Me/Documents"
+# - 相对路径：如 "./uploads"
+# - 特殊标记：
+#   - "$HOME" 或 "~"：用户主目录
+#   - "$CWD"：当前工作目录
+file_picker_root = ""
+
+[tui.custom_colors]
+# 自定义主题颜色（可选）
+# 格式：color_name = "#RRGGBB"
+# 可用键：primary, secondary, accent, background, surface, text 等
+# primary = "#b8bb26"
+# background = "#1d2021"
+
+[backend]
+# 后端模式："mp2"（传统服务器）、"relay"（去中心化）、"hybrid"（混合）
+mode = "relay"
+
+[identity]
+# 本地身份配置
+
+# 身份文件路径（默认：~/.config/drlms/e2ee_keys.json）
+# identity_file = ""
+
+# 注册 ID（未设置则自动生成）
+# registration_id = 0
+
+# 设备 ID（多设备支持）
+device_id = 1
+
+[trust]
+# 信任策略配置
+
+# 新联系人默认信任策略
+# - "tofu"：首次信任（默认）
+# - "manual_only"：仅手动验证
+# - "anchored_only"：仅外部锚定
+default_policy = "tofu"
+
+# 联系人公钥变更时的行为
+# - "warn"：显示警告，让用户决定（默认）
+# - "block"：自动阻止直到验证
+# - "reset"：重置信任级别到 TOFU
+key_change_action = "warn"
+
+[keyserver]
+# Keyserver 配置
+
+# 查询超时（毫秒）
+timeout = 5000
+
+# OPK（一次性预密钥）最小数量，低于此值触发补充
+min_opk_count = 10
+
+# 补充后目标 OPK 数量
+target_opk_count = 100
+
+[rooms]
+# 房间默认设置
+
+# 新房间默认可见性："private"、"unlisted"、"public"
+default_visibility = "private"
+
+# 房间公告频道
+announcement_channel = "__rooms__"
+```
+
+---
+
+## 配置节详解
+
+### [general]
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `language` | string | `"en"` | 界面语言 |
+
+### [tui]
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `theme` | string | `"forest"` | 主题名称 |
+| `file_picker_root` | string | `""` | 文件选择器根目录 |
+
+### [tui.custom_colors]
+
+自定义主题颜色，键值对格式：
+
+```toml
+[tui.custom_colors]
+primary = "#5C9E31"
+background = "#1d2021"
+surface = "#282828"
+text = "#ebdbb2"
+```
+
+### [backend]
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `mode` | string | `"relay"` | 后端模式 |
+
+### [identity]
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `identity_file` | string | - | 身份文件路径 |
+| `registration_id` | integer | 自动生成 | Signal 注册 ID |
+| `device_id` | integer | `1` | 设备 ID |
+
+### [trust]
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `default_policy` | string | `"tofu"` | 默认信任策略 |
+| `key_change_action` | string | `"warn"` | 密钥变更行为 |
+
+### [keyserver]
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `timeout` | integer | `5000` | 超时（毫秒） |
+| `min_opk_count` | integer | `10` | 最小 OPK 数量 |
+| `target_opk_count` | integer | `100` | 目标 OPK 数量 |
+
+### [rooms]
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `default_visibility` | string | `"private"` | 默认可见性 |
+| `announcement_channel` | string | `"__rooms__"` | 公告频道 |
+
+---
+
+## 配置优先级
+
+配置加载优先级（从高到低）：
+
+1. 命令行参数
+2. 环境变量
+3. 配置文件（`config.toml`）
+4. 默认值
+
+---
+
+## 配置文件位置
+
+| 平台 | 路径 |
+|------|------|
+| Linux | `~/.config/drlms/config.toml` |
+| macOS | `~/.config/drlms/config.toml` |
+| Windows | `%APPDATA%\DRLMS\config.toml` |
+
+可通过 `DRLMS_CONFIG_FILE` 环境变量覆盖。

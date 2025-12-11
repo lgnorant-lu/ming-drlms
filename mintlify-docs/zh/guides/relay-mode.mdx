@@ -1,0 +1,418 @@
+---
+title: "Relay 模式指南"
+description: "去中心化 Relay 模式完整使用指南"
+---
+
+## 概述
+
+Relay 模式是 DRLMS 的去中心化运行模式。在此模式下，消息通过 Relay 服务器网络传输，无需中心化的 MP2 服务器。
+
+---
+
+## 模式对比
+
+| 特性 | Relay 模式 | MP2 模式 |
+|------|------------|----------|
+| 架构 | 去中心化 | 中心化 |
+| 身份管理 | 本地自主 | 服务器管理 |
+| 房间创建 | 任意用户 | 服务器授权 |
+| 离线消息 | 支持 | 部分支持 |
+| 多设备 | 计划中 | 支持 |
+| 依赖 | Relay 服务器 | MP2 服务器 |
+
+---
+
+## 启用 Relay 模式
+
+### 环境变量配置
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    # 设置后端模式
+    export DRLMS_BACKEND_MODE=relay
+    
+    # 配置 Relay 服务器列表（逗号分隔）
+    export DRLMS_DEFAULT_RELAYS=http://relay1.example.com,http://relay2.example.com
+    
+    # 可选：配置信任策略
+    export DRLMS_TRUST_POLICY=tofu
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    # 设置后端模式
+    $env:DRLMS_BACKEND_MODE = "relay"
+    
+    # 配置 Relay 服务器列表（逗号分隔）
+    $env:DRLMS_DEFAULT_RELAYS = "http://relay1.example.com,http://relay2.example.com"
+    
+    # 可选：配置信任策略
+    $env:DRLMS_TRUST_POLICY = "tofu"
+    ```
+  </Tab>
+</Tabs>
+
+### 配置文件
+
+在 `config.toml` 中：
+
+```toml
+[backend]
+mode = "relay"
+
+[relay]
+default_relays = [
+    "http://relay1.example.com",
+    "http://relay2.example.com"
+]
+```
+
+---
+
+## 身份管理
+
+### 创建身份
+
+首次使用需要创建本地身份：
+
+```bash
+ming-drlms identity create --name "你的名字"
+```
+
+输出：
+
+```
+身份创建成功！
+
+公钥指纹:
+  7A3F 9B2C 4E1D 8F5A 2C7B 1D9E
+
+公钥 (hex):
+  0x1234567890abcdef...
+
+提示: 使用 'ming-drlms identity export' 备份身份
+```
+
+### 查看身份
+
+```bash
+ming-drlms identity show
+```
+
+### 备份身份
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    # 导出
+    ming-drlms identity export --output ~/backup/identity.json
+    
+    # 导入（在新设备上）
+    ming-drlms identity import ~/backup/identity.json
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    # 导出
+    ming-drlms identity export --output "$env:USERPROFILE\backup\identity.json"
+    
+    # 导入（在新设备上）
+    ming-drlms identity import "$env:USERPROFILE\backup\identity.json"
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## 密钥发布
+
+为了让其他用户能够向你发送加密消息，需要发布 PreKeyBundle：
+
+```bash
+ming-drlms chat publish-bundle
+```
+
+此命令将：
+1. 生成签名预密钥
+2. 生成一次性预密钥（OPK）
+3. 发布到配置的 Relay 服务器
+
+---
+
+## 发送消息
+
+### 使用 CLI
+
+```bash
+# 发送消息到指定用户
+ming-drlms chat send --to <接收者公钥> --message "你好！"
+
+# 发送到指定房间
+ming-drlms chat send --to <接收者公钥> --message "你好！" --room myroom
+```
+
+### 使用 TUI
+
+1. 启动 TUI：`ming-drlms tui`
+2. 在 Relay 启动界面点击"进入聊天"
+3. 选择联系人或房间
+4. 输入消息并发送
+
+---
+
+## 接收消息
+
+### 使用 CLI
+
+```bash
+# 列出可用房间
+ming-drlms chat recv
+
+# 接收指定房间的消息
+ming-drlms chat recv --room <room_id>
+
+# 限制消息数量
+ming-drlms chat recv --room <room_id> --limit 10
+
+# 从指定序号开始获取
+ming-drlms chat recv --room <room_id> --since 100
+```
+
+接收选项：
+
+| 选项 | 简写 | 默认值 | 说明 |
+|------|------|--------|------|
+| `--room` | `-r` | - | 房间 ID |
+| `--limit` | `-n` | `20` | 消息数量限制 |
+| `--since` | `-s` | - | 起始序号 |
+
+### 使用 TUI
+
+TUI 会自动轮询并显示新消息。
+
+---
+
+## 房间管理
+
+### 创建房间
+
+```bash
+# 创建私有房间
+ming-drlms relay-room create --name "我的房间"
+
+# 创建公开房间
+ming-drlms relay-room create --name "公共聊天" --visibility public
+
+# 带描述和指定 Relay
+ming-drlms relay-room create --name "开发聊天" --desc "开发讨论组" --relays http://relay1.example.com,http://relay2.example.com
+```
+
+创建选项：
+
+| 选项 | 简写 | 说明 |
+|------|------|------|
+| `--name` | `-n` | 房间名称 |
+| `--desc` | `-d` | 房间描述 |
+| `--visibility` | `-v` | 可见性: private, unlisted, public |
+| `--relays` | `-r` | Relay 列表（逗号分隔） |
+
+### 邀请他人
+
+```bash
+ming-drlms relay-room invite <房间ID>
+```
+
+生成的邀请链接格式：
+
+```
+drlms://room/<room_id>?key=<room_key>&relays=<relay_list>
+```
+
+### 加入房间
+
+```bash
+ming-drlms relay-room join "drlms://room/..."
+```
+
+### 列出房间
+
+```bash
+ming-drlms relay-room list
+```
+
+### 发现公开房间
+
+```bash
+ming-drlms relay-room discover --relays http://relay.example.com
+```
+
+<Note>
+`discover` 命令需要指定 `--relays` 参数。
+</Note>
+
+---
+
+## 信任管理
+
+### 信任策略
+
+| 策略 | 说明 |
+|------|------|
+| `tofu` | 首次信任（默认） |
+| `manual_only` | 仅手动验证 |
+| `anchored_only` | 仅外部锚定 |
+
+配置：
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    export DRLMS_TRUST_POLICY=tofu
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    $env:DRLMS_TRUST_POLICY = "tofu"
+    ```
+  </Tab>
+</Tabs>
+
+### 查看联系人
+
+```bash
+ming-drlms trust list
+```
+
+### 手动验证
+
+通过安全渠道获取对方指纹后：
+
+```bash
+ming-drlms trust verify <公钥> --fingerprint "7A3F 9B2C 4E1D..."
+```
+
+### 处理密钥变更
+
+当检测到联系人密钥变更时：
+
+```bash
+# 查看变更详情
+ming-drlms trust show <公钥>
+
+# 接受变更（确认后）
+ming-drlms trust accept <公钥>
+
+# 或屏蔽联系人
+ming-drlms trust block <公钥> --reason "可疑密钥变更"
+```
+
+---
+
+## 多 Relay 配置
+
+### 配置多个 Relay
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    export DRLMS_DEFAULT_RELAYS=http://relay1.example.com,http://relay2.example.com,http://relay3.example.com
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    $env:DRLMS_DEFAULT_RELAYS = "http://relay1.example.com,http://relay2.example.com,http://relay3.example.com"
+    ```
+  </Tab>
+</Tabs>
+
+### 健康检查
+
+系统会自动检查 Relay 健康状态，优先使用响应快的 Relay。
+
+### 故障转移
+
+当主 Relay 不可用时，系统自动切换到备用 Relay。
+
+---
+
+## 离线队列
+
+消息在网络不可用时会进入离线队列：
+
+- 自动持久化到本地
+- 网络恢复后自动重试
+- 指数退避策略
+- 最大重试次数限制
+
+---
+
+## 数据存储
+
+Relay 模式的本地数据存储：
+
+**Linux**:
+
+| 数据 | 路径 | 说明 |
+|------|------|------|
+| 身份密钥 | `~/.config/drlms/e2ee_keys.json` | 身份密钥对 |
+| 信任存储 | `~/.config/drlms/trust_store.json` | 信任关系 |
+| 房间 | `~/.config/drlms/rooms.json` | 房间配置 |
+| 消息缓存 | `~/.config/drlms/messages.db` | SQLite |
+| 离线队列 | `~/.config/drlms/offline_queue.db` | SQLite |
+
+**Windows**:
+
+| 数据 | 路径 |
+|------|------|
+| 配置文件 | `%APPDATA%\DRLMS\` |
+| 数据文件 | `%LOCALAPPDATA%\DRLMS\` |
+
+---
+
+## 故障排查
+
+### 无法连接 Relay
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    # 检查 Relay 健康
+    curl http://relay.example.com/health
+    
+    # 检查配置
+    echo $DRLMS_DEFAULT_RELAYS
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    # 检查 Relay 健康
+    Invoke-WebRequest http://relay.example.com/health
+    
+    # 检查配置
+    echo $env:DRLMS_DEFAULT_RELAYS
+    ```
+  </Tab>
+</Tabs>
+
+### 消息发送失败
+
+1. 确认接收者已发布 PreKeyBundle
+2. 检查网络连接
+3. 查看日志：`ming-drlms --log-level DEBUG chat send ...`
+
+### 身份丢失
+
+从备份恢复：
+
+```bash
+ming-drlms identity import ~/backup/identity.json
+```
+
+---
+
+## 相关文档
+
+- [MP2 模式](/zh/guides/mp2-mode) - 传统模式指南
+- [身份管理](/zh/guides/identity-management) - 身份详解
+- [信任验证](/zh/guides/trust-verification) - 信任模型详解
