@@ -83,12 +83,24 @@ ming-drlms --help
 
 ## 文档
 
-- **在线文档**: [docs](./docs/zh/)
-- **贡献指南**: [CONTRIBUTING.md](./CONTRIBUTING.md)
-- **安全策略**: [SECURITY.md](./SECURITY.md)
+### 在线文档
+
+- **[快速开始](./docs/zh/quickstart.mdx)** — 5 分钟上手
+- **[安装指南](./docs/zh/installation.mdx)** — 详细安装步骤
+- **[CLI 参考](./docs/zh/cli-reference/overview.mdx)** — 命令行完整手册
+- **[架构设计](./docs/zh/architecture/overview.mdx)** — 系统设计文档
+
+### 项目文档
+
+| 文档 | 说明 |
+|------|------|
+| [INSTALL.md](./INSTALL.md) | 安装指南 |
+| [CONTRIBUTING.md](./CONTRIBUTING.md) | 贡献指南 |
+| [SECURITY.md](./SECURITY.md) | 安全策略 |
+| [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) | 行为准则 |
 
 ---
 
 ## 许可
 
-MIT
+MIT © [lgnorant-lu](https://github.com/lgnorant-lu)
