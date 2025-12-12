@@ -23,8 +23,27 @@ from .merkle import MerkleForest
 # Simple logger; full configuration should follow docs/logging_spec.md from caller
 logger = logging.getLogger("ming_drlms.relay.server")
 
-DB_PATH = os.environ.get("DRLMS_DB_PATH", "drlms.db")
-FILES_DIR = os.environ.get("DRLMS_FILES_DIR", "relay_files")
+
+def _default_db_path() -> str:
+    """Get default DB path: DRLMS_DB_PATH > DRLMS_DATA_DIR/drlms.db > server_files/drlms.db"""
+    if p := os.environ.get("DRLMS_DB_PATH"):
+        return p
+    data_dir = os.environ.get("DRLMS_DATA_DIR", "server_files")
+    return os.path.join(data_dir, "drlms.db")
+
+
+def _default_files_dir() -> str:
+    """Get default files dir: DRLMS_FILES_DIR > DRLMS_DATA_DIR/relay_files > relay_files"""
+    if p := os.environ.get("DRLMS_FILES_DIR"):
+        return p
+    data_dir = os.environ.get("DRLMS_DATA_DIR")
+    if data_dir:
+        return os.path.join(data_dir, "relay_files")
+    return "relay_files"
+
+
+DB_PATH = _default_db_path()
+FILES_DIR = _default_files_dir()
 
 # Phase 17C: XEdDSA signing private key (32-byte hex, required)
 # HMAC signing has been removed in Phase 17C

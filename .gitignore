@@ -100,6 +100,9 @@ relay_files/
 *.db-shm
 *.db-wal
 
+# Runtime config files (keep examples)
+/drlms.yaml
+
 # Env files (keep .env.example as template)
 .env
 .env.local

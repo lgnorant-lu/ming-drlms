@@ -97,9 +97,19 @@ class RelayHTTPClient:
         return meta
 
 
+def _default_client_db_path() -> str:
+    """Get default client DB path: DRLMS_DB_PATH > ~/.drlms/events.db"""
+    if p := os.environ.get("DRLMS_DB_PATH"):
+        return p
+    config_dir = os.environ.get("MING_DRLMS_CONFIG_DIR")
+    if config_dir:
+        return os.path.join(config_dir, "events.db")
+    return os.path.join(os.path.expanduser("~"), ".drlms", "events.db")
+
+
 class LocalEventStore:
     def __init__(self, db_path: Optional[str] = None) -> None:
-        self._db_path = db_path or os.environ.get("DRLMS_DB_PATH", "drlms.db")
+        self._db_path = db_path or _default_client_db_path()
 
     def _conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._db_path)
