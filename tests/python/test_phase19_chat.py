@@ -5,6 +5,8 @@ Tests for relay-mode chat commands.
 
 from __future__ import annotations
 
+import pytest
+
 
 class TestChatCLI:
     """Tests for chat CLI command registration."""
@@ -70,14 +72,28 @@ class TestChatHelpers:
         with pytest.raises(typer.Exit):
             _get_identity()
 
-    def test_get_relay_config_no_relays(self, monkeypatch):
+    def test_get_relay_config_no_relays(self, monkeypatch, tmp_path):
         """Test _get_relay_config raises when no relays configured."""
-        import pytest
         import typer
         from ming_drlms.cli.chat import _get_relay_config
 
+        # Clear all relay-related env vars
         monkeypatch.setenv("DRLMS_BACKEND_MODE", "relay")
         monkeypatch.delenv("DRLMS_DEFAULT_RELAYS", raising=False)
+        monkeypatch.delenv("DRLMS_RELAY_BASE_URL", raising=False)
+        monkeypatch.delenv("DRLMS_RELAYS_CONFIG", raising=False)
+
+        # Set config dir to empty temp dir to avoid loading config.toml defaults
+        monkeypatch.setenv("DRLMS_CONFIG_DIR", str(tmp_path))
+
+        # Force UnifiedConfig reload
+        try:
+            # Reset global config to force reload with new env
+            import ming_drlms.core.unified_config as uc_module
+
+            uc_module._global_config = None
+        except (ImportError, AttributeError):
+            pass
 
         with pytest.raises(typer.Exit):
             _get_relay_config()

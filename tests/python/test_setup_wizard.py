@@ -63,8 +63,15 @@ user = "alice"
         )
 
         from ming_drlms.tui import setup_wizard
+        from unittest.mock import MagicMock
 
+        # Mock get_config_file to return our test config file
         monkeypatch.setattr(setup_wizard, "get_config_file", lambda: config_file)
+
+        # Mock get_config to return a config with user set
+        mock_cfg = MagicMock()
+        mock_cfg.identity.user = "alice"
+        monkeypatch.setattr(setup_wizard, "get_config", lambda reload=False: mock_cfg)
 
         assert needs_setup() is False
 

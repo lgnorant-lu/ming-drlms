@@ -379,39 +379,45 @@ class TestRCV01StorageReceipts:
         assert result.verified_count == 2
 
     def test_server_signs_receipt(self):
-        """Server _sign_receipt generates consistent signatures."""
+        """Server _sign_receipt generates consistent signatures (Phase 17C: XEdDSA only)."""
         # Import server module to test signing function
         from ming_drlms.relay.server import _sign_receipt
 
-        # Phase 17A: _sign_receipt now returns (hmac_sig, xeddsa_sig, pubkey)
+        # Phase 17C: _sign_receipt returns (signature, pubkey) or None
         result1 = _sign_receipt("event123", "room1", 42, 1733800000)
         result2 = _sign_receipt("event123", "room1", 42, 1733800000)
 
-        # Unpack results
-        hmac1, xeddsa1, pubkey1 = result1
-        hmac2, xeddsa2, pubkey2 = result2
+        # Results may be None if XEdDSA key not configured
+        if result1 is None:
+            assert result2 is None
+            return  # Skip further checks if not configured
 
-        # Same inputs = same HMAC signature
-        assert hmac1 == hmac2
-        assert len(hmac1) == 64  # HMAC-SHA256 hex
+        # Unpack results (signature, pubkey)
+        sig1, pubkey1 = result1
+        sig2, pubkey2 = result2
 
-        # XEdDSA signature may be None if key not configured
-        assert xeddsa1 == xeddsa2
+        # Same pubkey
         assert pubkey1 == pubkey2
 
+        # XEdDSA signatures are deterministic for same inputs
+        assert sig1 == sig2
+        assert len(sig1) == 128  # Ed25519 signature is 64 bytes = 128 hex chars
+
     def test_eventack_includes_signature_fields(self):
-        """EventAck model includes relay_id and relay_signature."""
+        """EventAck model includes relay_id and xeddsa_signature (Phase 17C)."""
         from ming_drlms.relay.server import EventAck
 
         ack = EventAck(
             server_seq=1,
             server_ts=1733800000,
             relay_id="relay-test",
-            relay_signature="a" * 64,
+            xeddsa_signature="a" * 128,  # 64 bytes = 128 hex chars
+            relay_pubkey="b" * 64,  # 32 bytes = 64 hex chars
         )
 
         assert ack.relay_id == "relay-test"
-        assert ack.relay_signature == "a" * 64
+        assert ack.xeddsa_signature == "a" * 128
+        assert ack.relay_pubkey == "b" * 64
 
 
 class TestOFFQ01BackgroundProcessing:
