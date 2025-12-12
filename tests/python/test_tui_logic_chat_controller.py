@@ -29,6 +29,100 @@ class _DummyClient:
         self.stopped = True
 
 
+def test_connect_calls_disconnect_before_new_connection(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: SysPath
+) -> None:
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    monkeypatch.setenv("MING_DRLMS_STATE_DIR", str(state_dir))
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    monkeypatch.setenv("MING_DRLMS_CONFIG_DIR", str(config_dir))
+    # Ensure tokens/e2ee files are not required
+    (state_dir / "tui_state.json").write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(logic_mod, "RobustThreadedRoomClient", _DummyClient)
+    monkeypatch.setattr(ChatController, "_load_backend", lambda self: "mp2")
+
+    orig_disconnect = ChatController.disconnect
+    disconnect_calls: list[None] = []
+
+    def spy_disconnect(self: ChatController) -> None:
+        disconnect_calls.append(None)
+        orig_disconnect(self)
+
+    monkeypatch.setattr(ChatController, "disconnect", spy_disconnect)
+
+    controller = ChatController(
+        username="alice",
+        host="127.0.0.1",
+        port=15035,
+        on_event=lambda ev: None,
+        on_error=lambda exc: None,
+        on_connection_state=lambda st: None,
+    )
+
+    controller.connect("Town Square")
+    first_client = controller.client
+    assert isinstance(first_client, _DummyClient)
+
+    controller.connect("Deep Woods")
+    second_client = controller.client
+    assert isinstance(second_client, _DummyClient)
+
+    assert len(disconnect_calls) == 2, "disconnect should run before each connect"
+    assert first_client is not second_client
+    assert first_client.stopped is True
+
+
+def test_connect_relay_mode_resets_components(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: SysPath
+) -> None:
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    monkeypatch.setenv("MING_DRLMS_STATE_DIR", str(state_dir))
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    monkeypatch.setenv("MING_DRLMS_CONFIG_DIR", str(config_dir))
+    (state_dir / "tui_state.json").write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(ChatController, "_load_backend", lambda self: "relay")
+
+    call_info: list[dict] = []
+
+    def fake_start_relay(self: ChatController, room_name: str) -> None:
+        call_info.append(
+            {
+                "room": room_name,
+                "relay_manager_before": self._relay_manager,
+                "health_checker_before": self._health_checker,
+            }
+        )
+        # Simulate initialization side effects
+        self._relay_manager = object()
+        self._health_checker = object()
+
+    monkeypatch.setattr(ChatController, "_start_relay", fake_start_relay)
+
+    controller = ChatController(
+        username="alice",
+        host="127.0.0.1",
+        port=15035,
+        on_event=lambda ev: None,
+        on_error=lambda exc: None,
+        on_connection_state=lambda st: None,
+    )
+
+    controller.connect("Town Square")
+    controller.connect("Deep Woods")
+
+    assert [c["room"] for c in call_info] == ["Town Square", "Deep Woods"]
+    # Relay components should be cleared before each new start
+    assert call_info[0]["relay_manager_before"] is None
+    assert call_info[1]["relay_manager_before"] is None
+    assert call_info[1]["health_checker_before"] is None
+
+
 def test_connect_uses_last_seen_and_e2ee_keys(
     monkeypatch: pytest.MonkeyPatch, tmp_path: SysPath
 ) -> None:

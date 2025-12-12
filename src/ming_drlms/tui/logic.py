@@ -173,8 +173,9 @@ class ChatController:
 
     def connect(self, room_name: str) -> None:
         """Connect to a room."""
-        if self.client:
-            self.client.stop()
+        # Always shut down any previous connection (MP2 or Relay) to avoid
+        # leaving background pollers/monitors running concurrently.
+        self.disconnect()
 
         state_dir = _state_dir()
         token_path = state_dir / "tokens.json"
