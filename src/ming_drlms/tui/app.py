@@ -18,7 +18,6 @@ from .log_screen import LogScreen
 from .settings_screen import SettingsScreen
 from .profiles_screen import ServerProfilesScreen
 from .relay_start_screen import RelayStartScreen
-from .relay_chat_screen import RelayChatPlaceholder
 from .setup_wizard import SetupWizardScreen, needs_setup
 from .logic import _state_dir
 import logging
@@ -152,15 +151,6 @@ class DRLMSApp(App):
             group="login",
         )
 
-    @on(RelayStartScreen.EnterRelay)
-    async def handle_enter_relay(self, message: RelayStartScreen.EnterRelay) -> None:
-        """Handle entering relay mode from RelayStartScreen."""
-        # For now, transition to a placeholder chat screen
-        # TODO: Create RelayRoomListScreen or adapt ChatScreen for relay mode
-        self.pop_screen()
-        # Create a relay-mode chat screen (placeholder - will be enhanced in 19C)
-        self.push_screen(RelayChatPlaceholder())
-
     async def _do_login(
         self, host: str, port: int, username: str, password: str
     ) -> None:
@@ -286,12 +276,41 @@ class DRLMSApp(App):
     @on(RelayStartScreen.EnterRelay)
     def on_enter_relay(self, message: RelayStartScreen.EnterRelay) -> None:
         """Handle entering relay mode from RelayStartScreen."""
-        # Switch to relay chat placeholder
-        self.switch_screen(RelayChatPlaceholder())
+        # Phase 22: Use same ChatScreen for both MP2 and Relay
+        # ChatController internally handles backend selection via DRLMS_BACKEND_MODE
+        config = BackendConfig.from_env()
+
+        # Get username from env or unified config
+        username = os.environ.get("DRLMS_USER", "")
+        if not username:
+            try:
+                from ..core.unified_config import get_config
+
+                cfg = get_config()
+                username = cfg.identity.user or "user"
+            except Exception:
+                username = "user"
+
+        # For Relay mode, extract host:port from URL for ChatScreen
+        # ChatScreen expects "host:port" format, not full URL
+        relay_url = (
+            config.default_relays[0] if config.default_relays else "127.0.0.1:15019"
+        )
+        try:
+            from urllib.parse import urlparse
+
+            parsed = urlparse(relay_url)
+            server = f"{parsed.hostname or '127.0.0.1'}:{parsed.port or 15019}"
+        except Exception:
+            server = "127.0.0.1:15019"
+
+        # Use the same ChatScreen - it will auto-detect relay backend
+        chat_screen = ChatScreen(username, server, test_sync=self.test_sync_hook)
+        self.switch_screen(chat_screen)
 
     def switch_to_chat(self, username: str, server: str) -> None:
         """Switch to chat screen after successful login."""
-        # Remove login screen and show chat
+        # MP2 mode: Use original ChatScreen (full featured)
         chat_screen = ChatScreen(username, server, test_sync=self.test_sync_hook)
         self.switch_screen(chat_screen)
 
