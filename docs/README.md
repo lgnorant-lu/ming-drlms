@@ -13,7 +13,7 @@ npm i -g mintlify
 ### 启动开发服务器
 
 ```bash
-cd mintlify-docs
+cd docs
 mintlify dev
 ```
 
@@ -22,7 +22,7 @@ mintlify dev
 ## 目录结构
 
 ```
-mintlify-docs/
+docs/
 ├── docs.json           # Mintlify 配置文件
 ├── zh/                 # 中文文档（默认语言）
 │   ├── index.mdx       # 首页

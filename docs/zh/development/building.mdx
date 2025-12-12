@@ -105,13 +105,76 @@ set VCPKG_ROOT=D:\vcpkg
 
 ### 安装依赖
 
+#### 方式一：Manifest 模式（推荐）
+
+项目根目录已包含 `vcpkg.json`，CMake 会自动安装依赖：
+
+```json
+{
+  "name": "ming-drlms",
+  "version-string": "1.0.0",
+  "dependencies": [
+    { "name": "openssl", "features": ["tools"] },
+    "sqlite3",
+    "argon2",
+    "protobuf-c"
+  ]
+}
+```
+
+配置时指定 toolchain 即可：
+
 ```bash
-vcpkg install sqlite3 openssl argon2 protobuf-c
+cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake
+```
+
+#### 方式二：传统模式
+
+手动安装依赖：
+
+```bash
+vcpkg install sqlite3 openssl argon2 protobuf-c --triplet x64-windows  # Windows
+vcpkg install sqlite3 openssl argon2 protobuf-c                        # Linux
 ```
 
 <Note>
 使用 `protobuf-c` 而非 `protobuf`（C 语言版本）。
 </Note>
+
+### OpenSSL 配置（CFFI 构建必需）
+
+Python CFFI 构建 Signal Bridge 时需要 OpenSSL 头文件：
+
+<Tabs>
+  <Tab title="Windows">
+    ```powershell
+    # vcpkg 安装后设置
+    $env:OPENSSL_ROOT_DIR = "$PWD\vcpkg_installed\x64-windows"
+    
+    # 或全局 vcpkg
+    $env:OPENSSL_ROOT_DIR = "C:\vcpkg\installed\x64-windows"
+    
+    # 验证
+    Test-Path "$env:OPENSSL_ROOT_DIR\include\openssl\evp.h"
+    ```
+  </Tab>
+  <Tab title="Linux/WSL">
+    ```bash
+    # vcpkg 安装后设置
+    export OPENSSL_ROOT_DIR=$PWD/vcpkg_installed/x64-linux
+    
+    # 或系统安装
+    export OPENSSL_ROOT_DIR=/usr
+    
+    # 验证
+    ls $OPENSSL_ROOT_DIR/include/openssl/evp.h
+    ```
+  </Tab>
+</Tabs>
+
+<Warning>
+若 `OPENSSL_ROOT_DIR` 未正确设置，CFFI 构建将失败并报错 `openssl/evp.h: No such file`。
+</Warning>
 
 ### 构建
 
@@ -123,7 +186,7 @@ vcpkg install sqlite3 openssl argon2 protobuf-c
     make -j$(nproc)
     ```
   </Tab>
-  <Tab title="Windows">
+  <Tab title="Windows (VS 2022)">
     ```powershell
     mkdir build
     cd build
@@ -131,20 +194,50 @@ vcpkg install sqlite3 openssl argon2 protobuf-c
     cmake --build . --config Release
     ```
   </Tab>
+  <Tab title="Windows (VS 2026 + Ninja)">
+    在 **x64 Native Tools Command Prompt for VS 2026** 中执行：
+
+    ```cmd
+    cd path\to\DRLMS
+    rmdir /S /Q build_win_ninja_x64 2>nul
+    mkdir build_win_ninja_x64
+    cd build_win_ninja_x64
+
+    cmake -G "Ninja" ^
+      -DCMAKE_BUILD_TYPE=RelWithDebInfo ^
+      -DOPENSSL_ROOT_DIR=%CD%\..\vcpkg_installed\x64-windows ^
+      -DPROTOBUF_C_USE_PREGENSETS=OFF ^
+      ..
+    cmake --build . --target log_collector_server drlms_signal_bridge
+    ```
+
+    <Note>
+    VS 2026 需使用 Ninja 生成器，直接使用 VS 生成器可能无法正确识别。
+    </Note>
+  </Tab>
 </Tabs>
 
 ### 输出
 
-```
-build/
-├── log_collector_server         # 主服务器
-├── libipc.so / libipc.a         # IPC 共享/静态库
-└── libdrlms_signal_bridge.so    # Signal Protocol + XEdDSA 桥接库
-```
-
-<Note>
-Windows 下库文件名为 `ipc.dll` / `ipc.lib` 和 `drlms_signal_bridge.dll`。
-</Note>
+<Tabs>
+  <Tab title="Linux/macOS">
+    ```
+    build/
+    ├── log_collector_server         # 主服务器
+    ├── libipc.so / libipc.a         # IPC 共享/静态库
+    └── libdrlms_signal_bridge.so    # Signal Protocol + XEdDSA 桥接库
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```
+    build/                           # VS 2022 输出
+    build_win_ninja_x64/             # VS 2026 + Ninja 输出
+    ├── log_collector_server.exe     # 主服务器
+    ├── ipc.dll / ipc.lib            # IPC 动态/静态库
+    └── drlms_signal_bridge.dll      # Signal Protocol + XEdDSA 桥接库
+    ```
+  </Tab>
+</Tabs>
 
 ---
 
@@ -263,6 +356,19 @@ CMD ["python", "-m", "ming_drlms.relay.server"]
 
 ## 故障排查
 
+### 常见问题速查表
+
+| 问题 | 可能原因 | 解决方案 |
+|------|----------|----------|
+| CMake 找不到编译器 | 未在 VS Native Tools 命令行中运行 | 打开 `x64 Native Tools Command Prompt` |
+| 链接阶段缺少 `ws2_32.lib` | 未链接 Winsock | CMakeLists 添加 `ws2_32` |
+| Argon2 构建失败 | vcpkg 版本过旧 | `git pull && bootstrap-vcpkg.bat` |
+| OpenSSL 路径冲突 | 多个 OpenSSL 版本 | 清理 build 目录，确保 PATH 正确 |
+| CFFI `openssl/evp.h` 缺失 | `OPENSSL_ROOT_DIR` 未设置 | 设置环境变量指向 OpenSSL 目录 |
+| vcpkg manifest 失败 | `vcpkg.json` 格式错误 | 检查 JSON 格式，更新 vcpkg |
+| VS 2026 MSBuild 失败 | 生成器兼容性问题 | 使用 Ninja：`-G "Ninja"` |
+| `signal-protocol-c.lib` 找不到 | triplet 不匹配 | 确认 `x64-windows` triplet |
+
 ### CMake 找不到依赖
 
 确保 vcpkg 工具链正确配置：
@@ -306,6 +412,23 @@ CMD ["python", "-m", "ming_drlms.relay.server"]
 python -c "from ming_drlms.core.pysignal._ffi import ffi, lib; print(lib)"
 ```
 
+### Windows 特有问题
+
+#### VS 2026 构建失败
+
+VS 2026 的 MSBuild 生成器可能存在兼容性问题，推荐使用 Ninja：
+
+```cmd
+:: 在 x64 Native Tools Command Prompt for VS 2026 中
+cmake -G "Ninja" -DCMAKE_BUILD_TYPE=RelWithDebInfo ..
+```
+
+#### 多工具链冲突
+
+<Warning>
+同一终端会话内不要混用 MSVC 与 MinGW-w64 工具链。本项目统一使用 MSVC。
+</Warning>
+
 ---
 
 ## 日志配置
@@ -331,11 +454,15 @@ python -c "from ming_drlms.core.pysignal._ffi import ffi, lib; print(lib)"
 
 ## 详细文档
 
-更多构建详情参见项目内文档：
+<Note>
+项目内 `docs/` 目录为历史归档，新内容已整合到本站点。
+</Note>
 
-- `docs/Environment.md` - Windows/WSL 双环境规范
-- `docs/WINDOWS_SETUP.md` - Windows 构建详细指南
-- `docs/logging_spec.md` - 日志规范与脱敏原则
+历史参考文档：
+
+- `docs/Environment.md` - Windows/WSL 双环境规范（归档）
+- `docs/WINDOWS_SETUP.md` - Windows 构建详细指南（归档）
+- `docs/logging_spec.md` - 日志规范与脱敏原则（归档）
 
 ---
 

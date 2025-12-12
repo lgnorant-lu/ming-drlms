@@ -83,9 +83,9 @@ ming-drlms --help
 
 ## 文档
 
-- **在线文档**: [mintlify-docs](./mintlify-docs/zh/)
-- **贡献指南**: [CONTRIBUTING.md](./docs/CONTRIBUTING.md)
-- **安全策略**: [SECURITY.md](./docs/SECURITY.md)
+- **在线文档**: [docs](./docs/zh/)
+- **贡献指南**: [CONTRIBUTING.md](./CONTRIBUTING.md)
+- **安全策略**: [SECURITY.md](./SECURITY.md)
 
 ---
 

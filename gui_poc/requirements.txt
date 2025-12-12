@@ -1,3 +1,0 @@
-# gui_poc/requirements.txt
-flet>=0.28.3, <0.29.0
-
