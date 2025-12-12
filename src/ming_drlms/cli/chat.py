@@ -128,11 +128,42 @@ def send_message(
                 identity_key=identity_key,
                 registration_id=identity.registration_id,
                 device_id=identity.device_id,
+                signed_pre_key=None,
+                pre_keys={},
+                remote_identities={},
+                sender_keys={},
             )
 
         # Initialize store with local identity
-        store.set_local_identity(state.identity_key.private_key)
-        store.set_registration_id(state.registration_id)
+        id_pub = state.identity_key.public_key
+        if len(id_pub) == 32:
+            id_pub = b"\x05" + id_pub
+
+        store.set_identity(
+            public_key=id_pub,
+            private_key=state.identity_key.private_key,
+            registration_id=state.registration_id,
+            device_id=state.device_id,
+        )
+
+        # Debug: Log received bundle details
+        from ..log import get_logger
+
+        logger = get_logger("cli.chat")
+        logger.debug("Received PreKeyBundle from recipient")
+        logger.debug(
+            f"  Identity Key: len={len(bundle.identity_key)} hex={bundle.identity_key.hex()[:64]}..."
+        )
+        logger.debug(
+            f"  Signed PreKey: len={len(bundle.signed_prekey)} hex={bundle.signed_prekey.hex()}"
+        )
+        logger.debug(
+            f"  Signature: len={len(bundle.prekey_signature)} hex={bundle.prekey_signature.hex()[:64]}..."
+        )
+        if bundle.one_time_prekeys:
+            logger.debug(
+                f"  OPK[0]: len={len(bundle.one_time_prekeys[0].public_key)} hex={bundle.one_time_prekeys[0].public_key.hex()}"
+            )
 
         # Process recipient's bundle
         store.process_prekey_bundle(
@@ -361,21 +392,62 @@ def publish_bundle():
     # Generate signed prekey
     print("[dim]正在生成密钥包...[/dim]")
     try:
+        from ..core.pysignal.store import SignalStore
+        from ..core.pysignal.signature import sign_bytes_with_store
+
         ctx = create_signal_context()
+        store = SignalStore(ctx)
+        store.set_identity(
+            public_key=identity.public_key,
+            private_key=identity.private_key,
+            registration_id=identity.registration_id,
+            device_id=identity.device_id,
+        )
 
         # Generate signed prekey
-        signed_prekey_private = secrets.token_bytes(32)
+        signed_prekey_private_raw = secrets.token_bytes(32)
+        # Apply X25519 bit clamping
+        signed_prekey_private = bytearray(signed_prekey_private_raw)
+        signed_prekey_private[0] &= 248
+        signed_prekey_private[31] &= 127
+        signed_prekey_private[31] |= 64
+        signed_prekey_private = bytes(signed_prekey_private)
+
         from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 
         priv = X25519PrivateKey.from_private_bytes(signed_prekey_private)
         signed_prekey = priv.public_key().public_bytes_raw()
 
-        # Generate signature (simplified - should use proper XEdDSA)
-        import hashlib
+        # Generate proper XEdDSA signature
+        # CRITICAL: Signal Protocol verifies signature against SERIALIZED public key
+        # ec_public_key_serialize adds a 0x05 type byte prefix (33 bytes total)
+        # See session_builder.c L232: ec_public_key_serialize(&serialized_signed_pre_key, signed_pre_key)
+        signed_prekey_serialized = b"\x05" + signed_prekey
+        prekey_signature = sign_bytes_with_store(store, signed_prekey_serialized)
 
-        sig_data = identity.private_key + signed_prekey
-        prekey_signature = hashlib.sha512(sig_data).digest()
+        print(f"[dim]Identity Key len: {len(identity.public_key)}[/dim]")
+        print(f"[dim]Signed PreKey len: {len(signed_prekey)}[/dim]")
+        print(f"[dim]Signature len: {len(prekey_signature)}[/dim]")
 
+        # Debug: Log published bundle details
+        from ..log import get_logger
+
+        logger = get_logger("cli.chat")
+        logger.debug("Publishing PreKeyBundle")
+        logger.debug(
+            f"  Identity Key: len={len(identity.public_key)} hex={identity.public_key.hex()[:64]}..."
+        )
+        logger.debug(
+            f"  Signed PreKey (raw): len={len(signed_prekey)} hex={signed_prekey.hex()}"
+        )
+        logger.debug(
+            f"  Signed PreKey (serialized): len={len(signed_prekey_serialized)} hex={signed_prekey_serialized.hex()}"
+        )
+        logger.debug(
+            f"  Signature: len={len(prekey_signature)} hex={prekey_signature.hex()[:64]}..."
+        )
+
+        store.close()
         ctx.close()
     except Exception as e:
         print(f"[red]密钥生成失败: {e}[/red]")
@@ -386,9 +458,19 @@ def publish_bundle():
     opks = opk_manager.generate_opks(10)
 
     # Create bundle
+    # Ensure identity key is 33 bytes
+    id_pub = identity.public_key
+    if len(id_pub) == 32:
+        id_pub = b"\x05" + id_pub
+
+    # CRITICAL: Bundle must store SERIALIZED signed_prekey (33 bytes with 0x05 prefix)
+    # Signal Protocol's process_prekey_bundle will serialize it again, so we need
+    # to store it in the form that matches what ec_public_key_serialize produces
+    signed_prekey_for_bundle = signed_prekey_serialized  # Already 33 bytes
+
     bundle = PreKeyBundle(
-        identity_key=identity.public_key,
-        signed_prekey=signed_prekey,
+        identity_key=id_pub,
+        signed_prekey=signed_prekey_for_bundle,
         signed_prekey_id=1,
         prekey_signature=prekey_signature,
         one_time_prekeys=opks,

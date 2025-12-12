@@ -239,7 +239,18 @@ class LocalIdentityManager:
         """
 
         # Generate random private key
-        private_key = secrets.token_bytes(32)
+        private_key_raw = secrets.token_bytes(32)
+
+        # CRITICAL FIX: Apply X25519 bit clamping to private key
+        # Signal Protocol C library automatically clamps keys during signing,
+        # so we must store the clamped version to ensure consistency.
+        # Without this, the public key derived here won't match the public key
+        # that Signal C derives during signature verification, causing INVALID_KEY errors.
+        private_clamped = bytearray(private_key_raw)
+        private_clamped[0] &= 248  # Clear lowest 3 bits
+        private_clamped[31] &= 127  # Clear highest bit
+        private_clamped[31] |= 64  # Set second-highest bit
+        private_key = bytes(private_clamped)
 
         # Derive public key using Signal protocol's curve implementation
         try:

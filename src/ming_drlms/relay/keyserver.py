@@ -253,8 +253,11 @@ class BundleCache:
                 return Path(base) / "ming-drlms" / BundleCache.DEFAULT_CACHE_FILE
         return Path.home() / ".config" / "ming-drlms" / BundleCache.DEFAULT_CACHE_FILE
 
-    def _fingerprint(self, identity_key: bytes) -> str:
+    def _fingerprint(self, identity_key: bytes | str) -> str:
         """Compute fingerprint for cache key."""
+        # Handle string input (hex-encoded public key)
+        if isinstance(identity_key, str):
+            identity_key = bytes.fromhex(identity_key)
         if len(identity_key) == 33:
             identity_key = identity_key[1:]
         return hashlib.sha256(identity_key).hexdigest()[:16]
@@ -391,8 +394,13 @@ class OPKManager:
             self._next_id += 1
 
             # Generate random key (32 bytes for X25519)
-            # In production, use proper X25519 key generation
-            private_key = secrets.token_bytes(32)
+            # Apply X25519 bit clamping for consistency with Signal Protocol
+            private_key_raw = secrets.token_bytes(32)
+            private_clamped = bytearray(private_key_raw)
+            private_clamped[0] &= 248
+            private_clamped[31] &= 127
+            private_clamped[31] |= 64
+            private_key = bytes(private_clamped)
 
             # Derive public key
             try:
@@ -401,10 +409,12 @@ class OPKManager:
                 )
 
                 priv = X25519PrivateKey.from_private_bytes(private_key)
-                public_key = priv.public_key().public_bytes_raw()
+                public_key_raw = priv.public_key().public_bytes_raw()
+                # Add 0x05 type prefix for Signal Protocol compatibility
+                public_key = b"\x05" + public_key_raw
             except ImportError:
                 # Fallback: just use random bytes (not secure, for testing only)
-                public_key = secrets.token_bytes(32)
+                public_key = b"\x05" + secrets.token_bytes(32)
 
             opks.append(OneTimePreKey(id=opk_id, public_key=public_key))
 
@@ -566,9 +576,15 @@ class KeyserverClient:
                         continue
 
                     data = json.loads(resp.read().decode())
-                    events = data.get("events", [])
+                    if isinstance(data, list):
+                        events = data
+                    else:
+                        events = data.get("events", [])
 
-                    # Find matching bundle
+                    # Find matching bundle - collect all valid bundles and return the newest
+                    best_bundle = None
+                    best_timestamp = 0
+
                     for event_data in events:
                         ciphertext = event_data.get("ciphertext", "")
                         try:
@@ -595,18 +611,24 @@ class KeyserverClient:
                                     )
                                     continue
 
-                            # Check expiration
+                            # Check expiration and track the newest bundle
                             if event.payload and not event.payload.is_expired:
-                                self.cache.put(event.payload)
-                                logger.info(
-                                    "Fetched bundle from %s for %s",
-                                    relay_url,
-                                    event.payload.fingerprint[:16],
-                                )
-                                return event.payload
+                                if event.timestamp > best_timestamp:
+                                    best_timestamp = event.timestamp
+                                    best_bundle = event.payload
 
                         except (json.JSONDecodeError, KeyError):
                             continue
+
+                    # Return the newest bundle found
+                    if best_bundle:
+                        self.cache.put(best_bundle)
+                        logger.info(
+                            "Fetched bundle from %s for %s",
+                            relay_url,
+                            best_bundle.fingerprint[:16],
+                        )
+                        return best_bundle
 
             except Exception as e:
                 logger.warning("Failed to query %s: %s", relay_url, e)
