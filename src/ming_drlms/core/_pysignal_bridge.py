@@ -1158,23 +1158,46 @@ def _detect_openssl_prefix(
 
 
 def _ensure_win_distutils() -> None:
+    """Ensure distutils compatibility on Windows for CFFI compilation.
+
+    Python 3.12+ removed distutils from stdlib. This function provides
+    a compatibility shim using setuptools' bundled distutils.
+    """
     if os.name != "nt":
         return
-    try:  # pragma: no cover - Windows 专用兼容
-        import distutils.msvc9compiler  # type: ignore # noqa: F401
-    except ModuleNotFoundError:
-        try:
-            from distutils import _msvccompiler  # type: ignore
-        except Exception as exc:  # pragma: no cover
-            raise SignalBridgeError("缺少 distutils 支持，无法编译 C 扩展") from exc
-        import types
 
-        module = types.ModuleType("distutils.msvc9compiler")
-        module.MSVCCompiler = _msvccompiler.MSVCCompiler  # type: ignore[attr-defined]
-        gen_lib = getattr(_msvccompiler, "gen_lib_options", None)
-        if gen_lib is not None:
-            module.gen_lib_options = gen_lib  # type: ignore[attr-defined]
-        sys.modules["distutils.msvc9compiler"] = module
+    # Python 3.12+ 需要 setuptools 提供的 distutils shim
+    try:  # pragma: no cover - Windows 专用兼容
+        # 先尝试导入 setuptools，它会注入 distutils 兼容层
+        import setuptools  # type: ignore # noqa: F401
+
+        # 现在尝试导入 distutils.msvc9compiler
+        try:
+            import distutils.msvc9compiler  # type: ignore # noqa: F401
+        except ModuleNotFoundError:
+            # setuptools 可能不提供 msvc9compiler，尝试 _msvccompiler
+            try:
+                from distutils import _msvccompiler  # type: ignore
+
+                import types
+
+                module = types.ModuleType("distutils.msvc9compiler")
+                module.MSVCCompiler = _msvccompiler.MSVCCompiler  # type: ignore[attr-defined]
+                gen_lib = getattr(_msvccompiler, "gen_lib_options", None)
+                if gen_lib is not None:
+                    module.gen_lib_options = gen_lib  # type: ignore[attr-defined]
+                sys.modules["distutils.msvc9compiler"] = module
+            except Exception:
+                # 如果都失败了，CFFI 可能仍能工作（使用预编译的 .so/.dll）
+                logger.debug(
+                    "distutils shim not available, CFFI may use prebuilt binaries"
+                )
+    except ImportError:
+        # setuptools 未安装，尝试旧方法
+        try:
+            import distutils.msvc9compiler  # type: ignore # noqa: F401
+        except ModuleNotFoundError:
+            logger.debug("distutils not available, CFFI may use prebuilt binaries")
 
 
 __all__ = ["load_bridge"]
