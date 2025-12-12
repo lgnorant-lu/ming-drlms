@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import sys
+import os
 import subprocess
+import sys
 
 import typer
 
@@ -78,9 +79,9 @@ def demo_quickstart():
                     "-p",
                     "15035",
                     "-u",
-                    "alice",
+                    os.environ.get("DRLMS_USER", "demo"),
                     "-P",
-                    "password",
+                    os.environ.get("DRLMS_PASSWORD", "demo"),
                 ],
                 check=False,
             )
@@ -99,9 +100,9 @@ def demo_quickstart():
                         "-p",
                         "15035",
                         "-u",
-                        "alice",
+                        os.environ.get("DRLMS_USER", "demo"),
                         "-P",
-                        "password",
+                        os.environ.get("DRLMS_PASSWORD", "demo"),
                     ],
                     check=False,
                 )
@@ -120,9 +121,9 @@ def demo_quickstart():
                         "-p",
                         "15035",
                         "-u",
-                        "alice",
+                        os.environ.get("DRLMS_USER", "demo"),
                         "-P",
-                        "password",
+                        os.environ.get("DRLMS_PASSWORD", "demo"),
                     ],
                     check=False,
                 )

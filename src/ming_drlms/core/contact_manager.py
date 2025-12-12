@@ -103,7 +103,7 @@ class ContactManager:
 
     Example usage:
         >>> manager = ContactManager()
-        >>> manager.add_contact(pubkey_bytes, alias="Alice", trust=TrustLevel.VERIFIED)
+        >>> manager.add_contact(pubkey_bytes, alias="User1", trust=TrustLevel.VERIFIED)
         >>> contact = manager.get_contact(pubkey_bytes)
         >>> contacts = manager.get_contacts()
     """

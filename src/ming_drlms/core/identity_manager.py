@@ -78,7 +78,7 @@ class IdentityManager:
     ECDH key exchange (E2EE) and XEdDSA signatures (Relay events).
 
     Example usage:
-        >>> manager = IdentityManager(username="alice")
+        >>> manager = IdentityManager(username="myuser")
         >>> if manager.has_identity():
         ...     signature = manager.sign(b"hello world")
         ...     pubkey = manager.get_pubkey()

@@ -58,7 +58,7 @@ class RobustThreadedRoomClient:
         client = RobustThreadedRoomClient(
             host="127.0.0.1",
             port=15035,
-            username="alice",
+            username="myuser",
             room="Town Square",
         )
         client.start(

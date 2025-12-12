@@ -132,7 +132,7 @@ export MING_DRLMS_CONFIG_DIR=$(pwd)/.drlms
 | `DRLMS_LOG_LEVEL` | 日志级别 | `DEBUG` |
 | `DRLMS_UPDATE_CHECK` | 更新检查 | `0`（测试时关闭） |
 | `MING_DRLMS_CONFIG_DIR` | 配置目录 | `$(pwd)/.drlms` |
-| `DRLMS_USER` | 当前用户名 | `alice` |
+| `DRLMS_USER` | 当前用户名 | `myuser` |
 
 ---
 
@@ -266,7 +266,7 @@ pytest tests/python/test_tui_logic_chat_controller.py -v
 $env:DRLMS_BACKEND = "relay"
 $env:DRLMS_RELAY_BASE_URL = "http://127.0.0.1:15019"
 $env:DRLMS_RELAY_ENFORCE_SIGNED = "1"
-$env:DRLMS_USER = "alice"
+$env:DRLMS_USER = "myuser"
 $env:DRLMS_LOG_LEVEL = "DEBUG"
 
 # 2. 启动 Relay 服务器（另一终端）
@@ -297,7 +297,7 @@ python -m ming_drlms.main tui
 
 # 终端 4: TUI (Relay 模式)
 $env:DRLMS_BACKEND = "relay"
-$env:DRLMS_USER = "bob"
+$env:DRLMS_USER = "peer"
 python -m ming_drlms.main tui
 ```
 
@@ -339,12 +339,12 @@ python scripts/start_relay_and_tui.py
 
 ```bash
 # 1. 初始化 E2EE 密钥
-python -m ming_drlms.main e2ee init --user alice
-python -m ming_drlms.main e2ee init --user bob
+python -m ming_drlms.main e2ee init --user myuser
+python -m ming_drlms.main e2ee init --user peer
 
 # 2. 交换密钥包
-python -m ming_drlms.main e2ee export-bundle --user alice > alice_bundle.json
-python -m ming_drlms.main e2ee export-bundle --user bob > bob_bundle.json
+python -m ming_drlms.main e2ee export-bundle --user myuser > alice_bundle.json
+python -m ming_drlms.main e2ee export-bundle --user peer > bob_bundle.json
 
 # 3. 运行 E2E 测试
 pytest tests/python/test_e2e_relay_signal_encrypt_sync.py -v

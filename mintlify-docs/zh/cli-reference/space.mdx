@@ -42,7 +42,7 @@ ming-drlms space join -r <房间名> [选项]
 | `--room` | `-r` | - | 房间名（必需） |
 | `--host` | `-H` | `127.0.0.1` | 服务器地址 |
 | `--port` | `-p` | `15035` | 服务器端口 |
-| `--user` | `-u` | `alice` | 用户名 |
+| `--user` | `-u` | `myuser` | 用户名 |
 | `--password` | `-P` | `password` | 密码 |
 | `--since-id` | `-s` | `-1` | 从指定 event_id 开始（-1 使用保存状态） |
 | `--save-dir` | `-o` | - | 保存事件的目录 |
@@ -52,8 +52,8 @@ ming-drlms space join -r <房间名> [选项]
 ### 示例
 
 ```bash
-ming-drlms space join -r general -u alice -P password
-ming-drlms space join -r general -u alice -P password --reconnect
+ming-drlms space join -r general -u myuser -P password
+ming-drlms space join -r general -u myuser -P password --reconnect
 ```
 
 ---
@@ -75,7 +75,7 @@ ming-drlms space leave -r <房间名> [选项]
 | `--room` | `-r` | - | 房间名（必需） |
 | `--host` | `-H` | `127.0.0.1` | 服务器地址 |
 | `--port` | `-p` | `15035` | 服务器端口 |
-| `--user` | `-u` | `alice` | 用户名 |
+| `--user` | `-u` | `myuser` | 用户名 |
 | `--password` | `-P` | `password` | 密码 |
 
 ---
@@ -99,7 +99,7 @@ ming-drlms space history -r <房间名> [选项]
 | `--since-id` | `-s` | `0` | 从指定 event_id 开始 |
 | `--host` | `-H` | `127.0.0.1` | 服务器地址 |
 | `--port` | `-p` | `15035` | 服务器端口 |
-| `--user` | `-u` | `alice` | 用户名 |
+| `--user` | `-u` | `myuser` | 用户名 |
 | `--password` | `-P` | `password` | 密码 |
 
 ---
@@ -123,17 +123,17 @@ ming-drlms space send -r <房间名> [选项]
 | `--file` | `-f` | - | 文件路径（与 --text 互斥） |
 | `--host` | `-H` | `127.0.0.1` | 服务器地址 |
 | `--port` | `-p` | `15035` | 服务器端口 |
-| `--user` | `-u` | `alice` | 用户名 |
+| `--user` | `-u` | `myuser` | 用户名 |
 | `--password` | `-P` | `password` | 密码 |
 
 ### 示例
 
 ```bash
 # 发送文本
-ming-drlms space send -r general -t "Hello!" -u alice -P password
+ming-drlms space send -r general -t "Hello!" -u myuser -P password
 
 # 发送文件
-ming-drlms space send -r general -f /path/to/file.pdf -u alice -P password
+ming-drlms space send -r general -f /path/to/file.pdf -u myuser -P password
 ```
 
 ---
@@ -155,7 +155,7 @@ ming-drlms space chat --room <房间名> [选项]
 | `--room` | - | 房间名（必需） |
 | `--host` | `127.0.0.1` | 服务器地址 |
 | `--port` | `15035` | 服务器端口 |
-| `--user` | `alice` | 用户名 |
+| `--user` | `myuser` | 用户名 |
 | `--password` | `password` | 密码 |
 | `--since-id` | `-1` | 起始 event_id |
 

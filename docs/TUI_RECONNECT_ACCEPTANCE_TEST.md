@@ -4,7 +4,7 @@
 - **测试时间**: 2025-01-21 10:42
 - **服务器**: log_collector_server (port 15035)
 - **客户端**: ming-drlms TUI (RobustThreadedRoomClient)
-- **测试用户**: alice, bob
+- **测试用户**: myuser, peer
 
 ---
 
@@ -102,7 +102,7 @@ def add_message(self, text: str, message_type: str = "normal") -> None:
 **操作步骤**:
 1. 启动服务器: `./scripts/run_server.sh`
 2. 启动 TUI: `ming-drlms tui`
-3. 使用 alice 登录 (服务器: 127.0.0.1:15035)
+3. 使用 myuser 登录 (服务器: 127.0.0.1:15035)
 
 **预期行为**:
 - TUI 顶部显示 "○ Connecting..."
@@ -132,7 +132,7 @@ def add_message(self, text: str, message_type: str = "normal") -> None:
 
 **实际测试日志** (10:42 测试):
 ```
-[10:42] bob: 测试重连
+[10:42] peer: 测试重连
 ~ Connection error: connection closed while receiving frame payload ~
 ~ Failed to send: Not connected to room ~
 ~ Failed to send: Not connected to room ~
@@ -154,7 +154,7 @@ TUI 之前使用的是 `ThreadedRoomClient` (无重连)，而不是 `RobustThrea
 ### 测试 3: 重测验证 (2025-01-21 11:17)
 
 **操作步骤**:
-1. 用 bob 登录进入 Town Square
+1. 用 peer 登录进入 Town Square
 2. 发送消息: "不知风雨"
 3. 运行 `pkill -f log_collector_server`
 4. 观察 TUI 状态和错误消息

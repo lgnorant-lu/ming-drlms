@@ -60,8 +60,8 @@ def space_join(
     room: str = typer.Option(..., "--room", "-r"),
     host: str = typer.Option("127.0.0.1", "--host", "-H"),
     port: int = typer.Option(15035, "--port", "-p"),
-    user: str = typer.Option("alice", "--user", "-u"),
-    password: str = typer.Option("password", "--password", "-P"),
+    user: str = typer.Option(None, "--user", "-u", envvar="DRLMS_USER"),
+    password: str = typer.Option(None, "--password", "-P", envvar="DRLMS_PASSWORD"),
     since_id: int = typer.Option(
         -1,
         "--since-id",
@@ -161,8 +161,8 @@ def space_leave(
     room: str = typer.Option(..., "--room", "-r"),
     host: str = typer.Option("127.0.0.1", "--host", "-H"),
     port: int = typer.Option(15035, "--port", "-p"),
-    user: str = typer.Option("alice", "--user", "-u"),
-    password: str = typer.Option("password", "--password", "-P"),
+    user: str = typer.Option(None, "--user", "-u", envvar="DRLMS_USER"),
+    password: str = typer.Option(None, "--password", "-P", envvar="DRLMS_PASSWORD"),
 ):
     _refresh_space_service()
     room = _option_value(room, "room")
@@ -193,8 +193,8 @@ def space_history(
     since_id: int = typer.Option(0, "--since-id", "-s"),
     host: str = typer.Option("127.0.0.1", "--host", "-H"),
     port: int = typer.Option(15035, "--port", "-p"),
-    user: str = typer.Option("alice", "--user", "-u"),
-    password: str = typer.Option("password", "--password", "-P"),
+    user: str = typer.Option(None, "--user", "-u", envvar="DRLMS_USER"),
+    password: str = typer.Option(None, "--password", "-P", envvar="DRLMS_PASSWORD"),
 ):
     _refresh_space_service()
     room = _option_value(room, "room")
@@ -241,8 +241,8 @@ def space_send(
     file: Optional[Path] = typer.Option(None, "--file", "-f"),
     host: str = typer.Option("127.0.0.1", "--host", "-H"),
     port: int = typer.Option(15035, "--port", "-p"),
-    user: str = typer.Option("alice", "--user", "-u"),
-    password: str = typer.Option("password", "--password", "-P"),
+    user: str = typer.Option(None, "--user", "-u", envvar="DRLMS_USER"),
+    password: str = typer.Option(None, "--password", "-P", envvar="DRLMS_PASSWORD"),
 ):
     _refresh_space_service()
     room = _option_value(room, "room")
@@ -317,8 +317,8 @@ def space_chat(
     room: str = typer.Option(..., "--room"),
     host: str = typer.Option("127.0.0.1", "--host"),
     port: int = typer.Option(15035, "--port"),
-    user: str = typer.Option("alice", "--user"),
-    password: str = typer.Option("password", "--password"),
+    user: str = typer.Option(None, "--user", envvar="DRLMS_USER"),
+    password: str = typer.Option(None, "--password", envvar="DRLMS_PASSWORD"),
     since_id: int = typer.Option(-1, "--since-id"),
 ):
     _refresh_space_service()

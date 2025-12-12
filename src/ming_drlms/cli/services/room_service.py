@@ -405,7 +405,7 @@ class RoomService:
 
         # Legacy text-protocol fallback (used by older tests exercising ROOMINFO)
         if password is None:
-            password = "password"
+            raise RoomServiceError("password required for legacy protocol")
 
         with self._legacy_connection(
             host=host, port=port, user=user, password=password

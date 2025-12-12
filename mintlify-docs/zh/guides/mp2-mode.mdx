@@ -86,7 +86,7 @@ ming-drlms login -u <用户名> -H <主机> -p <端口>
 示例：
 
 ```bash
-ming-drlms login -u alice -H 127.0.0.1 -p 15035
+ming-drlms login -u myuser -H 127.0.0.1 -p 15035
 ```
 
 ### 认证流程
@@ -103,8 +103,8 @@ ming-drlms login -u alice -H 127.0.0.1 -p 15035
 
 ```
 # 格式: username:password_hash:role
-alice:$argon2id$v=19$m=65536,t=2,p=1$...:user
-bob:$argon2id$v=19$m=65536,t=2,p=1$...:admin
+myuser:$argon2id$v=19$m=65536,t=2,p=1$...:user
+peer:$argon2id$v=19$m=65536,t=2,p=1$...:admin
 ```
 
 ---

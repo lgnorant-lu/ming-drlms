@@ -133,7 +133,7 @@ class RoomManager:
     Example usage:
         >>> manager = RoomManager()
         >>> room = manager.create_room("general", alias="General Chat")
-        >>> manager.add_member("general", pubkey_bytes, alias="Alice")
+        >>> manager.add_member("general", pubkey_bytes, alias="User1")
         >>> rooms = manager.get_rooms()
     """
 

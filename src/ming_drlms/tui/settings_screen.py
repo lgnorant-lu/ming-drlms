@@ -195,7 +195,7 @@ class SettingsScreen(Screen):
             )
             with Horizontal(classes="settings-row"):
                 yield Label("用户名")
-                yield Input(placeholder="alice", id="cfg_user")
+                yield Input(placeholder="ming-drlms", id="cfg_user")
             with Horizontal(classes="settings-row"):
                 yield Label("设备 ID")
                 yield Input(placeholder="1", id="cfg_device_id")

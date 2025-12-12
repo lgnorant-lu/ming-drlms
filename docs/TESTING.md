@@ -79,8 +79,8 @@
 #### 用例 2.3：房间策略——teardown
 *   目标：owner 下线时订阅者被动断开。
 *   **Execution Steps**:
-    1.  **Connection 1 (Owner)**: Log in as `owner1`, `SUB|teardown_room`, then `SETPOLICY|teardown_room|teardown`.
-    2.  **Connection 2 (Subscriber)**: Log in as `sub1`, `SUB|teardown_room`.
+    1.  **Connection 1 (Owner)**: Log in as `roomowner`, `SUB|teardown_room`, then `SETPOLICY|teardown_room|teardown`.
+    2.  **Connection 2 (Subscriber)**: Log in as `subscriber`, `SUB|teardown_room`.
     3.  Forcefully close the TCP connection for the owner.
     4.  Monitor the connection of the subscriber.
 *   期望：订阅端收到关闭并被断开。

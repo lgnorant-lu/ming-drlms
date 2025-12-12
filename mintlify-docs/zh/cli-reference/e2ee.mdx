@@ -48,16 +48,16 @@ ming-drlms e2ee generate-keys [选项]
 
 ```bash
 # 为当前用户生成密钥
-ming-drlms e2ee generate-keys -u alice -H 127.0.0.1 -p 15035
+ming-drlms e2ee generate-keys -u myuser -H 127.0.0.1 -p 15035
 
 # 强制重新生成
-ming-drlms e2ee generate-keys -u alice -H 127.0.0.1 -p 15035 --force
+ming-drlms e2ee generate-keys -u myuser -H 127.0.0.1 -p 15035 --force
 ```
 
 ### 输出示例
 
 ```
-成功: user=alice code=0 msg='Keys generated' registration_id=12345 pre_keys=100
+成功: user=myuser code=0 msg='Keys generated' registration_id=12345 pre_keys=100
 ```
 
 ---
@@ -86,14 +86,14 @@ ming-drlms e2ee prekey-bundle [选项]
 ### 示例
 
 ```bash
-# 获取 bob 的预密钥包
-ming-drlms e2ee prekey-bundle -u alice --target-user bob -H 127.0.0.1 -p 15035
+# 获取 peer 的预密钥包
+ming-drlms e2ee prekey-bundle -u myuser --target-user peer -H 127.0.0.1 -p 15035
 ```
 
 ### 输出示例
 
 ```
-预密钥包 user=bob device=1 registration=54321
+预密钥包 user=peer device=1 registration=54321
   pre_key_id=1 pre_key_public=abcdef...
   signed_pre_key_id=1 signed_pre_key_public=123456... signed_pre_key_signature=789abc...
   identity_key=def012...

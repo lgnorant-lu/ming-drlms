@@ -55,7 +55,7 @@ export DRLMS_DEFAULT_RELAYS=http://localhost:15019
 
 ```bash
 export DRLMS_BACKEND_MODE=mp2
-ming-drlms login -u alice -H 127.0.0.1 -p 15035
+ming-drlms login -u myuser -H 127.0.0.1 -p 15035
 ```
 
 ---

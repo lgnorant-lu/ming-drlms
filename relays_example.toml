@@ -161,7 +161,7 @@ region = "local"
 #   DRLMS_DEFAULT_RELAYS=http://127.0.0.1:15019
 #
 # CLI 命令：
-#   ming-drlms identity create --name "Alice"
+#   ming-drlms identity create --name "myuser"
 #   ming-drlms chat send --to <pubkey> --message "hello"
 #   ming-drlms chat recv --room <room_id>
 #

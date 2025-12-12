@@ -18,8 +18,12 @@ client_app = typer.Typer(help="client operations (list/upload/download/log)")
 def client_list(
     host: str = typer.Option("127.0.0.1", "--host", "-H", help="server host"),
     port: int = typer.Option(15035, "--port", "-p", help="server port"),
-    user: str = typer.Option("alice", "--user", "-u", help="username"),
-    password: str = typer.Option("password", "--password", "-P", help="password"),
+    user: str = typer.Option(
+        None, "--user", "-u", envvar="DRLMS_USER", help="username"
+    ),
+    password: str = typer.Option(
+        None, "--password", "-P", envvar="DRLMS_PASSWORD", help="password"
+    ),
 ):
     """List files on server (LOGIN -> LIST)."""
     if not BIN_AGENT.exists():
@@ -39,8 +43,12 @@ def client_upload(
     file: Path = typer.Argument(..., help="local file to upload"),
     host: str = typer.Option("127.0.0.1", "--host", "-H", help="server host"),
     port: int = typer.Option(15035, "--port", "-p", help="server port"),
-    user: str = typer.Option("alice", "--user", "-u", help="username"),
-    password: str = typer.Option("password", "--password", "-P", help="password"),
+    user: str = typer.Option(
+        None, "--user", "-u", envvar="DRLMS_USER", help="username"
+    ),
+    password: str = typer.Option(
+        None, "--password", "-P", envvar="DRLMS_PASSWORD", help="password"
+    ),
 ):
     """Upload a file to server (LOGIN -> UPLOAD)."""
     if not BIN_AGENT.exists():
@@ -72,8 +80,12 @@ def client_download(
     ),
     host: str = typer.Option("127.0.0.1", "--host", "-H", help="server host"),
     port: int = typer.Option(15035, "--port", "-p", help="server port"),
-    user: str = typer.Option("alice", "--user", "-u", help="username"),
-    password: str = typer.Option("password", "--password", "-P", help="password"),
+    user: str = typer.Option(
+        None, "--user", "-u", envvar="DRLMS_USER", help="username"
+    ),
+    password: str = typer.Option(
+        None, "--password", "-P", envvar="DRLMS_PASSWORD", help="password"
+    ),
 ):
     """Download a file from server (LOGIN -> DOWNLOAD)."""
     if not BIN_AGENT.exists():
@@ -104,8 +116,12 @@ def client_log(
     text: str = typer.Argument(..., help="log message to send"),
     host: str = typer.Option("127.0.0.1", "--host", "-H", help="server host"),
     port: int = typer.Option(15035, "--port", "-p", help="server port"),
-    user: str = typer.Option("alice", "--user", "-u", help="username"),
-    password: str = typer.Option("password", "--password", "-P", help="password"),
+    user: str = typer.Option(
+        None, "--user", "-u", envvar="DRLMS_USER", help="username"
+    ),
+    password: str = typer.Option(
+        None, "--password", "-P", envvar="DRLMS_PASSWORD", help="password"
+    ),
 ):
     """Send a single LOG message (LOGIN -> LOG -> QUIT)."""
 

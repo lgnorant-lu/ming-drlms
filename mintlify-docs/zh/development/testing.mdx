@@ -310,7 +310,7 @@ pytest --pdb
 | `DRLMS_LOG_LEVEL` | 日志级别 | `DEBUG` |
 | `DRLMS_UPDATE_CHECK` | 更新检查 | `0`（测试时关闭） |
 | `MING_DRLMS_CONFIG_DIR` | 配置目录 | `$(pwd)/.drlms` |
-| `DRLMS_USER` | 当前用户名 | `alice` |
+| `DRLMS_USER` | 当前用户名 | `myuser` |
 
 设置示例：
 
@@ -376,7 +376,7 @@ pytest --pdb
     # 1. 设置环境
     export DRLMS_BACKEND_MODE=relay
     export DRLMS_DEFAULT_RELAYS=http://127.0.0.1:15019
-    export DRLMS_USER=alice
+    export DRLMS_USER=myuser
     
     # 2. 启动 Relay 服务器（另一终端）
     python -m ming_drlms.relay.server
@@ -390,7 +390,7 @@ pytest --pdb
     # 1. 设置环境
     $env:DRLMS_BACKEND_MODE = "relay"
     $env:DRLMS_DEFAULT_RELAYS = "http://127.0.0.1:15019"
-    $env:DRLMS_USER = "alice"
+    $env:DRLMS_USER = "myuser"
     
     # 2. 启动 Relay 服务器（另一终端）
     python -m ming_drlms.relay.server

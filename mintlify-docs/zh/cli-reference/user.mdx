@@ -73,10 +73,10 @@ ming-drlms user add <用户名> [选项]
 
 ```bash
 # 交互式输入密码
-ming-drlms user add bob
+ming-drlms user add peer
 
 # 从 stdin 读取
-echo 'secret123' | ming-drlms user add bob -x
+echo 'secret123' | ming-drlms user add peer -x
 ```
 
 ---
@@ -102,11 +102,11 @@ ming-drlms user passwd <用户名> [选项]
 ### 示例
 
 ```bash
-ming-drlms user passwd alice
+ming-drlms user passwd myuser
 # 交互式输入新密码
 
 # 从 stdin 读取
-echo 'newsecret' | ming-drlms user passwd alice -x
+echo 'newsecret' | ming-drlms user passwd myuser -x
 ```
 
 ---
@@ -132,8 +132,8 @@ ming-drlms user del <用户名> [选项]
 ### 示例
 
 ```bash
-ming-drlms user del bob
-ming-drlms user del bob --force
+ming-drlms user del peer
+ming-drlms user del peer --force
 ```
 
 ---

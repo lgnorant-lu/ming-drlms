@@ -161,7 +161,7 @@ class LoginScreen(Screen):
 
             with Horizontal(classes="input-row"):
                 yield Label("NAME ›", classes="input-label")
-                yield Input(placeholder="farmer_alice", id="username-input")
+                yield Input(placeholder="ming-drlms", id="username-input")
 
             with Horizontal(classes="input-row"):
                 yield Label("KEY ›", classes="input-label")

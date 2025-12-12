@@ -107,16 +107,16 @@ ming-drlms trust verify <pubkey> --fingerprint "1234 5678..."
 已验证的联系人可以为其他人担保：
 
 ```
-Alice (MANUAL) ──担保──► Bob
+myuser (MANUAL) ──担保──► peer
                          │
                          ▼
-                    Bob 升级为 SOCIAL
+                    peer 升级为 SOCIAL
 ```
 
 ### 担保链
 
 ```
-你 ←─MANUAL─ Alice ←─SOCIAL─ Bob ←─SOCIAL─ Carol
+你 ←─MANUAL─ myuser ←─SOCIAL─ peer ←─SOCIAL─ Carol
 ```
 
 最多跳数：2（防止信任传递过远）
@@ -281,7 +281,7 @@ key_change_action = "warn"
   "records": {
     "7A3F9B2C4E1D8F5A2C7B1D9E": {
       "public_key": "hex_encoded_32_bytes",
-      "display_name": "Alice",
+      "display_name": "myuser",
       "trust_level": 1,
       "first_seen": "2025-12-01T10:00:00",
       "last_seen": "2025-12-11T15:30:00",

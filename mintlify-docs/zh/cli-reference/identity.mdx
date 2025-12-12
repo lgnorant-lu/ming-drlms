@@ -48,13 +48,13 @@ ming-drlms identity create [选项]
 
 ```bash
 # 创建身份并设置名称
-ming-drlms identity create --name "Alice"
+ming-drlms identity create --name "myuser"
 
 # 指定用户名（兼容 LocalKeyStore）
-ming-drlms identity create --name "Alice" --user alice
+ming-drlms identity create --name "myuser" --user myuser
 
 # 强制覆盖已有身份
-ming-drlms identity create --name "Alice" --force
+ming-drlms identity create --name "myuser" --force
 ```
 
 ### 输出示例
@@ -68,7 +68,7 @@ ming-drlms identity create --name "Alice" --force
 公钥 (hex):
   0x1234567890abcdef...
 
-显示名称: Alice
+显示名称: myuser
 
 提示: 使用 'ming-drlms identity export' 备份身份
 ```
@@ -94,7 +94,7 @@ ming-drlms identity show
 ├───────────────┼────────────────────────┤
 │ 公钥指纹      │ 1234 5678 9ABC DEF0... │
 │ 公钥 (hex)    │ 0x1234567890abcdef...  │
-│ 显示名称      │ Alice                  │
+│ 显示名称      │ myuser                  │
 │ Registration ID│ 12345                  │
 │ Device ID     │ 1                      │
 │ 创建时间      │ 2025-12-11 10:30:00    │
@@ -204,7 +204,7 @@ ming-drlms identity import [选项] <文件路径>
 ming-drlms identity import ~/backup/my_identity.json
 
 # 指定用户名（兼容 LocalKeyStore）
-ming-drlms identity import ~/backup/my_identity.json --user alice
+ming-drlms identity import ~/backup/my_identity.json --user myuser
 
 # 强制覆盖
 ming-drlms identity import --force ~/backup/my_identity.json

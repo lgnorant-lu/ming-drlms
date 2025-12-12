@@ -49,7 +49,7 @@
 [STATE] ○ CONNECTING
 [STATE] ● CONNECTED
 [TEST] Sending test message...
-[alice] Test message from heartbeat script  ✅
+[myuser] Test message from heartbeat script  ✅
 ```
 
 **结论**: ✅ 连接建立成功，消息发送和接收正常
@@ -122,19 +122,19 @@ sudo iptables -D INPUT -p tcp --dport 15035 -j DROP
 ### 场景 5: 多客户端消息不丢失
 **操作**:
 ```bash
-# 终端1: Alice
+# 终端1: myuser
 export PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python
-python test_heartbeat.py  # username=alice
+python test_heartbeat.py  # username=myuser
 
-# 终端2: Bob
-# 修改 test_heartbeat.py 中 username="bob"
+# 终端2: peer
+# 修改 test_heartbeat.py 中 username="peer"
 export PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python
-python test_heartbeat.py  # username=bob
+python test_heartbeat.py  # username=peer
 ```
 
 **预期行为**:
-- Alice 发送消息 → Bob 收到
-- Bob 发送消息 → Alice 收到
+- myuser 发送消息 → peer 收到
+- peer 发送消息 → myuser 收到
 - 杀死服务器 → 两端自动重连 → 消息继续互通
 
 ---

@@ -120,13 +120,13 @@ class VerificationSession:
     """Manages a manual verification session between two parties.
 
     Usage:
-        # Alice initiates
-        session = VerificationSession.create(alice_pubkey, bob_pubkey)
+        # User A initiates
+        session = VerificationSession.create(user_a_pubkey, user_b_pubkey)
         print(f"Compare this code: {session.safety_number}")
 
-        # Bob does the same
-        session_bob = VerificationSession.create(bob_pubkey, alice_pubkey)
-        # session.safety_number == session_bob.safety_number
+        # User B does the same
+        session_b = VerificationSession.create(user_b_pubkey, user_a_pubkey)
+        # session.safety_number == session_b.safety_number
     """
 
     local_pubkey: bytes

@@ -13,7 +13,7 @@ make all
 # 非严格模式启动（便于本地联通）
 ming-drlms server-up --no-strict --data-dir server_files --port 15035
 # 简单联通
-ming-drlms client list -H 127.0.0.1 -p 15035 -u alice -P password
+ming-drlms client list -H 127.0.0.1 -p 15035 -u myuser -P password
 ming-drlms server-down
 ```
 

@@ -83,7 +83,7 @@ class VerificationRecord:
     """Record of a verification event."""
 
     method: str  # "manual", "dns", "https", "github", "social"
-    details: str  # e.g., "alice.example.com" for DNS
+    details: str  # e.g., "user.example.com" for DNS
     verified_at: datetime
     expires_at: Optional[datetime] = None
 
@@ -246,7 +246,7 @@ class TrustStore:
 
     Example:
         >>> store = TrustStore()
-        >>> store.record_contact(pubkey, display_name="Alice")
+        >>> store.record_contact(pubkey, display_name="MyUser")
         >>> store.verify_manual(pubkey)
         >>> print(store.get_trust_level(pubkey))
         TrustLevel.MANUAL

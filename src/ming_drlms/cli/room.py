@@ -89,7 +89,7 @@ def room_sub(
     room: str = typer.Option(..., "--room", "-r", help="房间名"),
     host: str = typer.Option("127.0.0.1", "--host", "-H"),
     port: int = typer.Option(15035, "--port", "-p"),
-    user: str = typer.Option("alice", "--user", "-u"),
+    user: str = typer.Option(None, "--user", "-u", envvar="DRLMS_USER"),
     since_id: int = typer.Option(0, "--since-id", "-s", help="从指定 event_id 开始"),
     limit: int = typer.Option(0, "--limit", "-n", help="最多接收事件数量 (0 表示不限)"),
     json_out: bool = typer.Option(False, "--json", "-j", help="以 JSON 输出事件"),
@@ -171,7 +171,7 @@ def room_pub(
     ),
     host: str = typer.Option("127.0.0.1", "--host", "-H"),
     port: int = typer.Option(15035, "--port", "-p"),
-    user: str = typer.Option("alice", "--user", "-u"),
+    user: str = typer.Option(None, "--user", "-u", envvar="DRLMS_USER"),
     token_store: Optional[Path] = typer.Option(
         None,
         "--token-store",
@@ -269,7 +269,7 @@ def room_info(
     room: str = typer.Option(..., "--room", "-r", help="房间名"),
     host: str = typer.Option("127.0.0.1", "--host", "-H"),
     port: int = typer.Option(15035, "--port", "-p"),
-    user: str = typer.Option("alice", "--user", "-u"),
+    user: str = typer.Option(None, "--user", "-u", envvar="DRLMS_USER"),
     token_store: Optional[Path] = typer.Option(
         None, "--token-store", "-t", help="Token存储路径"
     ),
@@ -335,7 +335,7 @@ def room_create(
     ),
     host: str = typer.Option("127.0.0.1", "--host", "-H"),
     port: int = typer.Option(15035, "--port", "-p"),
-    user: str = typer.Option("alice", "--user", "-u"),
+    user: str = typer.Option(None, "--user", "-u", envvar="DRLMS_USER"),
     token_store: Optional[Path] = typer.Option(
         None, "--token-store", "-t", help="Token存储路径"
     ),
@@ -368,7 +368,7 @@ def room_set_policy(
     policy: str = typer.Option(..., "--policy", help="策略名", case_sensitive=False),
     host: str = typer.Option("127.0.0.1", "--host", "-H"),
     port: int = typer.Option(15035, "--port", "-p"),
-    user: str = typer.Option("alice", "--user", "-u"),
+    user: str = typer.Option(None, "--user", "-u", envvar="DRLMS_USER"),
     token_store: Optional[Path] = typer.Option(
         None, "--token-store", "-t", help="Token存储路径"
     ),
@@ -406,7 +406,7 @@ def room_set_storage_policy(
     ),
     host: str = typer.Option("127.0.0.1", "--host", "-H"),
     port: int = typer.Option(15035, "--port", "-p"),
-    user: str = typer.Option("alice", "--user", "-u"),
+    user: str = typer.Option(None, "--user", "-u", envvar="DRLMS_USER"),
     token_store: Optional[Path] = typer.Option(
         None, "--token-store", "-t", help="Token存储路径"
     ),
@@ -444,7 +444,7 @@ def room_transfer(
     new_owner: str = typer.Option(..., "--new-owner", "-n", help="新的拥有者用户名"),
     host: str = typer.Option("127.0.0.1", "--host", "-H"),
     port: int = typer.Option(15035, "--port", "-p"),
-    user: str = typer.Option("alice", "--user", "-u"),
+    user: str = typer.Option(None, "--user", "-u", envvar="DRLMS_USER"),
     token_store: Optional[Path] = typer.Option(
         None, "--token-store", "-t", help="Token存储路径"
     ),
@@ -474,8 +474,8 @@ def room_members(
     room: str = typer.Option(..., "--room", "-r", help="房间名"),
     host: str = typer.Option("127.0.0.1", "--host", "-H"),
     port: int = typer.Option(15035, "--port", "-p"),
-    user: str = typer.Option("alice", "--user", "-u"),
-    password: str = typer.Option("password", "--password", "-P"),
+    user: str = typer.Option(None, "--user", envvar="DRLMS_USER"),
+    password: str = typer.Option(None, "--password", envvar="DRLMS_PASSWORD"),
     json_output: bool = typer.Option(False, "--json", help="JSON格式输出"),
 ):
     room = _option_value(room, "room")
@@ -529,7 +529,7 @@ def room_download(
     output: Path = typer.Option(..., "--output", "-o", help="输出文件路径"),
     host: str = typer.Option("127.0.0.1", "--host", "-H"),
     port: int = typer.Option(15035, "--port", "-p"),
-    user: str = typer.Option("alice", "--user", "-u"),
+    user: str = typer.Option(None, "--user", "-u", envvar="DRLMS_USER"),
     token_store: Optional[Path] = typer.Option(None, "--token-store"),
     timeout: float = typer.Option(10.0, "--timeout", help="socket 超时时间"),
 ):

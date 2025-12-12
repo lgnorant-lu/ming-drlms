@@ -24,7 +24,7 @@ This document outlines the verification test plan for the core functionalities o
 | NET-004 | File Transfer Integrity | Upload preserves integrity. | 1. `ming-drlms server up -d server_files &` <br> 2. `sleep 1` <br> 3. `echo "testpass" \| ming-drlms user add testuser -d server_files -x` <br> 4. `echo "upload test" > upload_test.txt` <br> 5. `ming-drlms client upload -f upload_test.txt --user testuser --password testpass` <br> 6. Compare `sha256sum`. | Hashes match. | Upload OK; hashes match. | Pass |
 | NET-005 | File Transfer Integrity | Download preserves integrity. | 1. `ming-drlms server up -d server_files &` <br> 2. `sleep 1` <br> 3. `echo "testpass" \| ming-drlms user add testuser -d server_files -x` <br> 4. `echo "download test" > server_files/download_test.txt` <br> 5. `ming-drlms client download -f download_test.txt -o downloaded.txt --user testuser --password testpass` <br> 6. Compare `sha256sum`. | Hashes match. | Download OK; hashes match. | Pass |
 | NET-006 | Multi-client Concurrency | Three concurrent clients. | 1. Start server <br> 2. Add `u1/u2/u3` <br> 3. Run upload/list/download concurrently <br> 4. `wait` | All succeed; no crash. | Stable under concurrency. | Pass |
-| NET-007 | Network Logging | `client log` writes to `central.log` only after auth success. | 1. Start server <br> 2. Add `alice` <br> 3. `ming-drlms client log "security test log" --user alice --password WRONGPASSWORD; echo "EC=$?"` <br> 4. Stop server <br> 5. Inspect logs | No `central.log` entry on failed auth; `ops_audit.log` shows `ERR|AUTH`. | Verified: `ERR|AUTH` (EC=1); no central log write. | Pass |
+| NET-007 | Network Logging | `client log` writes to `central.log` only after auth success. | 1. Start server <br> 2. Add `myuser` <br> 3. `ming-drlms client log "security test log" --user myuser --password WRONGPASSWORD; echo "EC=$?"` <br> 4. Stop server <br> 5. Inspect logs | No `central.log` entry on failed auth; `ops_audit.log` shows `ERR|AUTH`. | Verified: `ERR|AUTH` (EC=1); no central log write. | Pass |
 | NET-008 | Audit Logging | Failed auth is recorded. | 1. Start server <br> 2. `ming-drlms client list --user no_such_user --password badpass` <br> 3. Stop server <br> 4. Inspect `ops_audit.log` | JSON entry exists. | Recorded as expected. | Pass |
 
 ---
@@ -54,8 +54,8 @@ FAST=0 SKIP_TEARDOWN=0 bash tests/integration_space.sh
 - Auditor scenario（严格模式：错误口令不得写 central.log）
 ```bash
 ming-drlms server up -d server_files
-echo "password" | ming-drlms user add alice -d server_files -x
-ming-drlms client log "security test log" --user alice --password WRONGPASSWORD; echo "EC=$?"
+echo "password" | ming-drlms user add myuser -d server_files -x
+ming-drlms client log "security test log" --user myuser --password WRONGPASSWORD; echo "EC=$?"
 ming-drlms server down
 echo "--- central.log ---"; cat server_files/central.log || true
 echo "--- ops_audit.log tail ---"; tail -2 server_files/ops_audit.log || true

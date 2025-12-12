@@ -160,7 +160,7 @@ class LocalIdentityManager:
 
     Example:
         >>> manager = LocalIdentityManager()
-        >>> identity = manager.create_identity(display_name="Alice")
+        >>> identity = manager.create_identity(display_name="MyUser")
         >>> print(identity.fingerprint)
         7A3F 9B2C 4E1D 8F5A 2C7B 1D9E
         >>> manager.export_identity("backup.json")

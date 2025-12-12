@@ -310,7 +310,7 @@ def config_set(
     Examples:
         ming-drlms config set backend.mode relay
         ming-drlms config set backend.relay.urls "http://relay1.com,http://relay2.com"
-        ming-drlms config set identity.user alice
+        ming-drlms config set identity.user myuser
         ming-drlms config set trust.default_policy tofu
         ming-drlms config set logging.level DEBUG
     """

@@ -49,7 +49,7 @@ ming-drlms room create -r <房间名> [选项]
 | `--ephemeral/--persistent` | - | `persistent` | 存储策略 |
 | `--host` | `-H` | `127.0.0.1` | 服务器地址 |
 | `--port` | `-p` | `15035` | 服务器端口 |
-| `--user` | `-u` | `alice` | 用户名 |
+| `--user` | `-u` | `myuser` | 用户名 |
 | `--token-store` | `-t` | - | Token 存储路径 |
 
 ### 示例
@@ -78,7 +78,7 @@ ming-drlms room sub -r <房间名> [选项]
 | `--room` | `-r` | - | 房间名称（必需） |
 | `--host` | `-H` | `127.0.0.1` | 服务器地址 |
 | `--port` | `-p` | `15035` | 服务器端口 |
-| `--user` | `-u` | `alice` | 用户名 |
+| `--user` | `-u` | `myuser` | 用户名 |
 | `--since-id` | `-s` | `0` | 从指定 event_id 开始 |
 | `--limit` | `-n` | `0` | 最多接收事件数量（0 不限） |
 | `--json` | `-j` | `false` | 以 JSON 输出事件 |
@@ -122,7 +122,7 @@ ming-drlms room pub -r <房间名> [选项]
 | `--ephemeral/--persistent` | - | `persistent` | 事件存储策略 |
 | `--host` | `-H` | `127.0.0.1` | 服务器地址 |
 | `--port` | `-p` | `15035` | 服务器端口 |
-| `--user` | `-u` | `alice` | 用户名 |
+| `--user` | `-u` | `myuser` | 用户名 |
 | `--token-store` | - | - | Token 存储路径 |
 | `--timeout` | - | `10.0` | Socket 超时时间 |
 | `--key-store` | - | - | E2EE 密钥存储路径 |
@@ -162,7 +162,7 @@ ming-drlms room info -r <房间名> [选项]
 | `--room` | `-r` | - | 房间名（必需） |
 | `--host` | `-H` | `127.0.0.1` | 服务器地址 |
 | `--port` | `-p` | `15035` | 服务器端口 |
-| `--user` | `-u` | `alice` | 用户名 |
+| `--user` | `-u` | `myuser` | 用户名 |
 | `--token-store` | `-t` | - | Token 存储路径 |
 | `--json` | `-j` | `false` | JSON 格式输出 |
 
@@ -173,7 +173,7 @@ ming-drlms room info -r <房间名> [选项]
 │ 属性         │ 值          │
 ├──────────────┼─────────────┤
 │ 房间名       │ general     │
-│ 所有者       │ alice       │
+│ 所有者       │ myuser       │
 │ 存储策略     │ persistent  │
 │ 实例模式     │ retain      │
 │ 实例数       │ 1           │
@@ -199,7 +199,7 @@ ming-drlms room members -r <房间名> [选项]
 | `--room` | `-r` | - | 房间名（必需） |
 | `--host` | `-H` | `127.0.0.1` | 服务器地址 |
 | `--port` | `-p` | `15035` | 服务器端口 |
-| `--user` | `-u` | `alice` | 用户名 |
+| `--user` | `-u` | `myuser` | 用户名 |
 | `--password` | `-P` | `password` | 密码 |
 | `--json` | - | `false` | JSON 格式输出 |
 
@@ -223,7 +223,7 @@ ming-drlms room set-policy -r <房间名> --policy <策略> [选项]
 | `--policy` | - | - | 策略名（必需） |
 | `--host` | `-H` | `127.0.0.1` | 服务器地址 |
 | `--port` | `-p` | `15035` | 服务器端口 |
-| `--user` | `-u` | `alice` | 用户名 |
+| `--user` | `-u` | `myuser` | 用户名 |
 | `--token-store` | `-t` | - | Token 存储路径 |
 
 ### 策略选项
@@ -254,7 +254,7 @@ ming-drlms room set-storage-policy -r <房间名> --policy <策略> [选项]
 | `--policy` | - | - | 存储策略（必需） |
 | `--host` | `-H` | `127.0.0.1` | 服务器地址 |
 | `--port` | `-p` | `15035` | 服务器端口 |
-| `--user` | `-u` | `alice` | 用户名 |
+| `--user` | `-u` | `myuser` | 用户名 |
 | `--token-store` | `-t` | - | Token 存储路径 |
 
 ### 策略选项
@@ -284,7 +284,7 @@ ming-drlms room transfer -r <房间名> --new-owner <用户名> [选项]
 | `--new-owner` | `-n` | - | 新所有者用户名（必需） |
 | `--host` | `-H` | `127.0.0.1` | 服务器地址 |
 | `--port` | `-p` | `15035` | 服务器端口 |
-| `--user` | `-u` | `alice` | 用户名 |
+| `--user` | `-u` | `myuser` | 用户名 |
 | `--token-store` | `-t` | - | Token 存储路径 |
 
 ---
@@ -359,7 +359,7 @@ ming-drlms room download -r <房间名> -e <event_id> -o <输出路径>
 | `--output` | `-o` | - | 输出路径（必需） |
 | `--host` | `-H` | `127.0.0.1` | 服务器地址 |
 | `--port` | `-p` | `15035` | 服务器端口 |
-| `--user` | `-u` | `alice` | 用户名 |
+| `--user` | `-u` | `myuser` | 用户名 |
 | `--token-store` | - | - | Token 存储路径 |
 | `--timeout` | - | `10.0` | Socket 超时时间 |
 

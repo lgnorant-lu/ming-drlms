@@ -192,7 +192,7 @@ class SetupWizardScreen(Screen):
         input_row = Horizontal(classes="wizard-input-row")
         input_row._add_children(
             Label("用户名"),
-            Input(placeholder="alice", id="input_username"),
+            Input(placeholder="ming-drlms", id="input_username"),
         )
 
         btn_row = Horizontal(classes="wizard-button-row")

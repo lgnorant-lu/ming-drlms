@@ -59,14 +59,14 @@ ming-drlms relay post [选项]
   <Tab title="Linux/WSL">
     ```bash
     # 简单投递（需要 DRLMS_USER）
-    export DRLMS_USER=alice
+    export DRLMS_USER=myuser
     ming-drlms relay post -r general --content "Hello" --base-url http://localhost:15019
     ```
   </Tab>
   <Tab title="Windows">
     ```powershell
     # 简单投递（需要 DRLMS_USER）
-    $env:DRLMS_USER = "alice"
+    $env:DRLMS_USER = "myuser"
     ming-drlms relay post -r general --content "Hello" --base-url http://localhost:15019
     ```
   </Tab>
@@ -123,7 +123,7 @@ ming-drlms relay post-simple -r <房间> -c <内容> [选项]
 ### 示例
 
 ```bash
-ming-drlms relay post-simple -r general -c "Hello!" --user alice
+ming-drlms relay post-simple -r general -c "Hello!" --user myuser
 ```
 
 ---
@@ -198,13 +198,13 @@ ming-drlms relay identity <action> [选项]
 
 ```bash
 # 查看当前身份
-ming-drlms relay identity show --user alice
+ming-drlms relay identity show --user myuser
 
 # 创建新身份
-ming-drlms relay identity create --user alice
+ming-drlms relay identity create --user myuser
 
 # 导出私钥
-ming-drlms relay identity export --user alice
+ming-drlms relay identity export --user myuser
 ```
 
 ---

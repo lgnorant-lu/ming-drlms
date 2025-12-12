@@ -16,9 +16,9 @@ DRLMS 实现 Signal 协议进行端到端加密，确保只有通信双方能够
 密钥协商协议，用于建立初始共享密钥：
 
 ```
-Alice                                   Bob
+myuser                                   peer
   │                                      │
-  │  获取 Bob 的 PreKeyBundle            │
+  │  获取 peer 的 PreKeyBundle            │
   │◄─────────────────────────────────────│
   │  IK_B, SPK_B, Sig_B, OPK_B           │
   │                                      │
@@ -35,7 +35,7 @@ Alice                                   Bob
   │  发送初始消息 + EK_A                  │
   │─────────────────────────────────────►│
   │                                      │
-  │                 Bob 执行相同计算得到 SK│
+  │                 peer 执行相同计算得到 SK│
 ```
 
 ### Double Ratchet
@@ -344,7 +344,7 @@ DRLMS 使用 XEdDSA 实现 X25519 密钥的签名功能：
 ```python
 from ming_drlms.core.identity_manager import IdentityManager
 
-manager = IdentityManager(username="alice")
+manager = IdentityManager(username="myuser")
 if manager.has_identity():
     signature = manager.sign(data)  # 64-byte XEdDSA signature
     pubkey = manager.get_pubkey()   # 32-byte X25519 public key

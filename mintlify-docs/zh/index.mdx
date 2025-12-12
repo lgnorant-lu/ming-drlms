@@ -76,7 +76,7 @@ DRLMS 由三个主要组件构成：
     export DRLMS_DEFAULT_RELAYS=http://relay1.example.com,http://relay2.example.com
     
     # 创建本地身份
-    ming-drlms identity create --name "Alice"
+    ming-drlms identity create --name "myuser"
     
     # 发送加密数据
     ming-drlms chat send --to <recipient_pubkey> --message "<any_data>"
@@ -88,7 +88,7 @@ DRLMS 由三个主要组件构成：
     $env:DRLMS_DEFAULT_RELAYS = "http://relay1.example.com,http://relay2.example.com"
     
     # 创建本地身份
-    ming-drlms identity create --name "Alice"
+    ming-drlms identity create --name "myuser"
     
     # 发送加密数据
     ming-drlms chat send --to <recipient_pubkey> --message "<any_data>"
@@ -104,13 +104,13 @@ DRLMS 由三个主要组件构成：
   <Tab title="Linux/WSL">
     ```bash
     export DRLMS_BACKEND_MODE=mp2
-    ming-drlms login -u alice -H 127.0.0.1 -p 15035
+    ming-drlms login -u myuser -H 127.0.0.1 -p 15035
     ```
   </Tab>
   <Tab title="Windows">
     ```powershell
     $env:DRLMS_BACKEND_MODE = "mp2"
-    ming-drlms login -u alice -H 127.0.0.1 -p 15035
+    ming-drlms login -u myuser -H 127.0.0.1 -p 15035
     ```
   </Tab>
 </Tabs>

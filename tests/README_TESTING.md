@@ -58,8 +58,8 @@
 
 **预定义用户组**：
 - `basic`: 基础测试用户 (testuser:testpass)
-- `room_test`: 房间测试用户 (owner1, sub1)
-- `legacy_test`: 传统格式用户 (alice, bob)
+- `room_test`: 房间测试用户 (roomowner, subscriber)
+- `legacy_test`: 传统格式用户 (myuser, peer)
 - `all`: 所有预定义用户
 
 ### 3. 集成测试脚本
@@ -99,11 +99,11 @@ FAST=1 make coverage
 在 `test_env_init.sh` 中定义：
 ```bash
 declare -A TEST_USERS=(
-    ["owner1"]="password"
-    ["sub1"]="password"
+    ["roomowner"]="password"
+    ["subscriber"]="password"
     ["testuser"]="testpass"
-    ["alice"]="password"
-    ["bob"]="password"
+    ["myuser"]="password"
+    ["peer"]="password"
 )
 ```
 
@@ -112,9 +112,9 @@ declare -A TEST_USERS=(
 在 `test_env_init.sh` 中定义：
 ```bash
 declare -A TEST_ROOMS=(
-    ["demo"]="owner1"
+    ["demo"]="roomowner"
     ["test_room"]="testuser"
-    ["integration_room"]="owner1"
+    ["integration_room"]="roomowner"
 )
 ```
 
