@@ -14,6 +14,7 @@ en_texts: Dict[str, str] = {
     "HELP.SERVER.STATUS": "Show server status and recent log tail.\n\nExamples:\n  ming-drlms server-status -p 15035\n",
     # Auth
     "HELP.AUTH.LOGIN": "Authenticate using M-Proto-v2 challenge/response and cache tokens locally.\n\nExamples:\n  ming-drlms login -u $DRLMS_USER -H 127.0.0.1 -p 5000 --users-file server_files/users.txt\n  ming-drlms login -u myuser --password-hash-file myuser.hash\n",
+    "HELP.AUTH.LOGOUT": "Revoke cached tokens for a user session.\n\nExamples:\n  ming-drlms logout -u myuser -H 127.0.0.1 -p 15035\n",
     # User
     "HELP.USER.ADD": "Create a new user with Argon2id password (interactive or stdin).\n\nSecurity: avoid plain passwords in shell history; prefer stdin.\nExamples:\n  echo 'p@ss' | ming-drlms user add myuser -d server_files -x\n",
     "HELP.USER.PASSWD": "Change password for an existing user (Argon2id).\n\nSecurity: avoid plain passwords in shell history; prefer stdin.\nExamples:\n  echo 'new' | ming-drlms user passwd myuser -d server_files -x\n",

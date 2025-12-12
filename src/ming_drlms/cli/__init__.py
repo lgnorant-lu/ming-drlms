@@ -145,6 +145,36 @@ def cli_login(
         typer.echo(f"token cached at {store_path}")
 
 
+@app.command("logout", help=t("HELP.AUTH.LOGOUT"))
+def cli_logout(
+    username: str = typer.Option(..., "--user", "-u", help="username"),
+    host: str = typer.Option("127.0.0.1", "--host", "-H", help="server host"),
+    port: int = typer.Option(15035, "--port", "-p", help="server port"),
+    token_store: Optional[Path] = typer.Option(
+        None,
+        "--token-store",
+        help="override token cache path (default: ~/.config/ming-drlms/tokens.json)",
+    ),
+):
+    """Revoke cached tokens for a user session."""
+    store = TokenStore(token_store) if token_store else TokenStore()
+
+    # Check if token exists before revoking
+    existing = store.load(username, host, port)
+    if existing is None:
+        print(f"[yellow]no cached token found for {username}@{host}:{port}[/yellow]")
+        raise typer.Exit(code=0)
+
+    store.revoke(username, host, port)
+    print(
+        f"[green]logout succeeded[/green]: revoked token for {username}@{host}:{port}"
+    )
+
+    store_path = getattr(store, "_path", None)
+    if store_path is not None:
+        typer.echo(f"token cache updated at {store_path}")
+
+
 # Import and register top-level command groups
 from . import client as _client  # noqa: E402
 from . import user as _user  # noqa: E402
