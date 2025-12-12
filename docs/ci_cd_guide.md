@@ -142,7 +142,7 @@ bash scripts/run_coverage.sh
 
 ```bash
 # 启动 Relay 服务器
-python -m uvicorn ming_drlms.relay.server:app --host 127.0.0.1 --port 8081 &
+uvicorn ming_drlms.relay.server:app --port 15019 &
 
 # 运行集成测试
 python -m pytest tests/integration/ -v
@@ -249,7 +249,7 @@ tests/integration/
 **解决**: 检查 `PYTHONPATH` 是否包含 `src/`
 
 **问题**: Relay 测试超时  
-**解决**: 确保没有其他进程占用 8081 端口
+**解决**: 确保没有其他进程占用 15019 端口
 
 ### 6.2 调试 CI
 

@@ -136,7 +136,7 @@ ming-drlms tui
     ```bash
     # 1. 设置环境
     export DRLMS_BACKEND_MODE=relay
-    export DRLMS_DEFAULT_RELAYS=http://localhost:8081
+    export DRLMS_DEFAULT_RELAYS=http://localhost:15019
     
     # 2. 创建身份
     ming-drlms identity create --name "Alice"
@@ -155,7 +155,7 @@ ming-drlms tui
     ```powershell
     # 1. 设置环境
     $env:DRLMS_BACKEND_MODE = "relay"
-    $env:DRLMS_DEFAULT_RELAYS = "http://localhost:8081"
+    $env:DRLMS_DEFAULT_RELAYS = "http://localhost:15019"
     
     # 2. 创建身份
     ming-drlms identity create --name "Alice"
@@ -181,7 +181,7 @@ ming-drlms server up --port 15035
 # 2. 登录（login 默认端口 15035）
 ming-drlms login -u alice -H 127.0.0.1
 
-# 3. 订阅房间（sub 默认端口 8080，需显式指定）
+# 3. 订阅房间（sub 默认端口 15035）
 ming-drlms room sub -r general -u alice -H 127.0.0.1 -p 15035
 
 # 4. 发布消息（pub 默认端口 15035）
@@ -192,9 +192,9 @@ ming-drlms room info -r general -u alice -H 127.0.0.1
 ```
 
 <Note>
-不同命令的默认端口可能不同：
+不同命令的默认端口可能不同（但已尽量统一为 `15035`）：
 - `login`、`pub`、`info` 等默认端口 `15035`
-- `sub`、`download` 默认端口 `8080`
+- `sub`、`download` 默认端口 `15035`
 
 建议显式指定 `--port` 确保一致性。
 </Note>

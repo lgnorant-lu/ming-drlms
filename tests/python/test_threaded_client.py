@@ -26,7 +26,7 @@ def test_threaded_client_initialization():
     """Test that ThreadedRoomClient can be initialized with correct parameters."""
     client = ThreadedRoomClient(
         host="127.0.0.1",
-        port=8080,
+        port=15035,
         username="alice",
         room="general",
         since_id=100,
@@ -34,7 +34,7 @@ def test_threaded_client_initialization():
     )
 
     assert client.host == "127.0.0.1"
-    assert client.port == 8080
+    assert client.port == 15035
     assert client.username == "alice"
     assert client.room == "general"
     assert client.since_id == 100
@@ -60,7 +60,7 @@ def test_start_creates_daemon_thread(mock_mp2_client):
 
     client = ThreadedRoomClient(
         host="127.0.0.1",
-        port=8080,
+        port=15035,
         username="alice",
         room="general",
     )
@@ -98,7 +98,7 @@ def test_start_raises_if_already_running(mock_mp2_client):
 
     client = ThreadedRoomClient(
         host="127.0.0.1",
-        port=8080,
+        port=15035,
         username="alice",
         room="general",
     )
@@ -127,7 +127,7 @@ def test_event_callback_invoked_on_message(mock_mp2_client):
 
     client = ThreadedRoomClient(
         host="127.0.0.1",
-        port=8080,
+        port=15035,
         username="alice",
         room="general",
     )
@@ -166,7 +166,7 @@ def test_multiple_events_callback(mock_mp2_client):
 
     client = ThreadedRoomClient(
         host="127.0.0.1",
-        port=8080,
+        port=15035,
         username="alice",
         room="general",
     )
@@ -195,7 +195,7 @@ def test_error_callback_invoked_on_exception(mock_mp2_client):
 
     client = ThreadedRoomClient(
         host="127.0.0.1",
-        port=8080,
+        port=15035,
         username="alice",
         room="general",
     )
@@ -233,7 +233,7 @@ def test_callback_exception_does_not_crash_thread(mock_mp2_client):
 
     client = ThreadedRoomClient(
         host="127.0.0.1",
-        port=8080,
+        port=15035,
         username="alice",
         room="general",
     )
@@ -283,7 +283,7 @@ def test_stop_terminates_thread(mock_mp2_client):
 
     client = ThreadedRoomClient(
         host="127.0.0.1",
-        port=8080,
+        port=15035,
         username="alice",
         room="general",
     )
@@ -303,7 +303,7 @@ def test_stop_does_nothing_if_not_running(mock_mp2_client):
     """Test that stop() is safe to call when client is not running."""
     client = ThreadedRoomClient(
         host="127.0.0.1",
-        port=8080,
+        port=15035,
         username="alice",
         room="general",
     )
@@ -321,7 +321,7 @@ def test_client_context_manager_usage(mock_mp2_client):
 
     client = ThreadedRoomClient(
         host="127.0.0.1",
-        port=8080,
+        port=15035,
         username="alice",
         room="general",
     )
@@ -347,7 +347,7 @@ def test_token_store_path_integration(mock_mp2_client, tmp_path: Path):
 
         client = ThreadedRoomClient(
             host="127.0.0.1",
-            port=8080,
+            port=15035,
             username="alice",
             room="general",
             token_store_path=token_file,
@@ -372,7 +372,7 @@ def test_on_error_callback_raises_exception(mock_mp2_client):
 
     client = ThreadedRoomClient(
         host="127.0.0.1",
-        port=8080,
+        port=15035,
         username="alice",
         room="general",
     )
@@ -403,7 +403,7 @@ def test_unexpected_exception_in_subscription_loop(mock_mp2_client):
 
     client = ThreadedRoomClient(
         host="127.0.0.1",
-        port=8080,
+        port=15035,
         username="alice",
         room="general",
     )
@@ -433,7 +433,7 @@ def test_socket_close_exception_during_cleanup(mock_mp2_client):
 
     client = ThreadedRoomClient(
         host="127.0.0.1",
-        port=8080,
+        port=15035,
         username="alice",
         room="general",
     )
@@ -469,7 +469,7 @@ def test_stop_event_checked_during_iteration(mock_mp2_client):
 
     client = ThreadedRoomClient(
         host="127.0.0.1",
-        port=8080,
+        port=15035,
         username="alice",
         room="general",
     )

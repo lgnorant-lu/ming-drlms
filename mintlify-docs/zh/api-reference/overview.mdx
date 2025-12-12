@@ -130,7 +130,7 @@ HTTP 状态码：
 <Tabs>
   <Tab title="curl">
     ```bash
-    curl -X POST http://localhost:8081/events \
+    curl -X POST http://localhost:15019/events \
       -H "Content-Type: application/json" \
       -d '{
         "room": "general",
@@ -149,7 +149,7 @@ HTTP 状态码：
         client_ts = 1702300000
     } | ConvertTo-Json
 
-    Invoke-RestMethod -Uri "http://localhost:8081/events" -Method Post -Body $body -ContentType "application/json"
+    Invoke-RestMethod -Uri "http://localhost:15019/events" -Method Post -Body $body -ContentType "application/json"
     ```
   </Tab>
 </Tabs>
@@ -159,12 +159,12 @@ HTTP 状态码：
 <Tabs>
   <Tab title="curl">
     ```bash
-    curl "http://localhost:8081/events?room=general&since_seq=0&limit=20"
+    curl "http://localhost:15019/events?room=general&since_seq=0&limit=20"
     ```
   </Tab>
   <Tab title="PowerShell">
     ```powershell
-    Invoke-RestMethod "http://localhost:8081/events?room=general&since_seq=0&limit=20"
+    Invoke-RestMethod "http://localhost:15019/events?room=general&since_seq=0&limit=20"
     ```
   </Tab>
 </Tabs>
@@ -174,12 +174,12 @@ HTTP 状态码：
 <Tabs>
   <Tab title="curl">
     ```bash
-    curl http://localhost:8081/health
+    curl http://localhost:15019/health
     ```
   </Tab>
   <Tab title="PowerShell">
     ```powershell
-    Invoke-RestMethod http://localhost:8081/health
+    Invoke-RestMethod http://localhost:15019/health
     ```
   </Tab>
 </Tabs>
@@ -189,12 +189,12 @@ HTTP 状态码：
 <Tabs>
   <Tab title="curl">
     ```bash
-    curl http://localhost:8081/.well-known/drlms-relay.json
+    curl http://localhost:15019/.well-known/drlms-relay.json
     ```
   </Tab>
   <Tab title="PowerShell">
     ```powershell
-    Invoke-RestMethod http://localhost:8081/.well-known/drlms-relay.json
+    Invoke-RestMethod http://localhost:15019/.well-known/drlms-relay.json
     ```
   </Tab>
 </Tabs>

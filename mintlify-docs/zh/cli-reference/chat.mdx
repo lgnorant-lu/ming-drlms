@@ -21,13 +21,13 @@ ming-drlms chat --help
      <Tab title="Linux/WSL">
        ```bash
        export DRLMS_BACKEND_MODE=relay
-       export DRLMS_DEFAULT_RELAYS=http://localhost:8081
+       export DRLMS_DEFAULT_RELAYS=http://localhost:15019
        ```
      </Tab>
      <Tab title="Windows">
        ```powershell
        $env:DRLMS_BACKEND_MODE = "relay"
-       $env:DRLMS_DEFAULT_RELAYS = "http://localhost:8081"
+       $env:DRLMS_DEFAULT_RELAYS = "http://localhost:15019"
        ```
      </Tab>
    </Tabs>
@@ -102,7 +102,7 @@ ming-drlms chat send --to 1234 --message "Hello!" --room myroom
 正在加密消息...
 加密完成: 128 字节
 正在投递到 Relay...
-消息已投递到 http://localhost:8081
+消息已投递到 http://localhost:15019
 
 消息发送成功
 房间: dm_1234_ABCD
@@ -164,7 +164,7 @@ ming-drlms chat recv --room myroom --since 100
 
 ```
 正在查询房间 myroom... 的消息
-从 http://localhost:8081 获取到 3 条消息
+从 http://localhost:15019 获取到 3 条消息
 
           消息列表
 ┌────────────┬─────────┬────────────────────────┐

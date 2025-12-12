@@ -51,14 +51,14 @@ tls = false
 ### 快速启动
 
 ```bash
-ming-drlms server up --port 8080 -d server_files
+ming-drlms server up --port 15035 -d server_files
 ```
 
 ### 启动选项
 
 | 选项 | 简写 | 默认值 | 说明 |
 |------|------|--------|------|
-| `--port` | `-p` | `8080` | 监听端口 |
+| `--port` | `-p` | `15035` | 监听端口 |
 | `--data-dir` | `-d` | `server_files` | 数据目录 |
 | `--strict/--no-strict` | `-S` | `true` | 严格认证模式 |
 | `--max-conn` | `-m` | `128` | 最大连接数 |
@@ -349,7 +349,7 @@ MP2 服务器支持与其他 MP2 服务器联邦：
     ming-drlms server status
     
     # 检查端口
-    netstat -an | grep 8080  # server up 默认端口
+    netstat -an | grep 15035  # server up 默认端口
     ```
   </Tab>
   <Tab title="Windows">
@@ -358,7 +358,7 @@ MP2 服务器支持与其他 MP2 服务器联邦：
     ming-drlms server status
     
     # 检查端口
-    netstat -an | findstr 8080
+    netstat -an | findstr 15035
     ```
   </Tab>
 </Tabs>

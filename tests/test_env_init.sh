@@ -38,7 +38,7 @@ set_test_data_dir() {
 
 TEST_DATA_DIR_DEFAULT="${TEST_DATA_DIR:-/tmp/drlms_test_env_$$}"
 set_test_data_dir "$TEST_DATA_DIR_DEFAULT"
-TEST_PORT="${TEST_PORT:-8080}"
+TEST_PORT="${TEST_PORT:-15035}"
 TEST_HOST="${TEST_HOST:-127.0.0.1}"
 START_SERVER=1
 
@@ -350,6 +350,11 @@ show_test_info() {
     echo "  export TEST_PORT='$TEST_PORT'"
     echo "  export TEST_HOST='$TEST_HOST'"
     echo ""
+    log_info "Additional environment variables:"
+    echo "  export DRLMS_MP2_HOST=127.0.0.1"
+    echo "  export DRLMS_MP2_PORT=15035"
+    echo "  export DRLMS_BACKEND_MODE=mp2"
+    echo ""
 }
 
 # 主函数
@@ -379,7 +384,7 @@ main() {
                 echo "Usage: $0 [OPTIONS]"
                 echo "Options:"
                 echo "  --keep-data     Keep test data directory after exit"
-                echo "  --port PORT     Use specific port (default: 8080)"
+                echo "  --port PORT     Use specific port (default: 15035)"
                 echo "  --data-dir DIR  Use specific data directory"
                 echo "  --no-server     Prepare data only (do not start server)"
                 echo "  --help          Show this help message"

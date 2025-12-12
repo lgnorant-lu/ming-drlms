@@ -126,7 +126,7 @@ def test_room_pub_stdin(
         stdin=True,
         ephemeral=True,
         host="127.0.0.1",
-        port=8080,
+        port=15035,
         user="alice",
         token_store=None,
         timeout=10.0,
@@ -511,7 +511,7 @@ def test_space_join_success(
     assert result.exit_code == 0
     assert "EVT|TEXT|r1|alice|tok|1|5" in result.output
     assert "hello" in result.output
-    key = "127.0.0.1:8080:r1"
+    key = "127.0.0.1:15035:r1"
     assert fake_state["rooms"][key]["last_event_id"] == 5
 
 
@@ -542,7 +542,7 @@ def test_space_join_with_save_dir(
         ],
     )
     assert result.exit_code == 0
-    key = "127.0.0.1:8080:r1"
+    key = "127.0.0.1:15035:r1"
     assert fake_state["rooms"][key]["last_event_id"] == 10
     assert log_file.exists()
     assert "EVT|FILE|r1|alice|tok|1|file|10" in log_file.read_text()
@@ -638,7 +638,7 @@ def test_space_send_text_success(
     )
     assert result.exit_code == 0
     assert "OK|PUBT|7" in result.output
-    key = "127.0.0.1:8080:r1"
+    key = "127.0.0.1:15035:r1"
     assert fake_state["rooms"][key]["last_event_id"] == 7
 
 
@@ -696,7 +696,7 @@ def test_space_send_file_success(
     )
     assert result.exit_code == 0
     assert "OK|PUBF|9" in result.output
-    key = "127.0.0.1:8080:r1"
+    key = "127.0.0.1:15035:r1"
     assert fake_state["rooms"][key]["last_event_id"] == 9
 
 
@@ -789,7 +789,7 @@ def test_space_chat_basic(
     space.space_chat(
         room="room",
         host="127.0.0.1",
-        port=8080,
+        port=15035,
         user="alice",
         password="password",
         since_id=5,
@@ -798,7 +798,7 @@ def test_space_chat_basic(
     assert "EVT|FILE|room|alice|tok|5|attachment|0" in out
     assert "NOTICE|info" in out
     assert "pong" in out
-    assert state["rooms"]["127.0.0.1:8080:room"]["last_event_id"] == 6
+    assert state["rooms"]["127.0.0.1:15035:room"]["last_event_id"] == 6
 
 
 def test_space_chat_login_failure(
@@ -815,7 +815,7 @@ def test_space_chat_login_failure(
     space.space_chat(
         room="room",
         host="127.0.0.1",
-        port=8080,
+        port=15035,
         user="alice",
         password="pw",
         since_id=0,
@@ -882,7 +882,7 @@ def test_room_service_publish_behavior() -> None:
     service = RoomService(client_factory=client_factory)
     result = service.publish(
         host="127.0.0.1",
-        port=8080,
+        port=15035,
         user="alice",
         room="r1",
         payload=b"data",
@@ -910,7 +910,7 @@ def test_room_service_publish_error() -> None:
     with pytest.raises(RoomServiceError):
         service.publish(
             host="127.0.0.1",
-            port=8080,
+            port=15035,
             user="alice",
             room="r1",
             payload=b"data",
@@ -929,7 +929,7 @@ def test_room_service_fetch_info_variants() -> None:
     )
     info = service.fetch_info(
         host="127.0.0.1",
-        port=8080,
+        port=15035,
         user="alice",
         password="pw",
         room="r1",
@@ -945,7 +945,7 @@ def test_room_service_fetch_info_variants() -> None:
     )
     info2 = service2.fetch_info(
         host="127.0.0.1",
-        port=8080,
+        port=15035,
         user="alice",
         password="pw",
         room="r2",
@@ -981,7 +981,7 @@ def test_space_service_join_text_event() -> None:
     options = SpaceJoinOptions(
         room="r",
         host="127.0.0.1",
-        port=8080,
+        port=15035,
         user="alice",
         password="pw",
         since_id=0,
@@ -1009,7 +1009,7 @@ def test_space_service_join_connection_error() -> None:
     options = SpaceJoinOptions(
         room="r",
         host="127.0.0.1",
-        port=8080,
+        port=15035,
         user="alice",
         password="pw",
         since_id=0,
@@ -1039,7 +1039,7 @@ def test_space_service_history_behaviour() -> None:
     options = SpaceHistoryOptions(
         room="r",
         host="127.0.0.1",
-        port=8080,
+        port=15035,
         user="alice",
         password="pw",
         limit=10,
@@ -1074,7 +1074,7 @@ def test_space_service_publish_and_leave(tmp_path: Path) -> None:
     )
     resp, eid = service.publish_text(
         host="127.0.0.1",
-        port=8080,
+        port=15035,
         user="alice",
         password="pw",
         room="r",
@@ -1095,7 +1095,7 @@ def test_space_service_publish_and_leave(tmp_path: Path) -> None:
     progress = []
     resp_file, eid_file = service_file.publish_file(
         host="127.0.0.1",
-        port=8080,
+        port=15035,
         user="alice",
         password="pw",
         room="r",
@@ -1115,7 +1115,7 @@ def test_space_service_publish_and_leave(tmp_path: Path) -> None:
     )
     resp_leave = service_leave.leave(
         host="127.0.0.1",
-        port=8080,
+        port=15035,
         user="alice",
         password="pw",
         room="r",
@@ -1132,7 +1132,7 @@ def test_space_service_publish_and_leave(tmp_path: Path) -> None:
     with pytest.raises(SpaceServiceError):
         service_leave_err.leave(
             host="127.0.0.1",
-            port=8080,
+            port=15035,
             user="alice",
             password="pw",
             room="r",

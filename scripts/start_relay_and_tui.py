@@ -37,7 +37,7 @@ import urllib.error
 
 
 RELAY_DEFAULT_HOST = "127.0.0.1"
-RELAY_DEFAULT_PORT = 8081
+RELAY_DEFAULT_PORT = 15019
 RELAY_HEALTH_PATH = "/events?room=__health__&since_seq=0&limit=1"
 
 
@@ -102,7 +102,7 @@ def _start_relay(
     """Start relay server via uvicorn as subprocess.
 
     By default equivalent to:
-        python -m uvicorn ming_drlms.relay.server:app --host 127.0.0.1 --port 8081
+        python -m uvicorn ming_drlms.relay.server:app --host 127.0.0.1 --port 15019
     """
 
     host = RELAY_DEFAULT_HOST
@@ -189,7 +189,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     parser.add_argument(
         "--relay-base-url",
-        help="Override relay base URL (default: from DRLMS_RELAY_BASE_URL or http://127.0.0.1:8081)",
+        help="Override relay base URL (default: from DRLMS_RELAY_BASE_URL or http://127.0.0.1:15019)",
     )
     args = parser.parse_args(argv)
 

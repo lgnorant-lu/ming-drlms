@@ -284,7 +284,7 @@ class TestStorageReceiptDataclass:
         from ming_drlms.relay.manager import StorageReceipt
 
         receipt = StorageReceipt(
-            relay_url="http://localhost:8081",
+            relay_url="http://localhost:15019",
             relay_id="relay-test",
             server_seq=1,
             server_ts=1733800000,
@@ -304,7 +304,7 @@ class TestStorageReceiptDataclass:
         from ming_drlms.relay.manager import StorageReceipt
 
         receipt = StorageReceipt(
-            relay_url="http://localhost:8081",
+            relay_url="http://localhost:15019",
             relay_id="relay-test",
             server_seq=1,
             server_ts=1733800000,

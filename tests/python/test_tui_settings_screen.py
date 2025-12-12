@@ -32,7 +32,7 @@ class MockUnifiedConfig(UnifiedConfig):
         self.general.update_check = True
         self.tui.theme = "cyberpunk"
         self.backend.mode = "relay"
-        self.backend.relay.urls = ["http://test.relay:8081"]
+        self.backend.relay.urls = ["http://test.relay:15019"]
         self.backend.mp2.host = "192.168.1.1"
         self.backend.mp2.port = 15036
         self.backend.mp2.tls = True
@@ -85,7 +85,7 @@ async def test_settings_loads_config_into_ui(monkeypatch: pytest.MonkeyPatch):
         assert screen._get_select("cfg_theme") == "cyberpunk"
         assert screen._get_select("cfg_language") == "zh"
         assert screen._get_select("cfg_backend_mode") == "relay"
-        assert screen._get_input("cfg_relay_urls") == "http://test.relay:8081"
+        assert screen._get_input("cfg_relay_urls") == "http://test.relay:15019"
         assert screen._get_input("cfg_mp2_host") == "192.168.1.1"
         assert screen._get_input("cfg_mp2_port") == "15036"
         assert screen._get_checkbox("cfg_mp2_tls") is True

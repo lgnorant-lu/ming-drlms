@@ -170,7 +170,7 @@ cleanup() {
 trap cleanup EXIT
 
 HOST=${1:-${TEST_HOST:-127.0.0.1}}
-PORT=${2:-${TEST_PORT:-8080}}
+PORT=${2:-15035}
 FILE_RAW=${3:-${TEST_FILE:-${PROJECT_ROOT}/README.md}}
 OUT_RAW=${4:-${TEST_OUT:-}}
 

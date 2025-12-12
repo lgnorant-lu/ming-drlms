@@ -146,9 +146,11 @@ DRLMS_RELAY_SIGNING_KEY=$NEW_KEY
 # Step 4: 重启服务
 systemctl restart drlms-relay
 
-# Step 5: 验证新密钥生效
-curl -X POST http://relay:8081/events -d '...'
-# 检查返回的 relay_signature 是否可被新密钥验证
+# Verification:
+```bash
+curl http://localhost:15019/health
+# Expect: "pubkey": "<hex_pubkey>"
+```# 检查返回的 relay_signature 是否可被新密钥验证
 
 # Step 6: 观察期后移除旧密钥
 ```

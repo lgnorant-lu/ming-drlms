@@ -425,8 +425,8 @@ class TestKeyserverClient:
         room = client._keyserver_room("https://relay.example.com")
         assert room == "__keyserver__relay.example.com"
 
-        room = client._keyserver_room("https://relay.example.com:8080")
-        assert room == "__keyserver__relay.example.com_8080"
+        room = client._keyserver_room("https://relay.example.com:15035")
+        assert room == "__keyserver__relay.example.com_15035"
 
     def test_client_with_cache(self, tmp_path):
         """Test client uses cache."""

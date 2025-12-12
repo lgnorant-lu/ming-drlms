@@ -24,7 +24,7 @@ if [ -z "$ENV_FILE" ] || [ ! -f "$ENV_FILE" ]; then
     export DRLMS_BACKEND=mp2
     export DRLMS_MP2_HOST=127.0.0.1
     export DRLMS_MP2_PORT=15035
-    export DRLMS_RELAY_BASE_URL=http://127.0.0.1:8081
+    export DRLMS_RELAY_BASE_URL=http://127.0.0.1:15019
     export DRLMS_LOG_LEVEL=DEBUG
     export DRLMS_UPDATE_CHECK=0
     export MING_DRLMS_CONFIG_DIR="$(pwd)/.drlms"

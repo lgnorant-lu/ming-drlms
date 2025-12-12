@@ -20,7 +20,7 @@
 ./tests/test_env_init.sh
 
 # 自定义配置
-./tests/test_env_init.sh --port 8081 --data-dir /tmp/my_test --keep-data
+./tests/test_env_init.sh --port 15019 --data-dir /tmp/my_test --keep-data
 
 # 查看帮助
 ./tests/test_env_init.sh --help
@@ -160,13 +160,13 @@ set -x
 # 检查服务器状态（使用共享 helper）
 source tests/lib/socket_helpers.sh
 ensure_python
-if port_is_open 127.0.0.1 8080; then echo "server listening"; else echo "server offline"; fi
+if port_is_open 127.0.0.1 15035; then echo "server listening"; else echo "server offline"; fi
 
 # 查看服务器日志
 tail -f /tmp/drlms_server.log
 
 # 手动测试登录
-printf 'LOGIN|testuser|testpass\nQUIT\n' | socket_request 127.0.0.1 8080
+printf 'LOGIN|testuser|testpass\nQUIT\n' | socket_request 127.0.0.1 15035
 ```
 
 ## 最佳实践

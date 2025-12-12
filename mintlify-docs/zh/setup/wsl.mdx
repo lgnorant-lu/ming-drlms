@@ -107,7 +107,7 @@ export MING_DRLMS_CONFIG_DIR=/mnt/d/drlms/config
 
 ```bash
 export DRLMS_BACKEND_MODE=relay
-export DRLMS_DEFAULT_RELAYS=http://localhost:8081
+export DRLMS_DEFAULT_RELAYS=http://localhost:15019
 ```
 
 ### 永久设置
@@ -117,7 +117,7 @@ export DRLMS_DEFAULT_RELAYS=http://localhost:8081
 ```bash
 # DRLMS 配置
 export DRLMS_BACKEND_MODE=relay
-export DRLMS_DEFAULT_RELAYS=http://localhost:8081
+export DRLMS_DEFAULT_RELAYS=http://localhost:15019
 export DRLMS_LOG_LEVEL=INFO
 ```
 
@@ -146,10 +146,10 @@ WSL 2 使用虚拟网络，localhost 转发默认启用。
 
 ```powershell
 # Windows 侧（使用 PowerShell）
-Invoke-RestMethod http://localhost:8081/health
+Invoke-RestMethod http://localhost:15019/health
 
 # 或使用 curl（需安装）
-curl http://localhost:8081/health
+curl http://localhost:15019/health
 ```
 
 从 WSL 访问 Windows 服务：
@@ -167,7 +167,7 @@ cat /etc/resolv.conf | grep nameserver | awk '{print $2}'
 
 ```powershell
 # PowerShell（管理员）
-netsh interface portproxy add v4tov4 listenport=8081 listenaddress=0.0.0.0 connectport=8081 connectaddress=$(wsl hostname -I | cut -d' ' -f1)
+netsh interface portproxy add v4tov4 listenport=15019 listenaddress=0.0.0.0 connectport=15019 connectaddress=$(wsl hostname -I | cut -d' ' -f1)
 ```
 
 ---

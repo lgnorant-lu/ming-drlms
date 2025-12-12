@@ -20,7 +20,9 @@ class SocketStream:
 
     __slots__ = ("_sock", "_buffer", "_max_chunk")
 
-    def __init__(self, sock: Optional[socket.socket] = None, *, max_chunk: int = 4096) -> None:
+    def __init__(
+        self, sock: Optional[socket.socket] = None, *, max_chunk: int = 4096
+    ) -> None:
         self._sock: Optional[socket.socket] = sock
         self._buffer = bytearray()
         self._max_chunk = max(1024, max_chunk)

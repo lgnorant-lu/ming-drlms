@@ -95,7 +95,7 @@ verify_user() {
     local username="$1"
     local password="$2"
     local host="${3:-127.0.0.1}"
-    local port="${4:-8080}"
+    local port="${4:-15035}"
     
     log_info "Verifying user: $username"
     
@@ -202,7 +202,7 @@ main() {
                 log_error "Usage: $0 verify USERNAME PASSWORD [HOST] [PORT]"
                 exit 1
             fi
-            verify_user "$2" "$3" "${4:-127.0.0.1}" "${5:-8080}"
+            verify_user "$2" "$3" "${4:-127.0.0.1}" "${5:-15035}"
             ;;
         "list")
             list_users "${2:-$DEFAULT_DATA_DIR}"

@@ -30,7 +30,7 @@ class TestChatCLI:
         from ming_drlms.core.backend import BackendMode
 
         monkeypatch.setenv("DRLMS_BACKEND_MODE", "relay")
-        monkeypatch.setenv("DRLMS_DEFAULT_RELAYS", "http://localhost:8081")
+        monkeypatch.setenv("DRLMS_DEFAULT_RELAYS", "http://localhost:15019")
 
         config = _get_relay_config()
 

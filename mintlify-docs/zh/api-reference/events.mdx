@@ -88,7 +88,7 @@ Relay 服务器不解析此信封，仅原样存储和转发。客户端负责�
 <Tabs>
   <Tab title="curl">
     ```bash
-    curl -X POST http://localhost:8081/events \
+    curl -X POST http://localhost:15019/events \
       -H "Content-Type: application/json" \
       -d '{
         "room": "general",
@@ -109,7 +109,7 @@ Relay 服务器不解析此信封，仅原样存储和转发。客户端负责�
         client_ts = 1702300000
     } | ConvertTo-Json
 
-    Invoke-RestMethod -Uri "http://localhost:8081/events" -Method Post -Body $body -ContentType "application/json"
+    Invoke-RestMethod -Uri "http://localhost:15019/events" -Method Post -Body $body -ContentType "application/json"
     ```
   </Tab>
 </Tabs>
@@ -165,12 +165,12 @@ GET /events?room={room_id}&since_seq={seq}&limit={limit}
 <Tabs>
   <Tab title="curl">
     ```bash
-    curl "http://localhost:8081/events?room=general&since_seq=0&limit=50"
+    curl "http://localhost:15019/events?room=general&since_seq=0&limit=50"
     ```
   </Tab>
   <Tab title="PowerShell">
     ```powershell
-    Invoke-RestMethod "http://localhost:8081/events?room=general&since_seq=0&limit=50"
+    Invoke-RestMethod "http://localhost:15019/events?room=general&since_seq=0&limit=50"
     ```
   </Tab>
 </Tabs>
@@ -203,12 +203,12 @@ GET /events/by-ids?room={room_id}&ids={hash1},{hash2},{hash3}
 <Tabs>
   <Tab title="curl">
     ```bash
-    curl "http://localhost:8081/events/by-ids?room=general&ids=a591a6d4...,b692b7e5..."
+    curl "http://localhost:15019/events/by-ids?room=general&ids=a591a6d4...,b692b7e5..."
     ```
   </Tab>
   <Tab title="PowerShell">
     ```powershell
-    Invoke-RestMethod "http://localhost:8081/events/by-ids?room=general&ids=a591a6d4...,b692b7e5..."
+    Invoke-RestMethod "http://localhost:15019/events/by-ids?room=general&ids=a591a6d4...,b692b7e5..."
     ```
   </Tab>
 </Tabs>

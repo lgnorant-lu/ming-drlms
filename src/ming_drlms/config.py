@@ -30,7 +30,7 @@ class FederationConfig:
 
 @dataclass
 class CLIConfig:
-    port: int = 8080
+    port: int = 15035
     data_dir: Path = Path("server_files")
     strict: bool = True
     max_conn: int = 128
@@ -182,7 +182,7 @@ def load_config(path: Optional[Path]) -> CLIConfig:
 
 def write_template(path: Path) -> None:
     tpl = {
-        "port": 8080,
+        "port": 15035,
         "data_dir": "server_files",
         "strict": True,
         "max_conn": 128,
@@ -221,7 +221,7 @@ def write_tui_template_toml(path: Path) -> None:
         "general": {
             "backend": "mp2",
             "relay": {
-                "base_url": "http://127.0.0.1:8081",
+                "base_url": "http://127.0.0.1:15019",
                 "enforce_signed": True,
                 "enforce_verify": True,
             },

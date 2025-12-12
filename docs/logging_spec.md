@@ -66,7 +66,7 @@
     - `... | INFO  | federation.c | [federation] Initialized: enabled=1, server_id=server-a, trusted_servers=1`
 - 客户端（TUI）：
   - 快捷键修复：设置页绑定为 `Ctrl+Comma`（原 `Ctrl+,` 在 Textual 里会触发空键错误）。
-  - 登录目标请包含端口，如：`localhost:15034`（否则默认端口 `8080` 可能连不上服务）。
+  - 登录目标请包含端口，如：`localhost:15035`（否则默认端口 `15035` 可能连不上服务）。
   - Python 端日志目录与级别可通过 `DRLMS_LOG_*` 环境变量覆盖，启动时 `setup_logging()` 会读取。
 
 ## 常见问答

@@ -88,7 +88,7 @@ def _print_room_event(event: RoomEvent, *, json_out: bool) -> None:
 def room_sub(
     room: str = typer.Option(..., "--room", "-r", help="房间名"),
     host: str = typer.Option("127.0.0.1", "--host", "-H"),
-    port: int = typer.Option(8080, "--port", "-p"),
+    port: int = typer.Option(15035, "--port", "-p"),
     user: str = typer.Option("alice", "--user", "-u"),
     since_id: int = typer.Option(0, "--since-id", "-s", help="从指定 event_id 开始"),
     limit: int = typer.Option(0, "--limit", "-n", help="最多接收事件数量 (0 表示不限)"),
@@ -528,7 +528,7 @@ def room_download(
     event_id: int = typer.Option(..., "--event-id", "-e", help="文件事件ID"),
     output: Path = typer.Option(..., "--output", "-o", help="输出文件路径"),
     host: str = typer.Option("127.0.0.1", "--host", "-H"),
-    port: int = typer.Option(8080, "--port", "-p"),
+    port: int = typer.Option(15035, "--port", "-p"),
     user: str = typer.Option("alice", "--user", "-u"),
     token_store: Optional[Path] = typer.Option(None, "--token-store"),
     timeout: float = typer.Option(10.0, "--timeout", help="socket 超时时间"),

@@ -39,7 +39,7 @@ def test_cli_e2ee_generate_keys(
     token_path = tmp_path / "tokens.json"
     username = "alice"
     host = "127.0.0.1"
-    port = 8080
+    port = 15035
     _prime_token_store(token_path, username, host, port)
 
     client_sock, server_sock = socket.socketpair()
@@ -99,7 +99,7 @@ def test_cli_e2ee_prekey_bundle(
     token_path = tmp_path / "tokens.json"
     username = "bob"
     host = "127.0.0.1"
-    port = 8080
+    port = 15035
     _prime_token_store(token_path, username, host, port)
 
     client_sock, server_sock = socket.socketpair()

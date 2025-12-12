@@ -143,7 +143,7 @@ class DRLMSApp(App):
         # Parse server address
         server_parts = message.server.split(":")
         host = server_parts[0]
-        port = int(server_parts[1]) if len(server_parts) > 1 else 8080
+        port = int(server_parts[1]) if len(server_parts) > 1 else 15035
 
         # Run login in a worker thread to avoid freezing UI
         self.run_worker(
@@ -273,7 +273,7 @@ class DRLMSApp(App):
         """Handle login attempt."""
         server_parts = message.server.split(":")
         host = server_parts[0]
-        port = int(server_parts[1]) if len(server_parts) > 1 else 8080
+        port = int(server_parts[1]) if len(server_parts) > 1 else 15035
 
         # Run the synchronous login worker in a thread
         self.run_worker(

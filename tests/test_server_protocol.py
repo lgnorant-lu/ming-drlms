@@ -26,7 +26,7 @@ from ming_drlms.core.mp2_transport import MP2Frame, read_frame, write_frame
 from ming_drlms.proto.schema.v2 import common_pb2, room_pb2
 
 DEFAULT_HOST = "127.0.0.1"
-DEFAULT_PORT = 8080
+DEFAULT_PORT = 15035
 _SOCKET_TIMEOUT = 10.0
 _SERVER_START_TIMEOUT = 2.0
 _PORT_REUSE_GRACE = 5.0
@@ -563,19 +563,22 @@ def server_binary_path() -> Path:
 
 @pytest.fixture(scope="session")
 def default_host() -> str:
-    return DEFAULT_HOST
+    return "127.0.0.1"
 
 
-def _next_free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind((DEFAULT_HOST, 0))
-        return sock.getsockname()[1]
+PORT = 15035
+
+
+def send_cmd(cmd):
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.connect(("127.0.0.1", PORT))
+        s.sendall(cmd.encode() + b"\n")
+        return s.recv(1024).decode()[1]
 
 
 @pytest.mark.integration
 def test_server_protocol_suite(server_binary_path: Path, default_host: str) -> None:
-    port = _next_free_port()
-    run_mp2_protocol_tests(default_host, port, server_binary_path)
+    run_mp2_protocol_tests(default_host, DEFAULT_PORT, server_binary_path)
 
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:

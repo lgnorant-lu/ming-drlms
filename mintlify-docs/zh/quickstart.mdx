@@ -100,7 +100,7 @@ DRLMS 支持两种传输模式：
 
 ```bash
 ming-drlms config set backend.mode relay
-ming-drlms config set backend.relay.urls http://localhost:8081
+ming-drlms config set backend.relay.urls http://localhost:15019
 ming-drlms config set identity.user alice
 ```
 
@@ -110,13 +110,13 @@ ming-drlms config set identity.user alice
   <Tab title="Linux/WSL">
     ```bash
     export DRLMS_BACKEND_MODE=relay
-    export DRLMS_DEFAULT_RELAYS=http://localhost:8081
+    export DRLMS_DEFAULT_RELAYS=http://localhost:15019
     ```
   </Tab>
   <Tab title="Windows">
     ```powershell
     $env:DRLMS_BACKEND_MODE = "relay"
-    $env:DRLMS_DEFAULT_RELAYS = "http://localhost:8081"
+    $env:DRLMS_DEFAULT_RELAYS = "http://localhost:15019"
     ```
   </Tab>
 </Tabs>
@@ -283,7 +283,7 @@ ming-drlms xeddsa-selftest --user YourName
 使用 `--port` 更换端口：
 
 ```bash
-ming-drlms server-up --port 8080
+ming-drlms server-up --port 15035
 ```
 
 ### WSL 路径问题

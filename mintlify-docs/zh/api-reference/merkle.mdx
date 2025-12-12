@@ -46,12 +46,12 @@ GET /merkle/root?room={room_id}
 <Tabs>
   <Tab title="curl">
     ```bash
-    curl "http://localhost:8081/merkle/root?room=general"
+    curl "http://localhost:15019/merkle/root?room=general"
     ```
   </Tab>
   <Tab title="PowerShell">
     ```powershell
-    Invoke-RestMethod "http://localhost:8081/merkle/root?room=general"
+    Invoke-RestMethod "http://localhost:15019/merkle/root?room=general"
     ```
   </Tab>
 </Tabs>
@@ -110,7 +110,7 @@ Content-Type: application/json
 <Tabs>
   <Tab title="curl">
     ```bash
-    curl -X POST http://localhost:8081/merkle/diff \
+    curl -X POST http://localhost:15019/merkle/diff \
       -H "Content-Type: application/json" \
       -d '{
         "room": "general",
@@ -127,7 +127,7 @@ Content-Type: application/json
         event_ids = @("hash_1", "hash_2")
     } | ConvertTo-Json
 
-    Invoke-RestMethod -Uri "http://localhost:8081/merkle/diff" -Method Post -Body $body -ContentType "application/json"
+    Invoke-RestMethod -Uri "http://localhost:15019/merkle/diff" -Method Post -Body $body -ContentType "application/json"
     ```
   </Tab>
 </Tabs>
@@ -191,12 +191,12 @@ def verify_proof(event_id, proof, root):
 <Tabs>
   <Tab title="curl">
     ```bash
-    curl "http://localhost:8081/merkle/proof?room=general&event_id=a591a6d4..."
+    curl "http://localhost:15019/merkle/proof?room=demo&event_id=10"
     ```
   </Tab>
   <Tab title="PowerShell">
     ```powershell
-    Invoke-RestMethod "http://localhost:8081/merkle/proof?room=general&event_id=a591a6d4..."
+    Invoke-RestMethod "http://localhost:15019/merkle/proof?room=demo&event_id=10"
     ```
   </Tab>
 </Tabs>

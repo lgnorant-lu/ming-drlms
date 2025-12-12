@@ -42,7 +42,7 @@ relay_app = typer.Typer(
 @relay_app.command("post")
 def relay_post(
     room: str = typer.Option(..., "--room", "-r"),
-    base_url: str = typer.Option("http://127.0.0.1:8081", "--base-url"),
+    base_url: str = typer.Option("http://127.0.0.1:15019", "--base-url"),
     ciphertext: Optional[str] = typer.Option(None, "--ciphertext", "-c"),
     content_len: Optional[int] = typer.Option(None, "--content-len"),
     client_event_hash: Optional[str] = typer.Option(None, "--client-hash"),
@@ -238,7 +238,7 @@ def relay_post(
 @relay_app.command("sync")
 def relay_sync(
     room: str = typer.Option(..., "--room", "-r"),
-    base_url: str = typer.Option("http://127.0.0.1:8081", "--base-url"),
+    base_url: str = typer.Option("http://127.0.0.1:15019", "--base-url"),
     limit: int = typer.Option(100, "--limit"),
 ):
     client = RelayHTTPClient(base_url)
@@ -313,7 +313,7 @@ def relay_sync(
 def relay_post_simple(
     room: str = typer.Option(..., "--room", "-r", help="Target room"),
     content: str = typer.Option(..., "--content", "-c", help="Message content"),
-    base_url: str = typer.Option("http://127.0.0.1:8081", "--base-url"),
+    base_url: str = typer.Option("http://127.0.0.1:15019", "--base-url"),
     content_type: str = typer.Option("text", "--content-type"),
     username: Optional[str] = typer.Option(
         None, "--user", "-u", help="Username for identity lookup"

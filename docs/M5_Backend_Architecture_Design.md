@@ -1239,7 +1239,7 @@ OK|LOGIN|protocol_version|server_version
 `drlms.yaml` (服务器配置):
 ```yaml
 server:
-  port: 8080
+  port: 15035
   max_connections: 128
 
 rooms:

@@ -171,7 +171,7 @@ class SettingsScreen(Screen):
             )
             with Horizontal(classes="settings-row"):
                 yield Label("Relay 地址")
-                yield Input(placeholder="http://localhost:8081", id="cfg_relay_urls")
+                yield Input(placeholder="http://localhost:15019", id="cfg_relay_urls")
 
         with Vertical(classes="settings-section"):
             yield Label("MP2 服务器配置", classes="settings-section-title")

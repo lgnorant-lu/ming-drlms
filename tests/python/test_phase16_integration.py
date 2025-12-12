@@ -123,7 +123,7 @@ class TestNetworkMonitorRecovery:
     async def test_network_recovery_event(self):
         """NetworkMonitor fires RECOVERED event on network comeback."""
         monitor = NetworkMonitor(check_interval=0.1)
-        monitor.set_known_relays(["http://localhost:8081"])
+        monitor.set_known_relays(["http://localhost:15019"])
 
         events_received = []
 
@@ -346,7 +346,7 @@ class TestRCV01StorageReceipts:
         from ming_drlms.relay.manager import StorageReceipt
 
         receipt = StorageReceipt(
-            relay_url="http://localhost:8081",
+            relay_url="http://localhost:15019",
             relay_id="relay-test",
             server_seq=42,
             server_ts=1733800000,
@@ -354,7 +354,7 @@ class TestRCV01StorageReceipts:
             verified=True,
         )
 
-        assert receipt.relay_url == "http://localhost:8081"
+        assert receipt.relay_url == "http://localhost:15019"
         assert receipt.relay_id == "relay-test"
         assert receipt.server_seq == 42
         assert receipt.verified is True
@@ -466,7 +466,7 @@ class TestReceiptStore:
         receipt_id = store.save_receipt(
             event_id="event123",
             room="room1",
-            relay_url="http://localhost:8081",
+            relay_url="http://localhost:15019",
             relay_id="relay-test",
             server_seq=42,
             server_ts=1733800000,
@@ -531,7 +531,7 @@ class TestReceiptStore:
         store.save_receipt(
             event_id="old_event",
             room="room1",
-            relay_url="http://localhost:8081",
+            relay_url="http://localhost:15019",
             relay_id="relay-test",
             server_seq=1,
             server_ts=1,

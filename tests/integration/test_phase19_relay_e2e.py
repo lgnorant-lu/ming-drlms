@@ -26,7 +26,7 @@ pytestmark = pytest.mark.integration
 @pytest.fixture
 def relay_url() -> str:
     """Get relay URL from environment or default."""
-    return os.environ.get("DRLMS_DEFAULT_RELAYS", "http://127.0.0.1:8081")
+    return os.environ.get("DRLMS_DEFAULT_RELAYS", "http://127.0.0.1:15019")
 
 
 @pytest.fixture

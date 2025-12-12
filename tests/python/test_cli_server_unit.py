@@ -23,7 +23,7 @@ def test_server_up_missing_binary_exits_zero_with_warning(
     # Prevent _ensure_server_binary from trying to locate or build the C server
     monkeypatch.setattr(server_mod, "_ensure_server_binary", lambda: None)
 
-    result = runner.invoke(app, ["server", "up", "--port", "18080"])
+    result = runner.invoke(app, ["server", "up", "--port", "15035"])
     assert result.exit_code == 0
     assert "server binary not available" in result.output
 

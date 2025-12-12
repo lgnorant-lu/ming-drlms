@@ -17,7 +17,7 @@ client_app = typer.Typer(help="client operations (list/upload/download/log)")
 @client_app.command("list", help=t("HELP.CLIENT.LIST"))
 def client_list(
     host: str = typer.Option("127.0.0.1", "--host", "-H", help="server host"),
-    port: int = typer.Option(8080, "--port", "-p", help="server port"),
+    port: int = typer.Option(15035, "--port", "-p", help="server port"),
     user: str = typer.Option("alice", "--user", "-u", help="username"),
     password: str = typer.Option("password", "--password", "-P", help="password"),
 ):
@@ -38,7 +38,7 @@ def client_list(
 def client_upload(
     file: Path = typer.Argument(..., help="local file to upload"),
     host: str = typer.Option("127.0.0.1", "--host", "-H", help="server host"),
-    port: int = typer.Option(8080, "--port", "-p", help="server port"),
+    port: int = typer.Option(15035, "--port", "-p", help="server port"),
     user: str = typer.Option("alice", "--user", "-u", help="username"),
     password: str = typer.Option("password", "--password", "-P", help="password"),
 ):
@@ -71,7 +71,7 @@ def client_download(
         None, "--out", "-o", help="output path (default: same name)"
     ),
     host: str = typer.Option("127.0.0.1", "--host", "-H", help="server host"),
-    port: int = typer.Option(8080, "--port", "-p", help="server port"),
+    port: int = typer.Option(15035, "--port", "-p", help="server port"),
     user: str = typer.Option("alice", "--user", "-u", help="username"),
     password: str = typer.Option("password", "--password", "-P", help="password"),
 ):
@@ -103,7 +103,7 @@ def client_download(
 def client_log(
     text: str = typer.Argument(..., help="log message to send"),
     host: str = typer.Option("127.0.0.1", "--host", "-H", help="server host"),
-    port: int = typer.Option(8080, "--port", "-p", help="server port"),
+    port: int = typer.Option(15035, "--port", "-p", help="server port"),
     user: str = typer.Option("alice", "--user", "-u", help="username"),
     password: str = typer.Option("password", "--password", "-P", help="password"),
 ):

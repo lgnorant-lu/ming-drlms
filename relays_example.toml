@@ -100,7 +100,7 @@ bundle_ttl = 604800
 # region: 区域标识（用于就近选择）
 
 [[relays]]
-url = "http://127.0.0.1:8081"
+url = "http://127.0.0.1:15019"
 priority = 1
 enabled = true
 backup_only = false
@@ -111,7 +111,7 @@ region = "local"
 
 # 示例：添加更多 Relay
 # [[relays]]
-# url = "http://relay2.example.com:8081"
+# url = "http://relay2.example.com:15019"
 # priority = 2
 # enabled = true
 # backup_only = false
@@ -119,7 +119,7 @@ region = "local"
 # pubkey = "..."  # Phase 17A
 
 # [[relays]]
-# url = "http://relay3.example.com:8081"
+# url = "http://relay3.example.com:15019"
 # priority = 3
 # enabled = true
 # backup_only = true  # 仅作为备份
@@ -158,7 +158,7 @@ region = "local"
 #
 # 环境变量设置：
 #   DRLMS_BACKEND_MODE=relay
-#   DRLMS_DEFAULT_RELAYS=http://127.0.0.1:8081
+#   DRLMS_DEFAULT_RELAYS=http://127.0.0.1:15019
 #
 # CLI 命令：
 #   ming-drlms identity create --name "Alice"

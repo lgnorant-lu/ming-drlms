@@ -45,7 +45,7 @@ ming-drlms relay post [选项]
 | 选项 | 说明 |
 |------|------|
 | `--room`, `-r` | 目标房间（必需） |
-| `--base-url` | Relay 服务器 URL（默认 http://127.0.0.1:8081） |
+| `--base-url` | Relay 服务器 URL（默认 http://127.0.0.1:15019） |
 | `--ciphertext`, `-c` | Base64 密文（已加密的消息） |
 | `--content` | 原始消息内容（未加密，需要 DRLMS_USER） |
 | `--content-file` | 从文件读取内容 |
@@ -60,14 +60,14 @@ ming-drlms relay post [选项]
     ```bash
     # 简单投递（需要 DRLMS_USER）
     export DRLMS_USER=alice
-    ming-drlms relay post -r general --content "Hello" --base-url http://localhost:8081
+    ming-drlms relay post -r general --content "Hello" --base-url http://localhost:15019
     ```
   </Tab>
   <Tab title="Windows">
     ```powershell
     # 简单投递（需要 DRLMS_USER）
     $env:DRLMS_USER = "alice"
-    ming-drlms relay post -r general --content "Hello" --base-url http://localhost:8081
+    ming-drlms relay post -r general --content "Hello" --base-url http://localhost:15019
     ```
   </Tab>
 </Tabs>
@@ -89,13 +89,13 @@ ming-drlms relay sync [选项]
 | 选项 | 默认值 | 说明 |
 |------|--------|------|
 | `--room`, `-r` | 必需 | 房间 ID |
-| `--base-url` | `http://127.0.0.1:8081` | Relay 服务器 URL |
+| `--base-url` | `http://127.0.0.1:15019` | Relay 服务器 URL |
 | `--limit` | `100` | 数量限制 |
 
 ### 示例
 
 ```bash
-ming-drlms relay sync -r general --limit 50 --base-url http://localhost:8081
+ming-drlms relay sync -r general --limit 50 --base-url http://localhost:15019
 ```
 
 ---
@@ -116,7 +116,7 @@ ming-drlms relay post-simple -r <房间> -c <内容> [选项]
 |------|------|--------|------|
 | `--room` | `-r` | - | 目标房间（必需） |
 | `--content` | `-c` | - | 消息内容（必需） |
-| `--base-url` | - | `http://127.0.0.1:8081` | Relay 服务器 URL |
+| `--base-url` | - | `http://127.0.0.1:15019` | Relay 服务器 URL |
 | `--content-type` | - | `text` | 内容类型 |
 | `--user` | `-u` | DRLMS_USER | 用户名 |
 

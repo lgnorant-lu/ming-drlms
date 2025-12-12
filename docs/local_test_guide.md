@@ -128,7 +128,7 @@ export MING_DRLMS_CONFIG_DIR=$(pwd)/.drlms
 | `DRLMS_BACKEND` | 后端类型 | `mp2` 或 `relay` |
 | `DRLMS_MP2_HOST` | MP2 服务器地址 | `127.0.0.1` |
 | `DRLMS_MP2_PORT` | MP2 服务器端口 | `15035` |
-| `DRLMS_RELAY_BASE_URL` | Relay 服务地址 | `http://127.0.0.1:8081` |
+| `DRLMS_RELAY_BASE_URL` | Relay 服务地址 | `http://127.0.0.1:15019` |
 | `DRLMS_LOG_LEVEL` | 日志级别 | `DEBUG` |
 | `DRLMS_UPDATE_CHECK` | 更新检查 | `0`（测试时关闭） |
 | `MING_DRLMS_CONFIG_DIR` | 配置目录 | `$(pwd)/.drlms` |
@@ -159,10 +159,10 @@ ss -tlnp | grep 15034           # WSL
 python -m ming_drlms.relay.server
 
 # 或使用 uvicorn（开发模式）
-uvicorn ming_drlms.relay.server:app --host 0.0.0.0 --port 8081 --reload
+uvicorn ming_drlms.relay.server:app --host 0.0.0.0 --port 15019 --reload
 
 # 验证启动
-curl http://127.0.0.1:8081/health
+curl http://127.0.0.1:15019/health
 ```
 
 ### 3.3 双端同时启动（开发）
@@ -264,7 +264,7 @@ pytest tests/python/test_tui_logic_chat_controller.py -v
 ```powershell
 # 1. 设置环境
 $env:DRLMS_BACKEND = "relay"
-$env:DRLMS_RELAY_BASE_URL = "http://127.0.0.1:8081"
+$env:DRLMS_RELAY_BASE_URL = "http://127.0.0.1:15019"
 $env:DRLMS_RELAY_ENFORCE_SIGNED = "1"
 $env:DRLMS_USER = "alice"
 $env:DRLMS_LOG_LEVEL = "DEBUG"
@@ -327,11 +327,11 @@ python scripts/start_relay_and_tui.py
 
 - 自动设置合理的开发默认 ENV（不覆盖已有变量）：
   - `DRLMS_BACKEND=relay`
-  - `DRLMS_RELAY_BASE_URL=http://127.0.0.1:8081`
+  - `DRLMS_RELAY_BASE_URL=http://127.0.0.1:15019`
   - `DRLMS_LOG_LEVEL=INFO`
   - `DRLMS_UPDATE_CHECK=0`
 - 启动两个子进程：
-  - Relay：`uvicorn ming_drlms.relay.server:app --host 127.0.0.1 --port 8081`
+  - Relay：`uvicorn ming_drlms.relay.server:app --host 127.0.0.1 --port 15019`
   - TUI：`python -m ming_drlms.main tui`
 - 捕获 Ctrl+C，统一关闭两个子进程，便于本地开发和快速验证
 
@@ -364,7 +364,7 @@ pytest tests/python/test_e2e_relay_signal_encrypt_sync.py -v
 
 # 确认关键变量（应为 Relay 模式）
 echo $env:DRLMS_BACKEND          # relay
-echo $env:DRLMS_RELAY_BASE_URL   # http://127.0.0.1:8081
+echo $env:DRLMS_RELAY_BASE_URL   # http://127.0.0.1:15019
 echo $env:MING_DRLMS_CONFIG_DIR  # 指向仓库下 .drlms
 
 # 2. 一键启动 Relay + TUI
@@ -405,7 +405,7 @@ ming-drlms room local-history --room "Town Square" --json
 ```
 A: 检查服务是否启动
    - netstat -ano | findstr :15035  (MP2)
-   - netstat -ano | findstr :8081   (Relay)
+   - netstat -ano | findstr :15019  (Relay)
 ```
 
 **Q: 配置未生效**

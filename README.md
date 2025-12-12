@@ -46,7 +46,7 @@ ming-drlms chat send --to <recipient_pubkey> --message "<any_payload>"
 
 ```bash
 export DRLMS_BACKEND_MODE=relay
-export DRLMS_DEFAULT_RELAYS=http://localhost:8081
+export DRLMS_DEFAULT_RELAYS=http://localhost:15019
 ```
 
 ### MP2 模式（传统）

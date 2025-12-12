@@ -27,28 +27,28 @@ dependencies = [
     "protobuf==6.33.1",
     "requests",
     "packaging>=24.2",
-    "cffi>=1.15.0,<2.0",
-    "cryptography>=42,<44",
+    "cffi>=1.15.0,<3.0",
+    "cryptography>=42.0,<46",  # 保持 42.x-45.x 兼容范围
     "typing-extensions>=4.7.0",
-    "textual>=0.47.0",
+    "textual>=6.6.0",
     "tomli>=2.0.0; python_version < '3.11'",
     "tomli-w>=1.0.0",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=7.0",
+    "pytest>=8.0,<9",  # pytest 8.x 系列
     "pytest-cov",
-    "pytest-asyncio>=0.23.0",
+    "pytest-asyncio>=0.23,<1",  # 0.23+ 支持 asyncio_mode="auto"
     "python-multipart",
     "nuitka>=2.0",
 ]
 
 relay = [
-    "fastapi",
-    "uvicorn[standard]",
-    "pydantic",
-    "httpx",
+    "fastapi>=0.115,<1",  # FastAPI 0.115+ (Pydantic v2 兼容)
+    "uvicorn[standard]>=0.30",
+    "pydantic>=2.0,<3",  # Pydantic v2 系列
+    "httpx>=0.27",
     "pynacl>=1.5.0",  # Phase 17A: XEdDSA signing
 ]
 

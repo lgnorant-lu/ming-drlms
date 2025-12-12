@@ -97,10 +97,10 @@ cd ~/vcpkg
 export VCPKG_ROOT=~/vcpkg
 
 # Windows
-git clone https://github.com/Microsoft/vcpkg.git C:\vcpkg
-cd C:\vcpkg
+git clone https://github.com/Microsoft/vcpkg.git D:\vcpkg
+cd D:\vcpkg
 .\bootstrap-vcpkg.bat
-set VCPKG_ROOT=C:\vcpkg
+set VCPKG_ROOT=D:\vcpkg
 ```
 
 ### 安装依赖
@@ -224,7 +224,7 @@ WORKDIR /app
 COPY . .
 RUN pip install --no-cache-dir .
 
-EXPOSE 8081
+EXPOSE 15019
 
 CMD ["python", "-m", "ming_drlms.relay.server"]
 ```

@@ -38,7 +38,7 @@ ming-drlms server up [选项]
 
 | 选项 | 简写 | 默认值 | 说明 |
 |------|------|--------|------|
-| `--port` | `-p` | `8080` | 监听端口 |
+| `--port` | `-p` | `15035` | 监听端口 |
 | `--data-dir` | `-d` | `server_files` | 数据目录 |
 | `--strict/--no-strict` | `-S` | `true` | 严格认证模式 |
 | `--max-conn` | `-m` | `128` | 最大连接数 |
@@ -48,7 +48,7 @@ ming-drlms server up [选项]
 ### 示例
 
 ```bash
-# 基本启动（默认端口 8080）
+# 基本启动（默认端口 15035）
 ming-drlms server up -d server_files
 
 # 指定端口
@@ -109,7 +109,7 @@ ming-drlms server status [选项]
 
 | 选项 | 简写 | 默认值 | 说明 |
 |------|------|--------|------|
-| `--port` | `-p` | `8080` | 检查的端口 |
+| `--port` | `-p` | `15035` | 检查的端口 |
 
 ### 输出示例
 
@@ -206,18 +206,18 @@ ming-drlms server-logs  # 等同于 ming-drlms server logs
 ### 端口被占用
 
 ```
-port 8080 is already in use; aborting start
+port 15035 is already in use; aborting start
 ```
 
 解决：
 
 ```bash
 # 查找占用进程
-netstat -ano | findstr :8080  # Windows
-lsof -i :8080                 # Linux/macOS
+netstat -ano | findstr :15035  # Windows
+lsof -i :15035                 # Linux/macOS
 
 # 更换端口
-ming-drlms server up --port 15034
+ming-drlms server up --port 15036
 ```
 
 ### 权限不足

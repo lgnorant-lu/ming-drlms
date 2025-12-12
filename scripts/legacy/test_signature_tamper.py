@@ -10,7 +10,7 @@
    (无 resolver 的场景由 pytest tests/python/test_signature_tamper.py 覆盖)
 
 用法:
-    1. 启动 Relay 服务器: python -m uvicorn ming_drlms.relay.server:app --port 8081
+    1. 启动 Relay 服务器: python -m uvicorn ming_drlms.relay.server:app --port 15019
     2. 运行此脚本: python scripts/test_signature_tamper.py
 """
 
@@ -53,7 +53,7 @@ def run_tests():
     tmp_dir = Path(tempfile.mkdtemp(prefix="drlms_tamper_test_"))
     print(f"临时目录: {tmp_dir}")
 
-    base_url = os.environ.get("DRLMS_RELAY_BASE_URL", "http://127.0.0.1:8081")
+    base_url = os.environ.get("DRLMS_RELAY_BASE_URL", "http://127.0.0.1:15019")
     room = "TamperTest"
 
     try:

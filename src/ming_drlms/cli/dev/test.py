@@ -19,7 +19,7 @@ def test_ipc():
 
 
 @test_app.command("integration", help=t("HELP.TEST.INTEGRATION"))
-def test_integration(host: str = "127.0.0.1", port: int = 8080):
+def test_integration(host: str = "127.0.0.1", port: int = 15035):
     env = env_with(HOST=host, PORT=str(port))
     script = ROOT / "tests" / "integration_protocol.sh"
     p = subprocess.run(
@@ -29,7 +29,7 @@ def test_integration(host: str = "127.0.0.1", port: int = 8080):
 
 
 @test_app.command("all", help=t("HELP.TEST.ALL"))
-def test_all(host: str = "127.0.0.1", port: int = 8080):
+def test_all(host: str = "127.0.0.1", port: int = 15035):
     env = env_with(DRLMS_SHM_KEY="0x4c4f4754")
     rc1 = subprocess.run(
         ["python3", "-m", "ming_drlms.main", "dev", "test", "ipc"], env=env

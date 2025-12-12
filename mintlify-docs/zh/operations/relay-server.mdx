@@ -14,7 +14,7 @@ Relay 服务器是 DRLMS 去中心化模式的核心组件，基于 FastAPI 实�
 ### 使用 uvicorn
 
 ```bash
-uvicorn ming_drlms.relay.server:app --host 0.0.0.0 --port 8081
+uvicorn ming_drlms.relay.server:app --host 0.0.0.0 --port 15019
 ```
 
 ---
@@ -73,7 +73,7 @@ uvicorn ming_drlms.relay.server:app --host 0.0.0.0 --port 8081
 gunicorn ming_drlms.relay.server:app \
   -w 4 \
   -k uvicorn.workers.UvicornWorker \
-  -b 0.0.0.0:8081
+  -b 0.0.0.0:15019
 ```
 
 ### 使用 systemd
@@ -91,7 +91,7 @@ User=drlms
 WorkingDirectory=/opt/drlms
 Environment=DRLMS_DB_PATH=/var/lib/drlms/relay.db
 Environment=DRLMS_FILES_DIR=/var/lib/drlms/files
-ExecStart=/usr/local/bin/uvicorn ming_drlms.relay.server:app --host 0.0.0.0 --port 8081
+ExecStart=/usr/local/bin/uvicorn ming_drlms.relay.server:app --host 0.0.0.0 --port 15019
 Restart=always
 RestartSec=5
 
@@ -117,7 +117,7 @@ server {
     ssl_certificate_key /etc/ssl/private/relay.key;
 
     location / {
-        proxy_pass http://127.0.0.1:8081;
+        proxy_pass http://127.0.0.1:15019;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -160,12 +160,12 @@ sqlite3 relay.db ".backup 'relay_backup.db'"
 <Tabs>
   <Tab title="curl">
     ```bash
-    curl http://localhost:8081/health
+    curl http://localhost:15019/health
     ```
   </Tab>
   <Tab title="PowerShell">
     ```powershell
-    Invoke-RestMethod http://localhost:8081/health
+    Invoke-RestMethod http://localhost:15019/health
     ```
   </Tab>
 </Tabs>
@@ -244,7 +244,7 @@ limit_req_zone $binary_remote_addr zone=relay:10m rate=100r/s;
 
 location /events {
     limit_req zone=relay burst=200 nodelay;
-    proxy_pass http://127.0.0.1:8081;
+    proxy_pass http://127.0.0.1:15019;
 }
 ```
 
@@ -256,7 +256,7 @@ location /events {
 
 ```bash
 # 检查端口占用
-netstat -tlnp | grep 8081
+netstat -tlnp | grep 15019
 
 # 检查日志
 journalctl -u drlms-relay -f

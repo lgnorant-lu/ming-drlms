@@ -117,7 +117,7 @@ message S2SPublishResponse {
 ### 完整配置示例
 
 ```yaml
-port: 8080
+port: 15035
 data_dir: server_files
 strict: true
 max_conn: 128

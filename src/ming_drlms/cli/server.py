@@ -181,7 +181,7 @@ def _ensure_server_binary() -> Path | None:
 
 @server_app.command("up", help=t("HELP.SERVER.UP"))
 def server_up(
-    port: int = typer.Option(8080, "--port", "-p"),
+    port: int = typer.Option(15035, "--port", "-p"),
     data_dir: Path = typer.Option(DATA_DIR, "--data-dir", "-d"),
     strict: bool = typer.Option(True, "--strict/--no-strict", "-S"),
     max_conn: int = typer.Option(128, "--max-conn", "-m"),
@@ -386,7 +386,7 @@ def server_down():
 
 
 @server_app.command("status", help=t("HELP.SERVER.STATUS"))
-def server_status(port: int = typer.Option(8080, "--port", "-p")):
+def server_status(port: int = typer.Option(15035, "--port", "-p")):
     """Show server status and recent log tail."""
     from rich.table import Table
 

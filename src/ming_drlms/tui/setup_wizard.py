@@ -143,8 +143,8 @@ class SetupWizardScreen(Screen):
             input_row._add_children(
                 Label("Relay 地址"),
                 Input(
-                    placeholder="http://localhost:8081",
-                    value="http://localhost:8081",
+                    placeholder="http://localhost:15019",
+                    value="http://localhost:15019",
                     id="input_relay_url",
                 ),
             )

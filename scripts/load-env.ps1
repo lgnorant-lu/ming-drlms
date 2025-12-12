@@ -26,7 +26,7 @@ if (-not $envFile) {
     $env:DRLMS_BACKEND = "mp2"
     $env:DRLMS_MP2_HOST = "127.0.0.1"
     $env:DRLMS_MP2_PORT = "15035"
-    $env:DRLMS_RELAY_BASE_URL = "http://127.0.0.1:8081"
+    $env:DRLMS_RELAY_BASE_URL = "http://127.0.0.1:15019"
     $env:DRLMS_LOG_LEVEL = "DEBUG"
     $env:DRLMS_UPDATE_CHECK = "0"
     $env:MING_DRLMS_CONFIG_DIR = "$PWD\.drlms"

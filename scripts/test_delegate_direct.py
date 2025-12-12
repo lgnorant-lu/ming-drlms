@@ -3,8 +3,9 @@
 Direct test for delegate policy - simpler than integration_space.sh
 """
 
-import socket
+import argparse
 import os
+import socket
 import sys
 
 
@@ -20,8 +21,13 @@ def send_recv(sock, cmd, timeout=5.0):
 
 
 def main():
-    host = "127.0.0.1"
-    port = int(os.getenv("PORT", os.getenv("DRLMS_PORT", "18080")))
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=15035)
+    args = parser.parse_args()
+
+    host = args.host
+    port = args.port
     room_env = os.getenv("ROOM", "")
 
     print("[1] Creating two users...")

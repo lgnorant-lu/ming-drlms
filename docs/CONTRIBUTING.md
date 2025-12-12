@@ -11,9 +11,9 @@
 ```bash
 make all
 # 非严格模式启动（便于本地联通）
-ming-drlms server-up --no-strict --data-dir server_files --port 8080
+ming-drlms server-up --no-strict --data-dir server_files --port 15035
 # 简单联通
-ming-drlms client list -H 127.0.0.1 -p 8080 -u alice -P password
+ming-drlms client list -H 127.0.0.1 -p 15035 -u alice -P password
 ming-drlms server-down
 ```
 
@@ -29,7 +29,7 @@ ming-drlms server-down
 ```bash
 # 单测 / 集成
 ming-drlms dev test ipc
-ming-drlms dev test integration --host 127.0.0.1 --port 8080
+ming-drlms dev test integration --host 127.0.0.1 --port 15035
 ming-drlms dev test all
 
 # 覆盖率

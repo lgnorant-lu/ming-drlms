@@ -22,10 +22,10 @@ if [ ! -f build/log_collector_server ]; then
 fi
 
 # Start server with debug output
-echo "[START] Starting server on port 18080..."
+echo "[START] Starting server on port 15035..."
 DRLMS_AUTH_STRICT=0 \
 DRLMS_DATA_DIR="$TEST_DIR" \
-DRLMS_PORT=18080 \
+DRLMS_PORT=15035 \
 ./build/log_collector_server > /tmp/delegate_cli_server.log 2>&1 &
 
 SERVER_PID=$!
@@ -34,14 +34,14 @@ echo "[INFO] Server PID: $SERVER_PID"
 # Wait for server to be ready
 echo "[WAIT] Waiting for server to start..."
 for i in {1..40}; do
-    if nc -z 127.0.0.1 18080 2>/dev/null; then
+    if nc -z 127.0.0.1 15035 2>/dev/null; then
         echo "[READY] Server is ready"
         break
     fi
     sleep 0.25
 done
 
-if ! nc -z 127.0.0.1 18080 2>/dev/null; then
+if ! nc -z 127.0.0.1 15035 2>/dev/null; then
     echo "[ERROR] Server failed to start"
     cat /tmp/delegate_cli_server.log
     exit 1

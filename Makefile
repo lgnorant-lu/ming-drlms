@@ -158,7 +158,7 @@ test: $(TESTS) log_agent log_collector_server ipc_sender log_consumer
 	@echo "Running C unit tests..."
 	DRLMS_SHM_KEY=0x4c4f4754 LD_LIBRARY_PATH=. DYLD_LIBRARY_PATH=. ./tests/test_ipc_suite
 	@echo "Running C protocol integration tests..."
-	chmod +x tests/test_server_protocol.sh && HOST=127.0.0.1 PORT=8080 bash -lc 'LD_LIBRARY_PATH=. DYLD_LIBRARY_PATH=. ./tests/test_server_protocol.sh $${HOST} $${PORT}'
+	chmod +x tests/test_server_protocol.sh && HOST=127.0.0.1 PORT=15035 bash -lc 'LD_LIBRARY_PATH=. DYLD_LIBRARY_PATH=. ./tests/test_server_protocol.sh $${HOST} $${PORT}'
 
 coverage:
 	@echo "--- Generating comprehensive C and Python coverage report using CMake ---"

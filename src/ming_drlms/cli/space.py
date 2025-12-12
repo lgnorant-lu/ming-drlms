@@ -59,7 +59,7 @@ def _emit_payload(txt: str) -> None:
 def space_join(
     room: str = typer.Option(..., "--room", "-r"),
     host: str = typer.Option("127.0.0.1", "--host", "-H"),
-    port: int = typer.Option(8080, "--port", "-p"),
+    port: int = typer.Option(15035, "--port", "-p"),
     user: str = typer.Option("alice", "--user", "-u"),
     password: str = typer.Option("password", "--password", "-P"),
     since_id: int = typer.Option(
@@ -160,7 +160,7 @@ def space_join(
 def space_leave(
     room: str = typer.Option(..., "--room", "-r"),
     host: str = typer.Option("127.0.0.1", "--host", "-H"),
-    port: int = typer.Option(8080, "--port", "-p"),
+    port: int = typer.Option(15035, "--port", "-p"),
     user: str = typer.Option("alice", "--user", "-u"),
     password: str = typer.Option("password", "--password", "-P"),
 ):
@@ -192,7 +192,7 @@ def space_history(
     limit: int = typer.Option(50, "--limit", "-n"),
     since_id: int = typer.Option(0, "--since-id", "-s"),
     host: str = typer.Option("127.0.0.1", "--host", "-H"),
-    port: int = typer.Option(8080, "--port", "-p"),
+    port: int = typer.Option(15035, "--port", "-p"),
     user: str = typer.Option("alice", "--user", "-u"),
     password: str = typer.Option("password", "--password", "-P"),
 ):
@@ -240,7 +240,7 @@ def space_send(
     text: Optional[str] = typer.Option(None, "--text", "-t"),
     file: Optional[Path] = typer.Option(None, "--file", "-f"),
     host: str = typer.Option("127.0.0.1", "--host", "-H"),
-    port: int = typer.Option(8080, "--port", "-p"),
+    port: int = typer.Option(15035, "--port", "-p"),
     user: str = typer.Option("alice", "--user", "-u"),
     password: str = typer.Option("password", "--password", "-P"),
 ):
@@ -316,7 +316,7 @@ def space_send(
 def space_chat(
     room: str = typer.Option(..., "--room"),
     host: str = typer.Option("127.0.0.1", "--host"),
-    port: int = typer.Option(8080, "--port"),
+    port: int = typer.Option(15035, "--port"),
     user: str = typer.Option("alice", "--user"),
     password: str = typer.Option("password", "--password"),
     since_id: int = typer.Option(-1, "--since-id"),

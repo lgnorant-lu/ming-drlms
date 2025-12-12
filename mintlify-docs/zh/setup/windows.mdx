@@ -97,7 +97,7 @@ DRLMS 在 Windows 上使用以下默认路径：
 
 ```powershell
 $env:DRLMS_BACKEND_MODE = "relay"
-$env:DRLMS_DEFAULT_RELAYS = "http://localhost:8081"
+$env:DRLMS_DEFAULT_RELAYS = "http://localhost:15019"
 $env:DRLMS_LOG_LEVEL = "INFO"
 ```
 
@@ -106,7 +106,7 @@ $env:DRLMS_LOG_LEVEL = "INFO"
 ```powershell
 # 用户级环境变量
 [Environment]::SetEnvironmentVariable("DRLMS_BACKEND_MODE", "relay", "User")
-[Environment]::SetEnvironmentVariable("DRLMS_DEFAULT_RELAYS", "http://localhost:8081", "User")
+[Environment]::SetEnvironmentVariable("DRLMS_DEFAULT_RELAYS", "http://localhost:15019", "User")
 ```
 
 ### 使用 .env 文件
@@ -115,7 +115,7 @@ $env:DRLMS_LOG_LEVEL = "INFO"
 
 ```ini
 DRLMS_BACKEND_MODE=relay
-DRLMS_DEFAULT_RELAYS=http://localhost:8081
+DRLMS_DEFAULT_RELAYS=http://localhost:15019
 DRLMS_LOG_LEVEL=INFO
 ```
 
@@ -204,10 +204,10 @@ cmake --build . --config Release
 
 ```powershell
 # 允许 Relay 服务器端口
-New-NetFirewallRule -DisplayName "DRLMS Relay" -Direction Inbound -LocalPort 8081 -Protocol TCP -Action Allow
+New-NetFirewallRule -DisplayName "DRLMS Relay" -Direction Inbound -LocalPort 15019 -Protocol TCP -Action Allow
 
-# 允许 C 服务器端口（默认 15034）
-New-NetFirewallRule -DisplayName "DRLMS Server" -Direction Inbound -LocalPort 15034 -Protocol TCP -Action Allow
+# 允许 C 服务器端口（默认 15035）
+New-NetFirewallRule -DisplayName "DRLMS Server" -Direction Inbound -LocalPort 15035 -Protocol TCP -Action Allow
 ```
 
 ---

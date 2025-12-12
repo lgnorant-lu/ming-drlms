@@ -20,7 +20,7 @@ e2ee_app = typer.Typer(help="[MP2 Only] E2EE 密钥管理 (需要 MP2 服务器)
 def generate_keys_command(
     username: str = typer.Option(..., "--user", "-u", help="认证用户名"),
     host: str = typer.Option("127.0.0.1", "--host", "-H", help="服务器地址"),
-    port: int = typer.Option(8080, "--port", "-p", help="服务器端口"),
+    port: int = typer.Option(15035, "--port", "-p", help="服务器端口"),
     target_user: Optional[str] = typer.Option(
         None, "--target-user", help="生成密钥的用户（默认与 --user 相同）"
     ),
@@ -57,7 +57,7 @@ def generate_keys_command(
 def prekey_bundle_command(
     username: str = typer.Option(..., "--user", "-u", help="认证用户名"),
     host: str = typer.Option("127.0.0.1", "--host", "-H", help="服务器地址"),
-    port: int = typer.Option(8080, "--port", "-p", help="服务器端口"),
+    port: int = typer.Option(15035, "--port", "-p", help="服务器端口"),
     target_user: Optional[str] = typer.Option(
         None, "--target-user", help="目标用户（默认与 --user 相同）"
     ),

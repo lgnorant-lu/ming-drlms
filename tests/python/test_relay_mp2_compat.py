@@ -91,7 +91,7 @@ class TestRelaySettings:
         config_path = tmp_path / "config.toml"
         config_path.write_text("""
 [general.relay]
-base_url = "http://192.168.1.100:8081"
+base_url = "http://192.168.1.100:15019"
 enforce_signed = false
 enforce_verify = true
 """)
@@ -103,7 +103,7 @@ enforce_verify = true
         s = load_settings()
         rs = get_relay_settings(s)
 
-        assert rs.base_url == "http://192.168.1.100:8081"
+        assert rs.base_url == "http://192.168.1.100:15019"
         assert rs.enforce_signed is False
         assert rs.enforce_verify is True
 
@@ -114,7 +114,7 @@ enforce_verify = true
         from ming_drlms.app_settings import load_settings, get_relay_settings
 
         config_path = tmp_path / "config.toml"
-        config_path.write_text('[general.relay]\nbase_url = "http://config:8081"\n')
+        config_path.write_text('[general.relay]\nbase_url = "http://config:15019"\n')
 
         monkeypatch.setenv("DRLMS_CONFIG_FILE", str(config_path))
         monkeypatch.setenv("DRLMS_RELAY_BASE_URL", "http://env:9999")

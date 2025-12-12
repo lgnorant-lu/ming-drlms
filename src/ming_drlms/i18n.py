@@ -9,9 +9,9 @@ from typing import Dict
 
 en_texts: Dict[str, str] = {
     # Server
-    "HELP.SERVER.UP": "Start server in background with health check.\n\nExamples:\n  ming-drlms server-up -p 8080 -d server_files --no-strict\n",
+    "HELP.SERVER.UP": "Start server in background with health check.\n\nExamples:\n  ming-drlms server-up -p 15035 -d server_files --no-strict\n",
     "HELP.SERVER.DOWN": "Stop server via PID file; fallback to pkill.\n\nExamples:\n  ming-drlms server-down\n",
-    "HELP.SERVER.STATUS": "Show server status and recent log tail.\n\nExamples:\n  ming-drlms server-status -p 8080\n",
+    "HELP.SERVER.STATUS": "Show server status and recent log tail.\n\nExamples:\n  ming-drlms server-status -p 15035\n",
     # Auth
     "HELP.AUTH.LOGIN": "Authenticate using M-Proto-v2 challenge/response and cache tokens locally.\n\nExamples:\n  ming-drlms login -u alice -H 127.0.0.1 -p 5000 --users-file server_files/users.txt\n  ming-drlms login -u bob --password-hash-file bob.hash\n",
     # User
@@ -20,23 +20,23 @@ en_texts: Dict[str, str] = {
     "HELP.USER.LIST": "List users and formats (argon2/legacy).\n\nExamples:\n  ming-drlms user list -d server_files --json\n",
     "HELP.USER.DEL": "Delete a user. Use --force to ignore missing.\n\nExamples:\n  ming-drlms user del alice -d server_files\n  ming-drlms user del ghost -d server_files --force\n",
     # Space
-    "HELP.SPACE.JOIN": "Subscribe to a room and tail events (with resume).\n\nExamples:\n  ming-drlms space join -r demo -H 127.0.0.1 -p 8080 -R -j\n",
+    "HELP.SPACE.JOIN": "Subscribe to a room and tail events (with resume).\n\nExamples:\n  ming-drlms space join -r demo -H 127.0.0.1 -p 15035 -R -j\n",
     "HELP.SPACE.SEND": "Publish text or file into a room.\n\nExamples:\n  ming-drlms space send -r demo -t 'hello'\n  ming-drlms space send -r demo -f /path/to/file\n",
     "HELP.SPACE.HISTORY": "Fetch historical events for a room.\n\nExamples:\n  ming-drlms space history -r demo -n 10 -s 0\n",
-    "HELP.SPACE.LEAVE": "Unsubscribe from a room.\n\nExamples:\n  ming-drlms space leave -r demo -H 127.0.0.1 -p 8080 -u alice -P password\n",
-    "HELP.SPACE.CHAT": "Interactive room chat: stdout tails, stdin publishes.\n\nExamples:\n  ming-drlms space chat --room demo -H 127.0.0.1 -p 8080 -u alice -P password\n",
+    "HELP.SPACE.LEAVE": "Unsubscribe from a room.\n\nExamples:\n  ming-drlms space leave -r demo -H 127.0.0.1 -p 15035 -u alice -P password\n",
+    "HELP.SPACE.CHAT": "Interactive room chat: stdout tails, stdin publishes.\n\nExamples:\n  ming-drlms space chat --room demo -H 127.0.0.1 -p 15035 -u alice -P password\n",
     # IPC
     "HELP.IPC.SEND": "Send one message via shared memory (ipc_sender).\n\nExamples:\n  echo 'hi' | ming-drlms ipc send\n  ming-drlms ipc send --file /tmp/file.txt\n",
     "HELP.IPC.TAIL": "Tail messages via shared memory (log_consumer).\n\nExamples:\n  ming-drlms ipc tail -n 3\n",
     # Teaching help
     "HELP.TOPIC": "Show rich help for a topic (user|space|server|ipc).\n\nExamples:\n  ming-drlms help user\n",
     # Client
-    "HELP.CLIENT.LIST": "List files on server (LOGIN -> LIST).\n\nExamples:\n  ming-drlms client list -H 127.0.0.1 -p 8080 -u alice -P password\n",
-    "HELP.CLIENT.UPLOAD": "Upload a file to server (LOGIN -> UPLOAD).\n\nExamples:\n  ming-drlms client upload README.md -H 127.0.0.1 -p 8080 -u alice -P password\n",
-    "HELP.CLIENT.DOWNLOAD": "Download a file from server (LOGIN -> DOWNLOAD).\n\nExamples:\n  ming-drlms client download README.md -o /tmp/README.md -H 127.0.0.1 -p 8080 -u alice -P password\n",
+    "HELP.CLIENT.LIST": "List files on server (LOGIN -> LIST).\n\nExamples:\n  ming-drlms client list -H 127.0.0.1 -p 15035 -u alice -P password\n",
+    "HELP.CLIENT.UPLOAD": "Upload a file to server (LOGIN -> UPLOAD).\n\nExamples:\n  ming-drlms client upload README.md -H 127.0.0.1 -p 15035 -u alice -P password\n",
+    "HELP.CLIENT.DOWNLOAD": "Download a file from server (LOGIN -> DOWNLOAD).\n\nExamples:\n  ming-drlms client download README.md -o /tmp/README.md -H 127.0.0.1 -p 15035 -u alice -P password\n",
     "HELP.CLIENT.LOG": "Send a single LOG message.\n\nExamples:\n  ming-drlms client log "
     "hello"
-    " -H 127.0.0.1 -p 8080 -u alice -P password\n",
+    " -H 127.0.0.1 -p 15035 -u alice -P password\n",
     # Room
     "HELP.ROOM.INFO": "Query room info.\n\nExamples:\n  ming-drlms room info --room demo --user alice\n",
     "HELP.ROOM.SUB": "Subscribe to a room via M-Proto-v2 and print events.\n\nExamples:\n  ming-drlms room sub --room demo --user alice --limit 10\n  ming-drlms room sub --room demo --user alice --json\n",
@@ -52,7 +52,7 @@ en_texts: Dict[str, str] = {
     "HELP.COVERAGE.SHOW": "Show coverage gcov output head.\n\nExamples:\n  ming-drlms coverage show -\n",
     # Test
     "HELP.TEST.IPC": "Run IPC unit test.\n\nExamples:\n  ming-drlms test ipc\n",
-    "HELP.TEST.INTEGRATION": "Run protocol integration test.\n\nExamples:\n  ming-drlms test integration --host 127.0.0.1 --port 8080\n",
+    "HELP.TEST.INTEGRATION": "Run protocol integration test.\n\nExamples:\n  ming-drlms test integration --host 127.0.0.1 --port 15035\n",
     "HELP.TEST.ALL": "Run all tests (ipc + integration).\n\nExamples:\n  ming-drlms test all -\n",
     # Dist
     "HELP.DIST.BUILD": "Build distribution artifacts via Makefile.\n\nExamples:\n  ming-drlms dist build\n",
@@ -64,7 +64,7 @@ en_texts: Dict[str, str] = {
     "HELP.COLLECT.ARTIFACTS": "Pack logs/coverage/meta into a tar.gz under --out directory.\n\nExamples:\n  ming-drlms collect artifacts --out artifacts\n",
     "HELP.COLLECT.RUN": "Run minimal coverage flow then pack artifacts.\n\nExamples:\n  ming-drlms collect run --out artifacts\n",
     # Dev group (new)
-    "HELP.DEV.TEST": "Developer: run tests (ipc/integration/all).\n\nExamples:\n  ming-drlms dev test ipc\n  ming-drlms dev test integration --host 127.0.0.1 --port 8080\n  ming-drlms dev test all\n",
+    "HELP.DEV.TEST": "Developer: run tests (ipc/integration/all).\n\nExamples:\n  ming-drlms dev test ipc\n  ming-drlms dev test integration --host 127.0.0.1 --port 15035\n  ming-drlms dev test all\n",
     "HELP.DEV.COVERAGE": "Developer: coverage helpers (run/show).\n\nExamples:\n  ming-drlms dev coverage run\n  ming-drlms dev coverage show -\n",
     "HELP.DEV.PKG": "Developer: package build/install/uninstall.\n\nExamples:\n  ming-drlms dev pkg build\n  ming-drlms dev pkg install --sudo\n  ming-drlms dev pkg uninstall --sudo\n",
     "HELP.DEV.ARTIFACTS": "Developer: collect artifacts (logs/coverage/meta).\n\nExamples:\n  ming-drlms dev artifacts run --out artifacts\n",

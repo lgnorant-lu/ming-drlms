@@ -131,7 +131,7 @@ class RelayVerifierXEdDSA:
 ```toml
 # relays.toml
 [[relays]]
-url = "http://relay1.example.com:8081"
+url = "http://relay1.example.com:15019"
 pubkey = "abc123..."  # Ed25519/XEdDSA 公钥
 
 # 或通过 Well-Known 自动发现
@@ -181,7 +181,7 @@ signature_scheme = "ed25519"  # "hmac" | "ed25519" | "xeddsa"
 require_verified = true
 
 [[relays]]
-url = "http://relay1:8081"
+url = "http://relay1:15019"
 pubkey = "abc123..."
 ```
 

@@ -27,7 +27,7 @@ def test_load_config_uses_defaults_when_no_files_and_no_env(
     cfg = load_config(None)
 
     assert isinstance(cfg, CLIConfig)
-    assert cfg.port == 8080
+    assert cfg.port == 15035
     assert cfg.data_dir.name == "server_files"
 
 
@@ -42,7 +42,7 @@ def test_load_config_env_overrides_and_invalid_ints_fall_back(
 
     cfg = load_config(None)
 
-    assert cfg.port == 8080
+    assert cfg.port == 15035
     assert cfg.data_dir == tmp_path / "data_dir"
     assert cfg.rooms_ephemeral_history_limit == 123
     assert cfg.max_conn == 128

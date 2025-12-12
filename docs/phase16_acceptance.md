@@ -155,7 +155,7 @@ set DRLMS_RELAYS_CONFIG=D:\path\to\relays.toml
 ```bash
 # .env.local 或系统环境变量
 set DRLMS_BACKEND=relay
-set DRLMS_RELAY_URL=http://localhost:8081
+set DRLMS_RELAY_URL=http://localhost:15019
 set DRLMS_DB_PATH=./data/relay.db
 set DRLMS_FILES_DIR=./data/files
 
@@ -168,10 +168,10 @@ set DRLMS_RELAY_ID=relay-local-01
 
 ```bash
 # 启动本地 Relay 服务器
-python -m ming_drlms.relay.server --port 8081
+python -m ming_drlms.relay.server --port 15019
 
 # 或使用 uvicorn
-uvicorn ming_drlms.relay.server:app --port 8081 --reload
+uvicorn ming_drlms.relay.server:app --port 15019 --reload
 ```
 
 ### 4.2 TUI 功能验证
@@ -216,7 +216,7 @@ python -m ming_drlms.tui
 
 ```text
 === Relay Health Status ===
-relay-local-01 (http://localhost:8081)
+relay-local-01 (http://localhost:15019)
   Status: healthy
   Score: 0.95
   Latency: 12 ms
@@ -293,7 +293,7 @@ Synced 5 events from relay
 python -m ming_drlms.cli relay health
 
 # 预期输出（示意）
-Relay: http://localhost:8081
+Relay: http://localhost:15019
   Status: healthy
   Latency: 15 ms
 ```
@@ -348,7 +348,7 @@ assert tree.verify_proof("event2", proof)
 #### 4.5.2 验证跨 Relay 一致性
 
 ```text
-1. 启动两个 Relay 实例（端口 8081, 8082）
+1. 启动两个 Relay 实例（端口 15019, 15020）
 2. 在 Relay A 发送 3 条消息
 3. 在 Relay B 发送相同 3 条消息
 4. 验证两个 Relay 的 Merkle 根相同

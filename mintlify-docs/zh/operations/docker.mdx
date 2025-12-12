@@ -26,11 +26,11 @@ docker pull ghcr.io/lgnorant-lu/ming-drlms:latest
 ```bash
 docker run -d \
   --name drlms-relay \
-  -p 8081:8081 \
+  -p 15019:15019 \
   -v drlms-data:/data \
   -e DRLMS_DB_PATH=/data/relay.db \
   ghcr.io/lgnorant-lu/ming-drlms:latest \
-  uvicorn ming_drlms.relay.server:app --host 0.0.0.0 --port 8081
+  uvicorn ming_drlms.relay.server:app --host 0.0.0.0 --port 15019
 ```
 
 ---
@@ -56,14 +56,14 @@ RUN pip install --no-cache-dir .
 RUN mkdir -p /data
 
 # 暴露端口
-EXPOSE 8081
+EXPOSE 15019
 
 # 环境变量
 ENV DRLMS_DB_PATH=/data/relay.db
 ENV DRLMS_FILES_DIR=/data/files
 
 # 启动命令
-CMD ["uvicorn", "ming_drlms.relay.server:app", "--host", "0.0.0.0", "--port", "8081"]
+CMD ["uvicorn", "ming_drlms.relay.server:app", "--host", "0.0.0.0", "--port", "15019"]
 ```
 
 ### 构建镜像
@@ -85,9 +85,9 @@ version: '3.8'
 services:
   relay:
     image: ghcr.io/lgnorant-lu/ming-drlms:latest
-    command: uvicorn ming_drlms.relay.server:app --host 0.0.0.0 --port 8081
+    command: uvicorn ming_drlms.relay.server:app --host 0.0.0.0 --port 15019
     ports:
-      - "8081:8081"
+      - "15019:15019"
     volumes:
       - relay-data:/data
     environment:
@@ -109,9 +109,9 @@ version: '3.8'
 services:
   relay1:
     image: ghcr.io/lgnorant-lu/ming-drlms:latest
-    command: uvicorn ming_drlms.relay.server:app --host 0.0.0.0 --port 8081
+    command: uvicorn ming_drlms.relay.server:app --host 0.0.0.0 --port 15019
     ports:
-      - "8081:8081"
+      - "15019:15019"
     volumes:
       - relay1-data:/data
     environment:
@@ -120,9 +120,9 @@ services:
 
   relay2:
     image: ghcr.io/lgnorant-lu/ming-drlms:latest
-    command: uvicorn ming_drlms.relay.server:app --host 0.0.0.0 --port 8081
+    command: uvicorn ming_drlms.relay.server:app --host 0.0.0.0 --port 15019
     ports:
-      - "8082:8081"
+      - "15020:15019"
     volumes:
       - relay2-data:/data
     environment:
@@ -189,7 +189,7 @@ services:
   relay:
     # ...
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:15019/health"]
       interval: 30s
       timeout: 10s
       retries: 3

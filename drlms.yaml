@@ -1,6 +1,6 @@
-port: 8080
+port: 15035
 data_dir: server_files
-strict: true
+strict: false
 max_conn: 128
 rate_up_bps: 0
 rate_down_bps: 0

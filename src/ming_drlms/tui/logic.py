@@ -1105,9 +1105,9 @@ class ChatController:
             if base:
                 return base
             # Final fallback if nothing configured
-            return "http://127.0.0.1:8081"
+            return "http://127.0.0.1:15019"
         except Exception:
-            return "http://127.0.0.1:8081"
+            return "http://127.0.0.1:15019"
 
     def _start_relay(self, room_name: str) -> None:
         # Reset state

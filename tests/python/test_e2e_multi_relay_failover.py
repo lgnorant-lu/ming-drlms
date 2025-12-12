@@ -44,8 +44,8 @@ class TestMultiRelayFailover:
 
         # Mock relays
         manager._relays = [
-            MagicMock(url="http://relay1:8081", enabled=True),
-            MagicMock(url="http://relay2:8081", enabled=True),
+            MagicMock(url="http://relay1:15019", enabled=True),
+            MagicMock(url="http://relay2:15019", enabled=True),
         ]
         manager._initialized = True
 
@@ -118,7 +118,7 @@ class TestMultiRelayFailover:
         # Simulate receipts from multiple relays
         receipts = [
             StorageReceipt(
-                relay_url="http://relay1:8081",
+                relay_url="http://relay1:15019",
                 relay_id="relay1",
                 server_seq=1,
                 server_ts=1000,
@@ -126,7 +126,7 @@ class TestMultiRelayFailover:
                 verified=True,
             ),
             StorageReceipt(
-                relay_url="http://relay2:8081",
+                relay_url="http://relay2:15019",
                 relay_id="relay2",
                 server_seq=1,
                 server_ts=1001,
@@ -134,7 +134,7 @@ class TestMultiRelayFailover:
                 verified=True,
             ),
             StorageReceipt(
-                relay_url="http://relay3:8081",
+                relay_url="http://relay3:15019",
                 relay_id="relay3",
                 server_seq=0,
                 server_ts=0,
@@ -149,9 +149,9 @@ class TestMultiRelayFailover:
             success_count=2,
             total_relays=3,
             event_id="test-event",
-            failed_relays=["http://relay3:8081"],
-            errors={"http://relay3:8081": "connection_refused"},
-            server_seqs={"http://relay1:8081": 1, "http://relay2:8081": 1},
+            failed_relays=["http://relay3:15019"],
+            errors={"http://relay3:15019": "connection_refused"},
+            server_seqs={"http://relay1:15019": 1, "http://relay2:15019": 1},
             receipts=receipts,
         )
 
@@ -210,9 +210,9 @@ class TestMultiRelayFailover:
         # Add relays
         checker.set_relays(
             [
-                "http://relay1:8081",
-                "http://relay2:8081",
-                "http://relay3:8081",
+                "http://relay1:15019",
+                "http://relay2:15019",
+                "http://relay3:15019",
             ]
         )
 
@@ -372,7 +372,7 @@ class TestE2EScenarios:
             store.save_receipt(
                 event_id=f"event-{i}",
                 room="audit-room",
-                relay_url="http://relay1:8081",
+                relay_url="http://relay1:15019",
                 relay_id="relay1",
                 server_seq=i + 1,
                 server_ts=1000 + i,
@@ -412,11 +412,11 @@ persist_receipts = true
 retention_days = 14
 
 [[relays]]
-url = "http://relay1:8081"
+url = "http://relay1:15019"
 priority = 1
 
 [[relays]]
-url = "http://relay2:8081"
+url = "http://relay2:15019"
 priority = 2
 """)
 

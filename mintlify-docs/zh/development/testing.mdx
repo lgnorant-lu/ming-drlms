@@ -123,7 +123,7 @@ import responses
 def test_fetch_events():
     responses.add(
         responses.GET,
-        "http://localhost:8081/health",
+        "http://localhost:15019/health",
         json={"status": "ok"},
     )
     ...
@@ -147,7 +147,7 @@ import responses
 def test_fetch_events():
     responses.add(
         responses.GET,
-        "http://localhost:8081/events",
+        "http://localhost:15019/events",
         json=[{"event_id": "e1", "ciphertext": "..."}],
     )
     
@@ -306,7 +306,7 @@ pytest --pdb
 | `DRLMS_BACKEND_MODE` | 后端类型 | `mp2` 或 `relay` |
 | `DRLMS_MP2_HOST` | MP2 服务器地址 | `127.0.0.1` |
 | `DRLMS_MP2_PORT` | MP2 服务器端口 | `15035` |
-| `DRLMS_DEFAULT_RELAYS` | Relay 服务地址 | `http://127.0.0.1:8081` |
+| `DRLMS_DEFAULT_RELAYS` | Relay 服务地址 | `http://127.0.0.1:15019` |
 | `DRLMS_LOG_LEVEL` | 日志级别 | `DEBUG` |
 | `DRLMS_UPDATE_CHECK` | 更新检查 | `0`（测试时关闭） |
 | `MING_DRLMS_CONFIG_DIR` | 配置目录 | `$(pwd)/.drlms` |
@@ -318,14 +318,14 @@ pytest --pdb
   <Tab title="Linux/WSL">
     ```bash
     export DRLMS_BACKEND_MODE=relay
-    export DRLMS_DEFAULT_RELAYS=http://127.0.0.1:8081
+    export DRLMS_DEFAULT_RELAYS=http://127.0.0.1:15019
     export DRLMS_LOG_LEVEL=DEBUG
     ```
   </Tab>
   <Tab title="Windows">
     ```powershell
     $env:DRLMS_BACKEND_MODE = "relay"
-    $env:DRLMS_DEFAULT_RELAYS = "http://127.0.0.1:8081"
+    $env:DRLMS_DEFAULT_RELAYS = "http://127.0.0.1:15019"
     $env:DRLMS_LOG_LEVEL = "DEBUG"
     ```
   </Tab>
@@ -375,7 +375,7 @@ pytest --pdb
     ```bash
     # 1. 设置环境
     export DRLMS_BACKEND_MODE=relay
-    export DRLMS_DEFAULT_RELAYS=http://127.0.0.1:8081
+    export DRLMS_DEFAULT_RELAYS=http://127.0.0.1:15019
     export DRLMS_USER=alice
     
     # 2. 启动 Relay 服务器（另一终端）
@@ -389,7 +389,7 @@ pytest --pdb
     ```powershell
     # 1. 设置环境
     $env:DRLMS_BACKEND_MODE = "relay"
-    $env:DRLMS_DEFAULT_RELAYS = "http://127.0.0.1:8081"
+    $env:DRLMS_DEFAULT_RELAYS = "http://127.0.0.1:15019"
     $env:DRLMS_USER = "alice"
     
     # 2. 启动 Relay 服务器（另一终端）

@@ -145,12 +145,12 @@ jobs:
         shell: bash
         run: |
           # Start Relay server in background
-          python -m uvicorn ming_drlms.relay.server:app --host 127.0.0.1 --port 8081 &
+          uvicorn ming_drlms.relay.server:app --port 15019 &
           RELAY_PID=$!
           sleep 3
           
           # Verify Relay is running
-          curl -f http://127.0.0.1:8081/health && echo "Relay health check passed"
+          curl -f http://127.0.0.1:15019/health && echo "Relay health check passed"
           
           # Run minimal relay tests
           python -m pytest tests/python/test_relay_health.py -v --timeout=60 || true
@@ -216,7 +216,7 @@ jobs:
       DRLMS_UPDATE_CHECK: '0'
       DRLMS_LOG_LEVEL: 'DEBUG'
       DRLMS_BACKEND_MODE: 'relay'
-      DRLMS_DEFAULT_RELAYS: 'http://127.0.0.1:8081'
+      DRLMS_DEFAULT_RELAYS: 'http://127.0.0.1:15019'
 
     steps:
       - name: Checkout repository
@@ -259,12 +259,12 @@ jobs:
         run: |
           # Start Relay server under coverage in background
           python -m coverage run --branch --parallel-mode -m uvicorn \
-            ming_drlms.relay.server:app --host 127.0.0.1 --port 8081 &
+            ming_drlms.relay.server:app --host 127.0.0.1 --port 15019 &
           RELAY_PID=$!
           sleep 3  # Wait for server startup
           
           # Verify Relay is running
-          curl -f http://127.0.0.1:8081/health || (kill $RELAY_PID 2>/dev/null; exit 1)
+          curl -f http://127.0.0.1:15019/health || (kill $RELAY_PID 2>/dev/null; exit 1)
           
           # Run integration tests with coverage
           python -m coverage run --branch --parallel-mode -m pytest \
