@@ -475,14 +475,14 @@ def room_members(
     host: str = typer.Option("127.0.0.1", "--host", "-H"),
     port: int = typer.Option(15035, "--port", "-p"),
     user: str = typer.Option(None, "--user", envvar="DRLMS_USER"),
-    password: str = typer.Option(None, "--password", envvar="DRLMS_PASSWORD"),
+    # Note: password parameter removed as it was not used by get_room_members_mp2()
     json_output: bool = typer.Option(False, "--json", help="JSON格式输出"),
 ):
     room = _option_value(room, "room")
     host = _option_value(host, "host")
     port = _option_value(port, "port")
     user = _option_value(user, "user")
-    password = _option_value(password, "password")
+    # password parameter removed (was never passed to service function)
     try:
         members = room_service.get_room_members_mp2(
             host=host,

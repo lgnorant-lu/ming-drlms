@@ -397,8 +397,16 @@ def publish_bundle():
 
         ctx = create_signal_context()
         store = SignalStore(ctx)
+
+        # CRITICAL FIX: Ensure identity key is 33 bytes (with 0x05 prefix)
+        # The bundle will be published with 33-byte identity_key, so we must
+        # sign with the same format to match during verification
+        id_pub = identity.public_key
+        if len(id_pub) == 32:
+            id_pub = b"\x05" + id_pub
+
         store.set_identity(
-            public_key=identity.public_key,
+            public_key=id_pub,
             private_key=identity.private_key,
             registration_id=identity.registration_id,
             device_id=identity.device_id,
