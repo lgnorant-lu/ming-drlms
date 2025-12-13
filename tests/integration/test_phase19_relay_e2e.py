@@ -69,8 +69,8 @@ class TestRelayE2EBasic:
             resp = requests.post(
                 f"{relay_url}/events",
                 json={
-                    "room_id": test_room,
-                    "payload": payload,
+                    "room": test_room,
+                    "ciphertext": payload,
                 },
                 timeout=10,
             )
@@ -194,8 +194,8 @@ class TestRelayTwoClientsE2E:
         resp = requests.post(
             f"{relay_url}/events",
             json={
-                "room_id": room.room_id,
-                "payload": payload,
+                "room": room.room_id,
+                "ciphertext": payload,
             },
             timeout=10,
         )
@@ -216,7 +216,7 @@ class TestRelayTwoClientsE2E:
         found = False
         for event in events:
             try:
-                event_payload = json.loads(event.get("payload", "{}"))
+                event_payload = json.loads(event.get("ciphertext", "{}"))
                 if event_payload.get("content") == "Hello Bob!":
                     found = True
                     break

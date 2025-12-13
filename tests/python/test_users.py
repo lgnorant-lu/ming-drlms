@@ -18,7 +18,6 @@ def test_parse_users_various_formats(tmp_path: Path) -> None:
         [
             "# comment line",
             "alice::$argon2id$encoded",
-            "bob: salt : " + "0" * 64,
             "weird:stuff:not-hash",
             "plainonly",
             "",
@@ -30,9 +29,8 @@ def test_parse_users_various_formats(tmp_path: Path) -> None:
     records = users.parse_users(path)
 
     assert records[0] == ("alice", "argon2", "$argon2id$encoded")
-    assert records[1] == ("bob", "legacy", f"salt:{'0' * 64}")
-    assert records[2] == ("weird", "unknown", "stuff:not-hash")
-    assert records[3] == ("plainonly", "unknown", "")
+    assert records[1] == ("weird", "unknown", "stuff:not-hash")
+    assert records[2] == ("plainonly", "unknown", "")
 
 
 def test_parse_users_missing_file_returns_empty(tmp_path: Path) -> None:
@@ -97,7 +95,6 @@ def test_write_users_atomic_writes_all_kinds(tmp_path: Path) -> None:
     path = tmp_path / "users.txt"
     records = [
         ("alice", "argon2", "$argon2id$aaa"),
-        ("bob", "legacy", "salt:dead"),
         ("weird", "unknown", "RIGHT"),
         ("empty", "unknown", ""),
     ]
@@ -107,7 +104,6 @@ def test_write_users_atomic_writes_all_kinds(tmp_path: Path) -> None:
     lines = [ln for ln in text.splitlines() if ln]
 
     assert "alice::$argon2id$aaa" in lines
-    assert "bob:salt:dead" in lines
     assert any(ln.startswith("# unknown-format weird RIGHT") for ln in lines)
     assert any(ln.strip() == "# unknown-format empty" for ln in lines)
 

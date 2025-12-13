@@ -18,10 +18,6 @@ int server_users_init(const char *data_dir);
 // Reload users.txt into cache (best-effort)
 int server_users_reload(void);
 
-// Upgrade a legacy user's password entry to argon2 and atomically rewrite
-// users.txt
-int server_users_upgrade_password(const char *username, const char *password);
-
 // Verify username+password against users cache, lazily loading from data_dir if
 // needed. Returns 1 on success, 0 on failure. When no users configured: returns
 // !auth_strict.

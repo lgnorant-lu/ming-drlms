@@ -33,9 +33,6 @@ from argon2 import low_level as argon2_ll
 
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_.\-]{1,32}$")
 ARGON2_LINE_RE = re.compile(r"^(?P<user>[^:\s][^:]*)::(?P<enc>\$argon2id\$.*)$")
-LEGACY_LINE_RE = re.compile(
-    r"^(?P<user>[^:\s][^:]*)\:(?P<salt>[^:\s]+)\:(?P<hash>[0-9a-fA-F]{64})$"
-)
 
 
 @dataclass
@@ -109,17 +106,7 @@ def parse_users(users_path: Path) -> List[Tuple[str, str, str]]:
                 enc = m_new.group("enc").strip()
                 records.append((user, "argon2", enc))
                 continue
-            # 尝试旧格式 user:salt:shahex（严格判定）
-            # Allow optional internal spaces around ':' for legacy lines
-            # Normalize by removing spaces around ':' before matching
-            normalized = re.sub(r"\s*:\s*", ":", line)
-            m_old = LEGACY_LINE_RE.match(normalized)
-            if m_old:
-                user = m_old.group("user").strip()
-                salt = m_old.group("salt").strip()
-                shahex = m_old.group("hash").strip()
-                records.append((user, "legacy", f"{salt}:{shahex}"))
-                continue
+
             # 兜底：unknown（尽量解析出 username:rest 的基本形态）
             colon_idx = line.find(":")
             if colon_idx != -1:
@@ -222,9 +209,7 @@ def write_users_atomic(users_path: Path, records: List[Tuple[str, str, str]]) ->
     for user, kind, payload in records:
         if kind == "argon2":
             line = f"{user}::{payload}"
-        elif kind == "legacy":
-            # 保留读取到的 legacy 用户（CLI 不主动创建）
-            line = f"{user}:{payload}"
+
         else:
             # unknown 尽量保留右侧片段
             if payload:

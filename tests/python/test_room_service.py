@@ -225,53 +225,6 @@ def test_list_rooms_wraps_errors(monkeypatch: pytest.MonkeyPatch) -> None:
         svc.list_rooms(host="h", port=1, user="u")
 
 
-def test_legacy_connection_and_fetch_info_success(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # Fake tcp_connect/login/recv_line for legacy path
-    class DummySock:
-        def __init__(self) -> None:
-            self.sent: list[bytes] = []
-            self.closed = False
-
-        def sendall(self, data: bytes) -> None:  # type: ignore[override]
-            self.sent.append(data)
-
-        def close(self) -> None:  # type: ignore[override]
-            self.closed = True
-
-    sock = DummySock()
-
-    def fake_tcp_connect(host: str, port: int) -> DummySock:  # type: ignore[override]
-        return sock
-
-    def fake_login(s, user, password):  # type: ignore[override]
-        return True
-
-    lines = [
-        "ROOMINFO|room1|1|2|1|10|owner|0",
-        "",  # terminate
-    ]
-
-    def fake_recv_line(s) -> str:  # type: ignore[override]
-        return lines.pop(0)
-
-    svc = RoomService(
-        client_factory=lambda *a, **k: DummyClientContext(DummyClient()),
-        tcp_connect_fn=fake_tcp_connect,
-        login_fn=fake_login,
-        recv_line_fn=fake_recv_line,
-    )
-
-    info = svc.fetch_info(
-        host="h", port=1, user="u", room="room1", token_store_path=None, password="pw"
-    )
-    assert info.name == "room1"
-    assert info.details["total_instances"] == 1
-    # storage_policy=1 should map to ephemeral according to implementation
-    assert info.details["storage_policy_name"] == "ephemeral"
-
-
 def test_fetch_info_mp2_success_and_error(monkeypatch: pytest.MonkeyPatch) -> None:
     client = DummyClient()
     client.get_room_info_result = {

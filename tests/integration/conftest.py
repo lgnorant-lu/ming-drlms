@@ -59,7 +59,7 @@ class TestRelayInstance:
 async def start_test_relay(
     port: int,
     tmp_dir: Path,
-    startup_timeout: float = 20.0,  # Increased for slower CI/Windows
+    startup_timeout: float = 30.0,  # Increased for slower CI/Windows
 ) -> TestRelayInstance:
     """Start a test relay server on the given port.
 

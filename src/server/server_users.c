@@ -294,22 +294,6 @@ int server_users_verify(const char *username, const char *password,
                 int rc = argon2id_verify(stored, password, strlen(password));
                 return (rc == ARGON2_OK) ? 1 : 0;
             }
-            // Legacy SHA256(password+salt)
-            unsigned char dg[SHA256_DIGEST_LENGTH];
-            SHA256_CTX ctx;
-            SHA256_Init(&ctx);
-            SHA256_Update(&ctx, (const unsigned char *)password,
-                          strlen(password));
-            SHA256_Update(&ctx, (const unsigned char *)g_users[i].salt,
-                          strlen(g_users[i].salt));
-            SHA256_Final(dg, &ctx);
-            char hx[SHA256_DIGEST_LENGTH * 2 + 1];
-            to_hex_lc_local(dg, sizeof dg, hx, sizeof hx);
-            if (hex_equal_nocase_local(hx, stored)) {
-                // Transparent upgrade on success
-                (void)server_users_upgrade_password(username, password);
-                return 1;
-            }
             return 0;
         }
     }

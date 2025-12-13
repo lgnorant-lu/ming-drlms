@@ -93,21 +93,6 @@ def test_user_del_ok_and_force(tmp_path: Path, runner: CliRunner):
     assert res.exit_code == 0
 
 
-def test_list_legacy_entries_are_detected(tmp_path: Path, runner: CliRunner):
-    data_dir = tmp_path / "srv"
-    users = data_dir / "users.txt"
-    data_dir.mkdir(parents=True, exist_ok=True)
-    users.write_text(
-        "alice:abcd:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n"
-    )
-    res = runner.invoke(app, ["user", "list", "-d", str(data_dir), "--json"])
-    assert res.exit_code == 0
-    lines = [ln for ln in res.output.splitlines() if ln.strip()]
-    arr = json.loads(lines[-1])
-    # Jules case: must recognize legacy format
-    assert any(it["username"] == "alice" and it["format"] == "legacy" for it in arr)
-
-
 def test_user_add_and_passwd_from_stdin(tmp_path: Path, runner: CliRunner):
     data_dir = tmp_path / "srv"
     # add via stdin
@@ -126,7 +111,6 @@ def test_parse_users_unit(tmp_path: Path):
     users.write_text(
         "\n".join(
             [
-                "legacy_user:abcd:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
                 "argon2_user::$argon2id$v=19$m=65536,t=2,p=1$YmFzZTY0$YWJjZGVm",  # dummy payload
                 "# comment",
             ]
@@ -135,41 +119,8 @@ def test_parse_users_unit(tmp_path: Path):
     )
     recs = parse_users(users)
     kinds = {u: k for (u, k, _e) in recs}
-    assert kinds.get("legacy_user") == "legacy"
     assert kinds.get("argon2_user") == "argon2"
     # parsing unit test only; no CLI invocation here
-
-
-def test_list_legacy_with_spaces_is_detected(tmp_path: Path, runner: CliRunner):
-    data_dir = tmp_path / "srv"
-    users = data_dir / "users.txt"
-    data_dir.mkdir(parents=True, exist_ok=True)
-    # 64-hex sha
-    sha = "0123456789abcdef" * 4
-    users.write_text(f"   legacy_user_ws : some_salt : {sha}   \n")
-    res = runner.invoke(app, ["user", "list", "-d", str(data_dir), "--json"])
-    assert res.exit_code == 0
-    lines = [ln for ln in res.output.splitlines() if ln.strip()]
-    arr = json.loads(lines[-1])
-    assert any(
-        it["username"] == "legacy_user_ws" and it["format"] == "legacy" for it in arr
-    )
-
-
-def test_list_legacy_with_crlf_is_detected(tmp_path: Path, runner: CliRunner):
-    data_dir = tmp_path / "srv"
-    users = data_dir / "users.txt"
-    data_dir.mkdir(parents=True, exist_ok=True)
-    sha = "abcdef0123456789" * 4
-    # Write CRLF line ending explicitly
-    users.write_bytes(f"legacy_user_crlf:salt:{sha}\r\n".encode("utf-8"))
-    res = runner.invoke(app, ["user", "list", "-d", str(data_dir), "--json"])
-    assert res.exit_code == 0
-    lines = [ln for ln in res.output.splitlines() if ln.strip()]
-    arr = json.loads(lines[-1])
-    assert any(
-        it["username"] == "legacy_user_crlf" and it["format"] == "legacy" for it in arr
-    )
 
 
 def test_user_add_invalid_username_exits_2(
