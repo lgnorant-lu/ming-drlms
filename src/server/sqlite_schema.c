@@ -50,13 +50,15 @@ int sqlite_storage_init(SQLiteStorage *storage, const char *db_path) {
         return -1;
     }
 
-    // Enable WAL mode for better concurrency support
-    rc =
-        sqlite3_exec(storage->db, "PRAGMA journal_mode=WAL;", NULL, NULL, NULL);
+    // Enable DELETE journal mode for better compatibility across short-lived
+    // connections DELETE mode commits immediately, ensuring data is visible to
+    // all connections WAL mode would require checkpoint calls which may not be
+    // available in all SQLite builds
+    rc = sqlite3_exec(storage->db, "PRAGMA journal_mode=DELETE;", NULL, NULL,
+                      NULL);
     if (rc != SQLITE_OK) {
-        LOG_ERROR("Failed to enable WAL mode: %s", sqlite3_errmsg(storage->db));
-        sqlite3_close(storage->db);
-        return -1;
+        LOG_WARN("Failed to set DELETE mode: %s (continuing anyway)",
+                 sqlite3_errmsg(storage->db));
     }
 
     if (platform_mutex_init(&storage->mu) != 0) {
@@ -236,6 +238,7 @@ int sqlite_storage_init(SQLiteStorage *storage, const char *db_path) {
     }
 
     // auth_refresh_tokens
+    LOG_DEBUG("[sqlite_schema] Creating auth_refresh_tokens table...");
     const char *auth_sql = "CREATE TABLE IF NOT EXISTS auth_refresh_tokens ("
                            "  token TEXT PRIMARY KEY,"
                            "  user_name TEXT NOT NULL,"
@@ -246,12 +249,14 @@ int sqlite_storage_init(SQLiteStorage *storage, const char *db_path) {
                            "auth_refresh_tokens(user_name);";
     rc = sqlite3_exec(storage->db, auth_sql, NULL, NULL, &err_msg);
     if (rc != SQLITE_OK) {
-        LOG_ERROR("SQL error: %s", err_msg ? err_msg : "(null)");
+        LOG_ERROR("[sqlite_schema] auth_refresh_tokens SQL error: %s",
+                  err_msg ? err_msg : "(null)");
         if (err_msg)
             sqlite3_free(err_msg);
         sqlite_storage_cleanup(storage);
         return -1;
     }
+    LOG_DEBUG("[sqlite_schema] auth_refresh_tokens table created successfully");
 
     // client_identities (14C)
     const char *ident_sql =
@@ -284,6 +289,12 @@ int sqlite_insert_refresh_token(SQLiteStorage *storage, const char *user,
                                 const char *token, sqlite3_int64 expires_at) {
     if (!storage || !user || !*user || !token || !*token || expires_at <= 0)
         return -1;
+
+    // Debug: log token being inserted
+    LOG_DEBUG("[sqlite_schema] INSERT token: user=%s token_prefix=%.16s... "
+              "expires_at=%lld",
+              user, token, (long long)expires_at);
+
     platform_mutex_lock(&storage->mu);
     const char *sql = "INSERT OR REPLACE INTO auth_refresh_tokens(token, "
                       "user_name, expires_at) VALUES (?, ?, ?);";
@@ -299,6 +310,13 @@ int sqlite_insert_refresh_token(SQLiteStorage *storage, const char *user,
     rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
     platform_mutex_unlock(&storage->mu);
+
+    if (rc == SQLITE_DONE) {
+        LOG_DEBUG("[sqlite_schema] INSERT successful for user=%s", user);
+    } else {
+        LOG_ERROR("[sqlite_schema] INSERT failed: rc=%d", rc);
+    }
+
     return (rc == SQLITE_DONE) ? 0 : -1;
 }
 
@@ -307,6 +325,10 @@ int sqlite_find_refresh_token(SQLiteStorage *storage, const char *token,
                               sqlite3_int64 *out_expires_at) {
     if (!storage || !token || !*token)
         return -1;
+
+    // Debug: log token being searched
+    LOG_DEBUG("[sqlite_schema] FIND token: token_prefix=%.16s...", token);
+
     if (out_user && out_user_cap)
         out_user[0] = '\0';
     if (out_expires_at)
@@ -329,10 +351,13 @@ int sqlite_find_refresh_token(SQLiteStorage *storage, const char *token,
             snprintf(out_user, out_user_cap, "%s", u);
         if (out_expires_at)
             *out_expires_at = ex;
+        LOG_DEBUG("[sqlite_schema] FIND successful: user=%s",
+                  u ? (const char *)u : "(null)");
         sqlite3_finalize(stmt);
         platform_mutex_unlock(&storage->mu);
         return 0;
     }
+    LOG_DEBUG("[sqlite_schema] FIND failed: token not in database");
     sqlite3_finalize(stmt);
     platform_mutex_unlock(&storage->mu);
     return -1;

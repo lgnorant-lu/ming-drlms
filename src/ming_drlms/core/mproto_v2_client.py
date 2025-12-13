@@ -7,7 +7,6 @@ import os
 import socket
 import time
 import uuid
-import importlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Generator, Iterable, Optional, cast
@@ -260,61 +259,103 @@ class MP2Client:
         auth_req.response = response_digest
 
         # 14C: attach ClientInfo with device/identity and binding signature (robust path)
+        # Phase 18+: Use LocalIdentityManager + SignalStore for XEdDSA signing
         try:
-            # Lazy import to avoid circular import with e2ee_store
-            ks_mod = importlib.import_module("ming_drlms.core.e2ee_store")
-            LocalKeyStore = getattr(ks_mod, "LocalKeyStore")
-            ks = LocalKeyStore()
-            st = ks.load_state(username)
-        except Exception:
-            st = None
+            # Import logging for debug output
+            import logging
 
-        # Phase 15.5: Use XEdDSA exclusively for MP2 login signature
-        # X25519 public key + XEdDSA signature (no Ed25519 fallback)
-        if st and getattr(st, "identity_key", None):
-            try:
-                from .identity_manager import IdentityManager
+            _mp2_log = logging.getLogger("ming_drlms.core.mproto_v2_client")
 
-                im = IdentityManager(username)
+            # Get local identity (Phase 18+ unified identity)
+            from ..identity import LocalIdentityManager
 
-                if im.has_identity():
-                    ts = int(time.time())
-                    binding_parts = [
-                        b"MP2-LOGIN-V1",
-                        username.encode("utf-8"),
-                        str(int(getattr(st, "device_id", 0))).encode("ascii"),
-                        str(int(getattr(st, "registration_id", 0))).encode("ascii"),
-                        (nonce or "").encode("ascii"),
-                        (server_salt or "").encode("utf-8"),
-                        str(ts).encode("ascii"),
-                    ]
-                    binding = b"|".join(binding_parts)
+            local_im = LocalIdentityManager()
 
-                    pub = im.get_pubkey()  # 32-byte X25519 public key
-                    sig = im.sign(binding)  # XEdDSA signature (64 bytes)
+            if local_im.has_identity():
+                identity = local_im.get_identity()
+                ts = int(time.time())
+                binding_parts = [
+                    b"MP2-LOGIN-V1",
+                    username.encode("utf-8"),
+                    str(identity.device_id).encode("ascii"),
+                    str(identity.registration_id).encode("ascii"),
+                    (nonce or "").encode("ascii"),
+                    (server_salt or "").encode("utf-8"),
+                    str(ts).encode("ascii"),
+                ]
+                binding = b"|".join(binding_parts)
 
-                    client = auth_pb2.ClientInfo()
-                    client.device_id = int(getattr(st, "device_id", 0))
-                    client.registration_id = int(getattr(st, "registration_id", 0))
-                    client.identity_pubkey = pub
-                    client.identity_sig = sig
-                    client.sig_ts = ts
-                    # signature_type: 1 = XEdDSA (Phase 15.5+), 0 = Ed25519 (legacy)
-                    if hasattr(client, "signature_type"):
-                        client.signature_type = 1
-                    try:
-                        client.platform = os.name
-                    except Exception:
-                        pass
-                    # app_version and device_guid left empty unless externally provided
-                    try:
-                        if hasattr(auth_req, "client"):
-                            auth_req.client.CopyFrom(client)  # type: ignore[attr-defined]
-                    except Exception:
-                        pass
-            except Exception:
-                # Non-fatal: proceed without ClientInfo if XEdDSA unavailable
-                pass
+                pub = identity.public_key_raw  # 32-byte X25519 public key
+
+                # XEdDSA signing via Signal Protocol C library
+                from .pysignal.context import create_signal_context
+                from .pysignal.store import SignalStore
+                from .pysignal.signature import sign_bytes_with_store
+
+                ctx = create_signal_context()
+                store = SignalStore(ctx)
+
+                # Initialize store with identity key
+                id_pub = identity.public_key
+                if len(id_pub) == 32:
+                    id_pub = b"\x05" + id_pub
+
+                store.set_identity(
+                    public_key=id_pub,
+                    private_key=identity.private_key,
+                    registration_id=identity.registration_id,
+                    device_id=identity.device_id,
+                )
+
+                sig = sign_bytes_with_store(
+                    store, binding
+                )  # XEdDSA signature (64 bytes)
+
+                store.close()
+                ctx.close()
+
+                # Debug: Log signature generation details
+                _mp2_log.debug(
+                    "[MP2 Login] Using LocalIdentityManager + SignalStore XEdDSA"
+                )
+                _mp2_log.debug(
+                    f"[MP2 Login] XEdDSA signing: binding_len={len(binding)}"
+                )
+                _mp2_log.debug(f"[MP2 Login] binding={binding!r}")
+                _mp2_log.debug(f"[MP2 Login] pubkey: len={len(pub)} hex={pub.hex()}")
+                _mp2_log.debug(
+                    f"[MP2 Login] signature: len={len(sig)} hex={sig.hex()[:32]}..."
+                )
+
+                client = auth_pb2.ClientInfo()
+                client.device_id = identity.device_id
+                client.registration_id = identity.registration_id
+                client.identity_pubkey = pub
+                client.identity_sig = sig
+                client.sig_ts = ts
+                # signature_type: 1 = XEdDSA (Phase 15.5+)
+                if hasattr(client, "signature_type"):
+                    client.signature_type = 1
+                try:
+                    client.platform = os.name
+                except Exception:
+                    pass
+                try:
+                    if hasattr(auth_req, "client"):
+                        auth_req.client.CopyFrom(client)
+                        _mp2_log.debug("[MP2 Login] ClientInfo attached successfully")
+                except Exception as e:
+                    _mp2_log.warning(f"[MP2 Login] Failed to attach ClientInfo: {e}")
+            else:
+                _mp2_log.debug(
+                    "[MP2 Login] No local identity found, skipping signature"
+                )
+        except Exception as e:
+            # Non-fatal: proceed without ClientInfo if identity unavailable
+            import logging
+
+            _mp2_log = logging.getLogger("ming_drlms.core.mproto_v2_client")
+            _mp2_log.debug(f"[MP2 Login] ClientInfo generation failed: {e}")
 
         write_frame(
             sock,

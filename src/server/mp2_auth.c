@@ -605,6 +605,18 @@ int mp2_auth_handle_auth_request(platform_socket_t fd,
                 ok = 0; /* enforce */
             }
 
+            /* Debug: Log signature verification state */
+            LOG_DEBUG("[auth][sig] user=%s require_sig=%d sig_ok=%d "
+                      "ok_after_sigcheck=%d",
+                      req->username ? req->username : "(null)", require_sig,
+                      sig_ok, ok);
+            if (ci) {
+                LOG_DEBUG("[auth][sig] ClientInfo: pubkey_len=%zu sig_len=%zu "
+                          "dev_id=%d reg_id=%d",
+                          ci->identity_pubkey.len, ci->identity_sig.len,
+                          (int)ci->device_id, (int)ci->registration_id);
+            }
+
             if (ok && sig_ok && cfg && cfg->data_dir &&
                 ci->identity_pubkey.len == 32) {
                 char db_path[PATH_MAX];
@@ -627,6 +639,12 @@ int mp2_auth_handle_auth_request(platform_socket_t fd,
             }
         }
 
+        /* Debug: Log final auth state before JWT generation */
+        LOG_DEBUG(
+            "[auth][final] user=%s ok=%d will_generate_jwt=%d cfg_data_dir=%s",
+            req->username ? req->username : "(null)", ok, ok ? 1 : 0,
+            (cfg && cfg->data_dir) ? cfg->data_dir : "(null)");
+
         if (ok) {
             unsigned long long exp =
                 (unsigned long long)time(NULL) + 15ULL * 60ULL;
@@ -644,13 +662,25 @@ int mp2_auth_handle_auth_request(platform_socket_t fd,
                          resp.access_token ? resp.access_token : "");
                 st->access_exp = time(NULL) + 15 * 60;
             }
-            if (cfg->data_dir && resp.refresh_token) {
+            /* Debug: Log refresh token storage attempt */
+            LOG_DEBUG("[auth][refresh] attempting save: cfg->data_dir=%s "
+                      "token_present=%d",
+                      (cfg && cfg->data_dir) ? cfg->data_dir : "(null)",
+                      resp.refresh_token ? 1 : 0);
+            if (cfg && cfg->data_dir && resp.refresh_token) {
                 char db_path[PATH_MAX];
                 snprintf(db_path, sizeof db_path, "%s/%s", cfg->data_dir,
                          "drlms.db");
-                sqlite_insert_refresh_token_path(
+                int insert_rc = sqlite_insert_refresh_token_path(
                     db_path, req->username, resp.refresh_token,
                     (sqlite3_int64)(time(NULL) + 7 * 24 * 3600));
+                LOG_DEBUG("[auth][refresh] insert_rc=%d path=%s user=%s",
+                          insert_rc, db_path,
+                          req->username ? req->username : "(null)");
+            } else {
+                LOG_WARN("[auth][refresh] NOT saving token: cfg=%p data_dir=%s",
+                         (void *)cfg,
+                         (cfg && cfg->data_dir) ? cfg->data_dir : "(null)");
             }
         }
     }
