@@ -7,8 +7,14 @@ from typing import Optional
 import typer
 from rich import print
 
+from ..i18n import t
 
-ipc_app = typer.Typer(help="Inter-Process Communication (Shared Memory) tools")
+
+ipc_app = typer.Typer(
+    help=t("HELP.IPC.DESC"),
+    epilog=t("HELP.IPC.EPILOG"),
+    context_settings={"help_option_names": ["-h", "--help"]},
+)
 
 
 def _find_tool(tool_name: str) -> Path:
@@ -44,14 +50,16 @@ def _find_tool(tool_name: str) -> Path:
     return Path(tool_name)
 
 
-@ipc_app.command("send", help="Send a message via shared memory (wraps ipc_sender)")
+@ipc_app.command("send", help=t("HELP.IPC.SEND"))
 def ipc_send(
     message: Optional[str] = typer.Option(
-        None, "--message", "-m", help="Text message to send"
+        None, "--message", "-m", help=t("HELP.IPC.OPT.MESSAGE")
     ),
-    file_path: Optional[Path] = typer.Option(None, "--file", "-f", help="File to send"),
-    key: str = typer.Option("0x1234", "--key", "-k", help="Shared memory key (hex)"),
-    chunk_size: int = typer.Option(0, "--chunk", help="Chunk size in bytes (0=auto)"),
+    file_path: Optional[Path] = typer.Option(
+        None, "--file", "-f", help=t("HELP.IPC.OPT.FILE")
+    ),
+    key: str = typer.Option("0x1234", "--key", "-k", help=t("HELP.IPC.OPT.KEY")),
+    chunk_size: int = typer.Option(0, "--chunk", help=t("HELP.IPC.OPT.CHUNK")),
 ):
     """
     Send data to the shared memory buffer.
@@ -88,11 +96,9 @@ def ipc_send(
         raise typer.Exit(code=1)
 
 
-@ipc_app.command(
-    "listen", help="Listen for messages from shared memory (wraps log_consumer)"
-)
+@ipc_app.command("listen", help=t("HELP.IPC.LISTEN"))
 def ipc_listen(
-    key: str = typer.Option("0x1234", "--key", "-k", help="Shared memory key (hex)"),
+    key: str = typer.Option("0x1234", "--key", "-k", help=t("HELP.IPC.OPT.KEY")),
 ):
     """
     Listen for data from the shared memory buffer.

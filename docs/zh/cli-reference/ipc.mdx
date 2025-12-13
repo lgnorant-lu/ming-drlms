@@ -1,14 +1,49 @@
 ---
 title: "ipc"
-description: "[Advanced] IPC 进程间通信命令"
+description: "[独立项目] 进程间通信 - 基于共享内存的消息传递"
 ---
 
 ## 概述
 
-`ipc` 命令组提供进程间通信（IPC）功能，用于与 C 服务器的共享内存交互。
+`ipc` 命令组是一个**独立的实验性项目**，提供基于共享内存的进程间通信（IPC）功能。
+
+> **注意**: IPC 是独立于 DRLMS 网络协议（Relay/MP2/Legacy）的本地进程间通信实现，主要用于教学和实验目的。
+
+### 特点
+
+- **共享内存通信**：使用操作系统共享内存机制
+- **信号量同步**：empty/full 信号量控制读写，防止竞态条件
+- **环形缓冲区**：支持多条消息排队
+- **跨平台**：支持 Windows 和 Linux
+- **文件支持**：可以发送文本消息或文件内容
 
 ```bash
 ming-drlms ipc --help
+```
+
+---
+
+## 架构说明
+
+### 核心组件
+
+| 组件 | 说明 |
+|------|------|
+| **共享内存** | 进程间共享的消息缓冲区 |
+| **信号量** | 同步机制（empty/full） |
+| **环形缓冲区** | 2个槽位，支持消息排队 |
+| **C 底层工具** | `log_consumer`（监听）、`ipc_sender`（发送） |
+
+### 工作原理
+
+```
+进程 A (Sender)          共享内存           进程 B (Listener)
+      |                     |                      |
+      | ──── write ───> [Buffer] ───── read ──> |
+      |                [Slot 0]                   |
+      |                [Slot 1]                   |
+      |                     |                      |
+   sem_empty <──> Semaphores <──> sem_full
 ```
 
 ---
@@ -17,14 +52,14 @@ ming-drlms ipc --help
 
 | 命令 | 说明 |
 |------|------|
-| `send` | 通过共享内存发送消息 |
-| `tail` | 监听共享内存消息 |
+| `send` | 发送消息到共享内存 |
+| `listen` | 监听共享内存消息 |
 
 ---
 
 ## ipc send
 
-通过共享内存发送消息。
+发送消息到共享内存缓冲区。
 
 ### 语法
 
@@ -36,61 +71,194 @@ ming-drlms ipc send [选项]
 
 | 选项 | 简写 | 说明 |
 |------|------|------|
-| `--text` | - | 消息内容（与 --file/--interactive 互斥） |
-| `--file` | - | 文件路径 |
-| `--interactive` | `-i` | 交互式模式（从 stdin 逐行读取） |
-| `--key` | - | DRLMS_SHM_KEY（如 0x4c4f4755） |
-| `--chunk` | - | 分块字节数（用于流式传输） |
+| `--message` | `-m` | 消息内容（字符串） |
+| `--file` | `-f` | 文件路径（读取文件内容作为消息） |
+| `--key` | `-k` | 共享内存密钥（十六进制，如 `0x1234`） |
+| `--chunk` | - | 分块大小（字节，0=自动） |
 
 ### 示例
 
+**发送文本消息**：
 ```bash
-ming-drlms ipc send --text "Hello via IPC" --key 0x4c4f4755
-ming-drlms ipc send --file /path/to/file.txt
-ming-drlms ipc send --interactive
+ming-drlms ipc send --key 0x1234 --message "Hello IPC!"
+```
+
+**发送文件内容**：
+```bash
+ming-drlms ipc send --key 0x1234 --file message.txt
+```
+
+**使用环境变量**：
+```bash
+export DRLMS_SHM_KEY=0x1234
+ming-drlms ipc send --message "Test"
 ```
 
 ---
 
-## ipc tail
+## ipc listen
 
-监听共享内存消息。
+监听共享内存消息并输出到标准输出。
 
 ### 语法
 
 ```bash
-ming-drlms ipc tail [选项]
+ming-drlms ipc listen [选项]
 ```
 
 ### 选项
 
 | 选项 | 简写 | 说明 |
 |------|------|------|
-| `--key` | - | DRLMS_SHM_KEY |
-| `--max` | `-n` | 最大接收消息数 |
+| `--key` | `-k` | 共享内存密钥（十六进制） |
 
 ### 示例
 
+**启动监听**：
 ```bash
-ming-drlms ipc tail --key 0x4c4f4755 --max 100
+ming-drlms ipc listen --key 0x1234
+```
+
+**输出重定向到文件**：
+```bash
+ming-drlms ipc listen --key 0x1234 > received.txt
+```
+
+**停止监听**：
+按 `Ctrl+C` 停止
+
+---
+
+## 完整示例
+
+### 基本消息传递
+
+**终端1 - 启动监听**：
+```bash
+ming-drlms ipc listen --key 0x1234
+```
+
+**终端2 - 发送消息**：
+```bash
+ming-drlms ipc send --key 0x1234 --message "Message 1"
+ming-drlms ipc send --key 0x1234 --message "Message 2"
+```
+
+**终端1 输出**：
+```
+Message 1
+Message 2
+```
+
+### 文件传输
+
+**创建测试文件**：
+```bash
+echo "Line 1" > test.txt
+echo "Line 2" >> test.txt
+```
+
+**发送文件**：
+```bash
+ming-drlms ipc send --key 0x1234 --file test.txt
+```
+
+**监听端接收**：
+```
+Line 1
+Line 2
 ```
 
 ---
 
-## IPC 配置
+## 环境变量
 
-### 环境变量
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `DRLMS_SHM_KEY` | 共享内存密钥 | `0x4c4f4742` |
 
-| 变量 | 说明 |
-|------|------|
-| `DRLMS_SHM_KEY` | 共享内存密钥（如 `0x4c4f4755`） |
+> **提示**: `--key` 选项会自动设置 `DRLMS_SHM_KEY` 环境变量传递给底层 C 工具。
 
-<Note>
-`--key` 选项会设置 `DRLMS_SHM_KEY` 环境变量传递给底层 C 二进制文件。
-</Note>
+---
+
+## 技术细节
+
+### 共享内存配置
+
+| 参数 | 值 |
+|------|-----|
+| 缓冲区大小 | 16384 字节 |
+| 槽位大小 | 4096 字节 |
+| 槽位数量 | 2 个 |
+| 信号量 | 2 个（empty, full） |
+
+### Windows 实现
+
+- **共享内存**: `CreateFileMapping` / `MapViewOfFile`
+- **信号量**: Named Semaphores (`CreateSemaphoreW`)
+- **信号量名称格式**: `Local\drlms_shm_sem_<key>_empty|full`
+
+### Linux 实现
+
+- **共享内存**: POSIX `shm_open` / `mmap`
+- **信号量**: POSIX Named Semaphores
+
+---
+
+## 实验用途
+
+IPC 功能主要用于以下场景：
+
+1. **进程间通信实验**：学习共享内存和信号量机制
+2. **本地消息传递**：无需网络的进程间数据交换
+3. **性能测试**：测试高频消息传递性能
+4. **教学演示**：演示 IPC 的工作原理
+
+> **不适用于**：生产环境、跨网络通信、持久化存储
+
+---
+
+## 故障排除
+
+### 常见问题
+
+**Q: 发送失败，提示 "shm_init failed"**  
+A: 确保 `log_consumer` 编译成功并在 `build_win_ninja_x64/` 目录下。
+
+**Q: Listener 没有显示消息**  
+A: 检查两个进程使用相同的 `--key` 值。
+
+**Q: Windows 上找不到信号量（error=2）**  
+A: 先启动 listener创建共享内存，再启动 sender。
+
+### 清理共享内存
+
+**Linux**：
+```bash
+# 查看共享内存
+ipcs -m
+# 删除
+ipcrm -M 0x1234
+```
+
+**Windows**：
+共享内存在最后一个进程退出时自动清理。
+
+---
+
+## 与其他协议的区别
+
+| 特性 | IPC | Relay | MP2 |
+|------|-----|-------|-----|
+| **通信方式** | 本地共享内存 | 网络 (TCP) | 网络 (TCP) |
+| **用途** | 本地进程间 | 加密聊天 | 房间管理 |
+| **认证** | 无 | Identity 公钥 | Token |
+| **适用场景** | 实验/教学 | 生产环境 | 生产环境 |
 
 ---
 
 ## 相关命令
 
+- [chat](/zh/cli-reference/chat) - Relay 协议加密聊天
+- [room](/zh/cli-reference/room) - MP2 协议房间管理
 - [server](/zh/cli-reference/server) - 服务器管理
