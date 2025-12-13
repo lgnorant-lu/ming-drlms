@@ -7,7 +7,10 @@ from ...i18n import t
 from ..utils import ROOT
 
 
-pkg_app = typer.Typer(help=t("HELP.DEV.PKG"))
+pkg_app = typer.Typer(
+    help=t("HELP.DEV.PKG"),
+    context_settings={"help_option_names": ["-h", "--help"]},
+)
 
 
 @pkg_app.command("build", help=t("HELP.DIST.BUILD"))

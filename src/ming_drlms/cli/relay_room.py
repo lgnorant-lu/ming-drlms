@@ -18,21 +18,27 @@ from rich import print
 from rich.console import Console
 from rich.table import Table
 import typer
+from ..i18n import t
 
 relay_room_app = typer.Typer(
-    help="[Relay Only] Relay-native 房间管理 (create/list/join/leave/invite)"
+    help=t("HELP.R_ROOM.DESC"),
+    context_settings={"help_option_names": ["-h", "--help"]},
 )
 
 
-@relay_room_app.command("create", help="创建新房间")
+@relay_room_app.command("create", help=t("HELP.R_ROOM.CREATE"))
 def create_room_command(
-    name: Optional[str] = typer.Option(None, "--name", "-n", help="房间名称"),
-    description: Optional[str] = typer.Option(None, "--desc", "-d", help="房间描述"),
+    name: Optional[str] = typer.Option(
+        None, "--name", "-n", help=t("HELP.R_ROOM.OPT.NAME")
+    ),
+    description: Optional[str] = typer.Option(
+        None, "--desc", "-d", help=t("HELP.R_ROOM.OPT.DESC")
+    ),
     visibility: str = typer.Option(
-        "private", "--visibility", "-v", help="可见性: private, unlisted, public"
+        "private", "--visibility", "-v", help=t("HELP.R_ROOM.OPT.VISIBILITY")
     ),
     relays: Optional[str] = typer.Option(
-        None, "--relays", "-r", help="Relay 列表 (逗号分隔)"
+        None, "--relays", "-r", help=t("HELP.R_ROOM.OPT.RELAYS")
     ),
 ):
     """创建一个新的 Relay-native 房间。"""
@@ -89,10 +95,10 @@ def create_room_command(
         print(f"  {invite}")
 
 
-@relay_room_app.command("list", help="列出已加入的房间")
+@relay_room_app.command("list", help=t("HELP.R_ROOM.LIST"))
 def list_rooms_command(
     visibility: Optional[str] = typer.Option(
-        None, "--visibility", "-v", help="按可见性过滤: private, unlisted, public"
+        None, "--visibility", "-v", help=t("HELP.R_ROOM.OPT.VISIBILITY_FILTER")
     ),
 ):
     """列出所有已加入的房间。"""
@@ -136,9 +142,9 @@ def list_rooms_command(
     console.print(table)
 
 
-@relay_room_app.command("invite", help="生成房间邀请链接")
+@relay_room_app.command("invite", help=t("HELP.R_ROOM.INVITE"))
 def invite_command(
-    room_id: str = typer.Argument(..., help="房间 ID 或前缀"),
+    room_id: str = typer.Argument(..., help=t("HELP.R_ROOM.OPT.ID")),
 ):
     """生成指定房间的邀请链接。"""
     from ..relay.rooms import RoomStore, generate_invite
@@ -161,9 +167,9 @@ def invite_command(
     print("[dim]将此链接分享给他人以邀请加入房间[/dim]")
 
 
-@relay_room_app.command("join", help="通过邀请链接加入房间")
+@relay_room_app.command("join", help=t("HELP.R_ROOM.JOIN"))
 def join_command(
-    invite_link: str = typer.Argument(..., help="邀请链接"),
+    invite_link: str = typer.Argument(..., help=t("HELP.R_ROOM.OPT.INVITE")),
 ):
     """通过邀请链接加入房间。"""
     from ..relay.rooms import RoomStore, join_room
@@ -185,10 +191,10 @@ def join_command(
         print(f"[bold]Relay:[/bold] {', '.join(room.relays)}")
 
 
-@relay_room_app.command("leave", help="离开房间")
+@relay_room_app.command("leave", help=t("HELP.R_ROOM.LEAVE"))
 def leave_command(
-    room_id: str = typer.Argument(..., help="房间 ID 或前缀"),
-    force: bool = typer.Option(False, "--force", "-f", help="跳过确认"),
+    room_id: str = typer.Argument(..., help=t("HELP.R_ROOM.OPT.ID")),
+    force: bool = typer.Option(False, "--force", "-f", help=t("HELP.R_ROOM.OPT.FORCE")),
 ):
     """离开指定房间。"""
     from ..relay.rooms import RoomStore
@@ -213,10 +219,10 @@ def leave_command(
         print("[red]离开房间失败[/red]")
 
 
-@relay_room_app.command("discover", help="发现公开房间")
+@relay_room_app.command("discover", help=t("HELP.R_ROOM.DISCOVER"))
 def discover_command(
     relays: Optional[str] = typer.Option(
-        None, "--relays", "-r", help="Relay 列表 (逗号分隔)"
+        None, "--relays", "-r", help=t("HELP.R_ROOM.OPT.RELAYS")
     ),
 ):
     """从 Relay 发现公开房间。"""
@@ -264,9 +270,9 @@ def discover_command(
     print("[dim]使用 'ming-drlms relay-room join <invite_link>' 加入房间[/dim]")
 
 
-@relay_room_app.command("info", help="显示房间详情")
+@relay_room_app.command("info", help=t("HELP.R_ROOM.INFO"))
 def info_command(
-    room_id: str = typer.Argument(..., help="房间 ID 或前缀"),
+    room_id: str = typer.Argument(..., help=t("HELP.R_ROOM.OPT.ID")),
 ):
     """显示房间详细信息。"""
     from ..relay.rooms import RoomStore, generate_invite

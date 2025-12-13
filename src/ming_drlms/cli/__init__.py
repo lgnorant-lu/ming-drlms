@@ -25,7 +25,10 @@ from ..core.token_store import TokenStore
 from ..core.mproto_v2_client import AuthenticationError, login_flow
 from .mproto_runtime import resolve_password_hash
 
-app = typer.Typer(help="ming-drlms: Pretty CLI for DRLMS server and client")
+app = typer.Typer(
+    help=t("HELP.APP.DESC"),
+    context_settings={"help_option_names": ["-h", "--help"]},
+)
 
 
 def version_callback(value: bool):
@@ -41,24 +44,24 @@ def _app_entry(
         typer.Option(
             "--version",
             "-V",
-            help="show CLI version and exit",
+            help=t("HELP.OPT.VERSION"),
             callback=version_callback,
             is_eager=True,
         ),
     ] = False,
     log_level: Annotated[
         Optional[str],
-        typer.Option("--log-level", help="override logging level for this run"),
+        typer.Option("--log-level", help=t("HELP.OPT.LOG_LEVEL")),
     ] = None,
     log_dir: Annotated[
         Optional[Path],
-        typer.Option("--log-dir", help="override logging directory for this run"),
+        typer.Option("--log-dir", help=t("HELP.OPT.LOG_DIR")),
     ] = None,
     log_console: Annotated[
         Optional[bool],
         typer.Option(
             "--log-console/--no-log-console",
-            help="enable/disable console logging for this run",
+            help=t("HELP.OPT.LOG_CONSOLE"),
         ),
     ] = None,
 ):
@@ -80,31 +83,31 @@ def _app_entry(
 
 @app.command("login", help=t("HELP.AUTH.LOGIN"))
 def cli_login(
-    username: str = typer.Option(..., "--user", "-u", help="username"),
-    host: str = typer.Option("127.0.0.1", "--host", "-H", help="server host"),
-    port: int = typer.Option(15035, "--port", "-p", help="server port"),
+    username: str = typer.Option(..., "--user", "-u", help=t("HELP.OPT.USER")),
+    host: str = typer.Option("127.0.0.1", "--host", "-H", help=t("HELP.OPT.HOST")),
+    port: int = typer.Option(15035, "--port", "-p", help=t("HELP.OPT.PORT")),
     password_hash: Optional[str] = typer.Option(
         None,
         "--password-hash",
-        help="precomputed Argon2 hash for the user (overrides --password-hash-file)",
+        help=t("HELP.OPT.PWD_HASH"),
     ),
     password_hash_file: Optional[Path] = typer.Option(
         None,
         "--password-hash-file",
-        help="path to file containing Argon2 hash",
+        help=t("HELP.OPT.PWD_HASH_FILE"),
     ),
     users_file: Optional[Path] = typer.Option(
         None,
         "--users-file",
         "-U",
-        help="users.txt location used to resolve stored Argon2 hash",
+        help=t("HELP.OPT.USERS_FILE"),
     ),
     token_store: Optional[Path] = typer.Option(
         None,
         "--token-store",
-        help="override token cache path (default: ~/.config/ming-drlms/tokens.json)",
+        help=t("HELP.OPT.TOKEN_STORE"),
     ),
-    timeout: float = typer.Option(10.0, "--timeout", help="socket timeout in seconds"),
+    timeout: float = typer.Option(10.0, "--timeout", help=t("HELP.OPT.TIMEOUT")),
 ):
     try:
         resolved_hash = resolve_password_hash(password_hash, password_hash_file)
@@ -147,13 +150,13 @@ def cli_login(
 
 @app.command("logout", help=t("HELP.AUTH.LOGOUT"))
 def cli_logout(
-    username: str = typer.Option(..., "--user", "-u", help="username"),
-    host: str = typer.Option("127.0.0.1", "--host", "-H", help="server host"),
-    port: int = typer.Option(15035, "--port", "-p", help="server port"),
+    username: str = typer.Option(..., "--user", "-u", help=t("HELP.OPT.USER")),
+    host: str = typer.Option("127.0.0.1", "--host", "-H", help=t("HELP.OPT.HOST")),
+    port: int = typer.Option(15035, "--port", "-p", help=t("HELP.OPT.PORT")),
     token_store: Optional[Path] = typer.Option(
         None,
         "--token-store",
-        help="override token cache path (default: ~/.config/ming-drlms/tokens.json)",
+        help=t("HELP.OPT.TOKEN_STORE"),
     ),
 ):
     """Revoke cached tokens for a user session."""
@@ -211,7 +214,7 @@ _server.register_top_level_aliases(app)
 
 
 # TUI Command
-@app.command("tui", help="Launch the Textual TUI interface (experimental)")
+@app.command("tui", help=t("HELP.CMD.TUI"))
 def cli_tui():
     """Launch the Textual TUI interface."""
     import time
@@ -237,11 +240,11 @@ def cli_tui():
 # XEdDSA self-test command
 @app.command(
     "xeddsa-selftest",
-    help="Run XEdDSA sign/verify self-test with local keystore identity",
+    help=t("HELP.CMD.XEDDSA"),
 )
 def cli_xeddsa_selftest(
     username: Optional[str] = typer.Option(
-        None, "--user", "-u", help="username for keystore lookup"
+        None, "--user", "-u", help=t("HELP.OPT.KEYSTORE_USER")
     ),
 ):
     import os

@@ -17,7 +17,10 @@ from .services import RoomService, RoomServiceError
 from ..i18n import t
 
 
-room_app = typer.Typer(help="[MP2 Only] 房间管理 (需要 MP2 服务器连接)")
+room_app = typer.Typer(
+    help=t("HELP.ROOM.DESC"),
+    context_settings={"help_option_names": ["-h", "--help"]},
+)
 
 _POLICY_NAME = {0: "retain", 1: "delegate", 2: "teardown"}
 _STORAGE_POLICY_NAME = {0: "persistent", 1: "ephemeral"}
@@ -84,25 +87,26 @@ def _print_room_event(event: RoomEvent, *, json_out: bool) -> None:
         print(f"[green][{event.event_id}] {event.display_token}[/green]")
 
 
+@room_app.command("join", help=t("HELP.ROOM.CMD.JOIN"))
 @room_app.command("sub", help=t("HELP.ROOM.SUB"))
 def room_sub(
-    room: str = typer.Option(..., "--room", "-r", help="房间名"),
+    room: str = typer.Option(..., "--room", "-r", help=t("HELP.ROOM.OPT.ROOM")),
     host: str = typer.Option("127.0.0.1", "--host", "-H"),
     port: int = typer.Option(15035, "--port", "-p"),
     user: str = typer.Option(None, "--user", "-u", envvar="DRLMS_USER"),
-    since_id: int = typer.Option(0, "--since-id", "-s", help="从指定 event_id 开始"),
-    limit: int = typer.Option(0, "--limit", "-n", help="最多接收事件数量 (0 表示不限)"),
-    json_out: bool = typer.Option(False, "--json", "-j", help="以 JSON 输出事件"),
+    since_id: int = typer.Option(0, "--since-id", "-s", help=t("HELP.ROOM.OPT.SINCE")),
+    limit: int = typer.Option(0, "--limit", "-n", help=t("HELP.ROOM.OPT.LIMIT")),
+    json_out: bool = typer.Option(False, "--json", "-j", help=t("HELP.ROOM.OPT.JSON")),
     token_store: Optional[Path] = typer.Option(
         None,
         "--token-store",
-        help="token 缓存文件路径 (默认 ~/.config/ming-drlms/tokens.json)",
+        help=t("HELP.OPT.TOKEN_STORE"),
     ),
-    timeout: float = typer.Option(10.0, "--timeout", help="socket 超时时间"),
+    timeout: float = typer.Option(10.0, "--timeout", help=t("HELP.OPT.TIMEOUT")),
     e2ee_store: Optional[Path] = typer.Option(
         None,
         "--key-store",
-        help="端到端密钥仓库路径 (默认 ~/.config/ming-drlms/e2ee_keys.json)",
+        help=t("HELP.ROOM.OPT.E2EE_STORE"),
     ),
 ):
     room = _option_value(room, "room")
@@ -162,12 +166,16 @@ def room_sub(
 
 @room_app.command("pub", help=t("HELP.ROOM.PUB"))
 def room_pub(
-    room: str = typer.Option(..., "--room", "-r", help="房间名"),
-    text: Optional[str] = typer.Option(None, "--text", "-t", help="发送文本内容"),
-    file: Optional[Path] = typer.Option(None, "--file", "-f", help="发送文件"),
-    stdin: bool = typer.Option(False, "--stdin", help="从标准输入读取内容"),
+    room: str = typer.Option(..., "--room", "-r", help=t("HELP.ROOM.OPT.ROOM")),
+    text: Optional[str] = typer.Option(
+        None, "--text", "-t", help=t("HELP.ROOM.OPT.TEXT")
+    ),
+    file: Optional[Path] = typer.Option(
+        None, "--file", "-f", help=t("HELP.ROOM.OPT.FILE")
+    ),
+    stdin: bool = typer.Option(False, "--stdin", help=t("HELP.ROOM.OPT.STDIN")),
     ephemeral: bool = typer.Option(
-        False, "--ephemeral/--persistent", help="使用阅后即焚事件"
+        False, "--ephemeral/--persistent", help=t("HELP.ROOM.OPT.EPHEMERAL")
     ),
     host: str = typer.Option("127.0.0.1", "--host", "-H"),
     port: int = typer.Option(15035, "--port", "-p"),
@@ -175,13 +183,13 @@ def room_pub(
     token_store: Optional[Path] = typer.Option(
         None,
         "--token-store",
-        help="token 缓存文件路径 (默认 ~/.config/ming-drlms/tokens.json)",
+        help=t("HELP.OPT.TOKEN_STORE"),
     ),
-    timeout: float = typer.Option(10.0, "--timeout", help="socket 超时时间"),
+    timeout: float = typer.Option(10.0, "--timeout", help=t("HELP.OPT.TIMEOUT")),
     e2ee_store: Optional[Path] = typer.Option(
         None,
         "--key-store",
-        help="端到端密钥仓库路径 (默认 ~/.config/ming-drlms/e2ee_keys.json)",
+        help=t("HELP.ROOM.OPT.E2EE_STORE"),
     ),
 ):
     room = _option_value(room, "room")
@@ -266,14 +274,16 @@ def room_pub(
 
 @room_app.command("info", help=t("HELP.ROOM.INFO"))
 def room_info(
-    room: str = typer.Option(..., "--room", "-r", help="房间名"),
+    room: str = typer.Option(..., "--room", "-r", help=t("HELP.ROOM.OPT.ROOM")),
     host: str = typer.Option("127.0.0.1", "--host", "-H"),
     port: int = typer.Option(15035, "--port", "-p"),
     user: str = typer.Option(None, "--user", "-u", envvar="DRLMS_USER"),
     token_store: Optional[Path] = typer.Option(
-        None, "--token-store", "-t", help="Token存储路径"
+        None, "--token-store", "-t", help=t("HELP.OPT.TOKEN_STORE")
     ),
-    json_out: bool = typer.Option(False, "--json", "-j", help="以 JSON 方式输出"),
+    json_out: bool = typer.Option(
+        False, "--json", "-j", help=t("HELP.ROOM.OPT.JSON_OUT")
+    ),
 ):
     room = _option_value(room, "room")
     host = _option_value(host, "host")
@@ -327,17 +337,17 @@ def room_info(
     print(table)
 
 
-@room_app.command("create", help="创建房间，可指定阅后即焚模式")
+@room_app.command("create", help=t("HELP.ROOM.CREATE"))
 def room_create(
-    room: str = typer.Option(..., "--room", "-r", help="房间名"),
+    room: str = typer.Option(..., "--room", "-r", help=t("HELP.ROOM.OPT.ROOM")),
     ephemeral: bool = typer.Option(
-        False, "--ephemeral/--persistent", help="使用阅后即焚存储策略"
+        False, "--ephemeral/--persistent", help=t("HELP.ROOM.OPT.EPHEMERAL_CREATE")
     ),
     host: str = typer.Option("127.0.0.1", "--host", "-H"),
     port: int = typer.Option(15035, "--port", "-p"),
     user: str = typer.Option(None, "--user", "-u", envvar="DRLMS_USER"),
     token_store: Optional[Path] = typer.Option(
-        None, "--token-store", "-t", help="Token存储路径"
+        None, "--token-store", "-t", help=t("HELP.OPT.TOKEN_STORE")
     ),
 ):
     room = _option_value(room, "room")
@@ -364,13 +374,15 @@ def room_create(
 
 @room_app.command("set-policy", help=t("HELP.ROOM.SETPOLICY"))
 def room_set_policy(
-    room: str = typer.Option(..., "--room", "-r", help="房间名"),
-    policy: str = typer.Option(..., "--policy", help="策略名", case_sensitive=False),
+    room: str = typer.Option(..., "--room", "-r", help=t("HELP.ROOM.OPT.ROOM")),
+    policy: str = typer.Option(
+        ..., "--policy", help=t("HELP.ROOM.OPT.POLICY"), case_sensitive=False
+    ),
     host: str = typer.Option("127.0.0.1", "--host", "-H"),
     port: int = typer.Option(15035, "--port", "-p"),
     user: str = typer.Option(None, "--user", "-u", envvar="DRLMS_USER"),
     token_store: Optional[Path] = typer.Option(
-        None, "--token-store", "-t", help="Token存储路径"
+        None, "--token-store", "-t", help=t("HELP.OPT.TOKEN_STORE")
     ),
 ):
     room = _option_value(room, "room")
@@ -398,17 +410,17 @@ def room_set_policy(
         raise typer.Exit(code=1)
 
 
-@room_app.command("set-storage-policy", help="设置房间存储策略")
+@room_app.command("set-storage-policy", help=t("HELP.ROOM.SET_STORAGE"))
 def room_set_storage_policy(
-    room: str = typer.Option(..., "--room", "-r", help="房间名"),
+    room: str = typer.Option(..., "--room", "-r", help=t("HELP.ROOM.OPT.ROOM")),
     policy: str = typer.Option(
-        ..., "--policy", help="storage policy", case_sensitive=False
+        ..., "--policy", help=t("HELP.ROOM.OPT.STORAGE_POLICY"), case_sensitive=False
     ),
     host: str = typer.Option("127.0.0.1", "--host", "-H"),
     port: int = typer.Option(15035, "--port", "-p"),
     user: str = typer.Option(None, "--user", "-u", envvar="DRLMS_USER"),
     token_store: Optional[Path] = typer.Option(
-        None, "--token-store", "-t", help="Token存储路径"
+        None, "--token-store", "-t", help=t("HELP.OPT.TOKEN_STORE")
     ),
 ):
     room = _option_value(room, "room")
@@ -440,13 +452,15 @@ def room_set_storage_policy(
 
 @room_app.command("transfer", help=t("HELP.ROOM.TRANSFER"))
 def room_transfer(
-    room: str = typer.Option(..., "--room", "-r", help="房间名"),
-    new_owner: str = typer.Option(..., "--new-owner", "-n", help="新的拥有者用户名"),
+    room: str = typer.Option(..., "--room", "-r", help=t("HELP.ROOM.OPT.ROOM")),
+    new_owner: str = typer.Option(
+        ..., "--new-owner", "-n", help=t("HELP.ROOM.OPT.NEW_OWNER")
+    ),
     host: str = typer.Option("127.0.0.1", "--host", "-H"),
     port: int = typer.Option(15035, "--port", "-p"),
     user: str = typer.Option(None, "--user", "-u", envvar="DRLMS_USER"),
     token_store: Optional[Path] = typer.Option(
-        None, "--token-store", "-t", help="Token存储路径"
+        None, "--token-store", "-t", help=t("HELP.OPT.TOKEN_STORE")
     ),
 ):
     room = _option_value(room, "room")
@@ -469,14 +483,16 @@ def room_transfer(
         raise typer.Exit(code=1)
 
 
-@room_app.command("members", help="查看房间成员列表")
+@room_app.command("members", help=t("HELP.ROOM.MEMBERS"))
 def room_members(
-    room: str = typer.Option(..., "--room", "-r", help="房间名"),
+    room: str = typer.Option(..., "--room", "-r", help=t("HELP.ROOM.OPT.ROOM")),
     host: str = typer.Option("127.0.0.1", "--host", "-H"),
     port: int = typer.Option(15035, "--port", "-p"),
     user: str = typer.Option(None, "--user", envvar="DRLMS_USER"),
     # Note: password parameter removed as it was not used by get_room_members_mp2()
-    json_output: bool = typer.Option(False, "--json", help="JSON格式输出"),
+    json_output: bool = typer.Option(
+        False, "--json", help=t("HELP.ROOM.OPT.JSON_OUTPUT")
+    ),
 ):
     room = _option_value(room, "room")
     host = _option_value(host, "host")
@@ -522,16 +538,18 @@ def room_members(
             print(f"[yellow]房间 '{room}' 没有成员[/yellow]")
 
 
-@room_app.command("download", help="下载房间文件")
+@room_app.command("download", help=t("HELP.ROOM.DOWNLOAD"))
 def room_download(
-    room: str = typer.Option(..., "--room", "-r", help="房间名"),
-    event_id: int = typer.Option(..., "--event-id", "-e", help="文件事件ID"),
-    output: Path = typer.Option(..., "--output", "-o", help="输出文件路径"),
+    room: str = typer.Option(..., "--room", "-r", help=t("HELP.ROOM.OPT.ROOM")),
+    event_id: int = typer.Option(
+        ..., "--event-id", "-e", help=t("HELP.ROOM.OPT.EVENT_ID")
+    ),
+    output: Path = typer.Option(..., "--output", "-o", help=t("HELP.ROOM.OPT.OUTPUT")),
     host: str = typer.Option("127.0.0.1", "--host", "-H"),
     port: int = typer.Option(15035, "--port", "-p"),
     user: str = typer.Option(None, "--user", "-u", envvar="DRLMS_USER"),
     token_store: Optional[Path] = typer.Option(None, "--token-store"),
-    timeout: float = typer.Option(10.0, "--timeout", help="socket 超时时间"),
+    timeout: float = typer.Option(10.0, "--timeout", help=t("HELP.OPT.TIMEOUT")),
 ):
     """下载房间中的文件。"""
     try:
@@ -551,17 +569,17 @@ def room_download(
         raise typer.Exit(code=1)
 
 
-@room_app.command("clear-owner", help="清空房间owner（回归系统所有）")
+@room_app.command("clear-owner", help=t("HELP.ROOM.CLEAR_OWNER"))
 def room_clear_owner(
-    room: str = typer.Option(..., "--room", "-r", help="房间名"),
+    room: str = typer.Option(..., "--room", "-r", help=t("HELP.ROOM.OPT.ROOM")),
     host: str = typer.Option("127.0.0.1", "--host", "-H"),
     port: int = typer.Option(15035, "--port", "-p"),
-    user: str = typer.Option(..., "--user", "-u", help="执行者用户名"),
+    user: str = typer.Option(..., "--user", "-u", help=t("HELP.ROOM.OPT.USER")),
     token_store: Optional[Path] = typer.Option(
         None,
         "--token-store",
         "-t",
-        help="Token存储路径",
+        help=t("HELP.OPT.TOKEN_STORE"),
     ),
 ):
     """清空房间owner，使房间回归系统所有。
@@ -598,14 +616,16 @@ def room_clear_owner(
         raise typer.Exit(code=1)
 
 
-@room_app.command("local-history", help="显示本地存储的历史消息（离线可用）")
+@room_app.command("local-history", help=t("HELP.ROOM.LOCAL_HISTORY"))
 def room_local_history(
-    room: str = typer.Option(..., "--room", "-r", help="房间名"),
-    limit: int = typer.Option(50, "--limit", "-n", help="最大返回数量"),
+    room: str = typer.Option(..., "--room", "-r", help=t("HELP.ROOM.OPT.ROOM")),
+    limit: int = typer.Option(50, "--limit", "-n", help=t("HELP.ROOM.OPT.LIMIT_ALT")),
     since_seq: int = typer.Option(
-        0, "--since-seq", "-s", help="从指定 server_seq 之后开始"
+        0, "--since-seq", "-s", help=t("HELP.ROOM.OPT.SINCE_SEQ")
     ),
-    json_out: bool = typer.Option(False, "--json", "-j", help="以 JSON 输出"),
+    json_out: bool = typer.Option(
+        False, "--json", "-j", help=t("HELP.ROOM.OPT.JSON_OUT")
+    ),
 ):
     """14F: 从本地 SQLite 存储读取历史消息（无需网络连接）。"""
     from ming_drlms.core.event_store import LocalEventStore, VerificationStatus

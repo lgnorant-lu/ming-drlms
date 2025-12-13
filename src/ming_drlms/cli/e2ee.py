@@ -6,6 +6,8 @@ from typing import Optional
 from rich import print
 import typer
 
+from ..i18n import t
+
 from ming_drlms.core.mproto_v2_client import (
     AuthenticationError,
     MP2Error,
@@ -13,22 +15,25 @@ from ming_drlms.core.mproto_v2_client import (
 
 from .mproto_runtime import create_mp2_client
 
-e2ee_app = typer.Typer(help="[MP2 Only] E2EE 密钥管理 (需要 MP2 服务器)")
+e2ee_app = typer.Typer(
+    help=t("HELP.E2EE.DESC"),
+    context_settings={"help_option_names": ["-h", "--help"]},
+)
 
 
-@e2ee_app.command("generate-keys", help="为用户生成端到端密钥")
+@e2ee_app.command("generate-keys", help=t("HELP.E2EE.GENERATE_KEYS"))
 def generate_keys_command(
-    username: str = typer.Option(..., "--user", "-u", help="认证用户名"),
-    host: str = typer.Option("127.0.0.1", "--host", "-H", help="服务器地址"),
-    port: int = typer.Option(15035, "--port", "-p", help="服务器端口"),
+    username: str = typer.Option(..., "--user", "-u", help=t("HELP.OPT.USER")),
+    host: str = typer.Option("127.0.0.1", "--host", "-H", help=t("HELP.OPT.HOST")),
+    port: int = typer.Option(15035, "--port", "-p", help=t("HELP.OPT.PORT")),
     target_user: Optional[str] = typer.Option(
-        None, "--target-user", help="生成密钥的用户（默认与 --user 相同）"
+        None, "--target-user", help=t("HELP.E2EE.OPT.TARGET_USER")
     ),
-    force: bool = typer.Option(False, "--force", help="强制重新生成密钥"),
+    force: bool = typer.Option(False, "--force", help=t("HELP.E2EE.OPT.FORCE")),
     token_store: Optional[Path] = typer.Option(
-        None, "--token-store", help="覆盖默认 token 存储路径"
+        None, "--token-store", help=t("HELP.OPT.TOKEN_STORE")
     ),
-    timeout: float = typer.Option(10.0, "--timeout", help="网络超时 (秒)"),
+    timeout: float = typer.Option(10.0, "--timeout", help=t("HELP.OPT.TIMEOUT")),
 ):
     target = target_user or username
     try:
@@ -53,18 +58,18 @@ def generate_keys_command(
     )
 
 
-@e2ee_app.command("prekey-bundle", help="获取用户的预密钥包")
+@e2ee_app.command("prekey-bundle", help=t("HELP.E2EE.PREKEY_BUNDLE"))
 def prekey_bundle_command(
-    username: str = typer.Option(..., "--user", "-u", help="认证用户名"),
-    host: str = typer.Option("127.0.0.1", "--host", "-H", help="服务器地址"),
-    port: int = typer.Option(15035, "--port", "-p", help="服务器端口"),
+    username: str = typer.Option(..., "--user", "-u", help=t("HELP.OPT.USER")),
+    host: str = typer.Option("127.0.0.1", "--host", "-H", help=t("HELP.OPT.HOST")),
+    port: int = typer.Option(15035, "--port", "-p", help=t("HELP.OPT.PORT")),
     target_user: Optional[str] = typer.Option(
-        None, "--target-user", help="目标用户（默认与 --user 相同）"
+        None, "--target-user", help=t("HELP.E2EE.OPT.TARGET_USER")
     ),
     token_store: Optional[Path] = typer.Option(
-        None, "--token-store", help="覆盖默认 token 存储路径"
+        None, "--token-store", help=t("HELP.OPT.TOKEN_STORE")
     ),
-    timeout: float = typer.Option(10.0, "--timeout", help="网络超时 (秒)"),
+    timeout: float = typer.Option(10.0, "--timeout", help=t("HELP.OPT.TIMEOUT")),
 ):
     target = target_user or username
     try:

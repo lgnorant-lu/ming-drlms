@@ -23,21 +23,24 @@ from ..users import (
 from .utils import resolve_data_dir
 
 
-user_app = typer.Typer(help="user management (add/passwd/del/list)")
+user_app = typer.Typer(
+    help=t("HELP.USER.DESC"),
+    context_settings={"help_option_names": ["-h", "--help"]},
+)
 
 
 @user_app.command("add", help=t("HELP.USER.ADD"))
 def user_add(
-    username: str = typer.Argument(..., help="username to add"),
+    username: str = typer.Argument(..., help=t("HELP.USER.ADD.USERNAME")),
     data_dir: Optional[Path] = typer.Option(None, "--data-dir", "-d"),
     config: Optional[Path] = typer.Option(
-        None, "--config", "-c", help="config yaml path"
+        None, "--config", "-c", help=t("HELP.USER.OPT.CONFIG")
     ),
     password_from_stdin: bool = typer.Option(
         False,
         "--password-from-stdin",
         "-x",
-        help="read password from stdin (single line) instead of interactive prompts",
+        help=t("HELP.USER.OPT.STDIN"),
     ),
 ):
     """Create a new user with Argon2id password (interactive prompt)."""
@@ -87,14 +90,14 @@ def user_add(
 
 @user_app.command("passwd", help=t("HELP.USER.PASSWD"))
 def user_passwd(
-    username: str = typer.Argument(..., help="existing username"),
+    username: str = typer.Argument(..., help=t("HELP.USER.PASSWD.USERNAME")),
     data_dir: Optional[Path] = typer.Option(None, "--data-dir", "-d"),
     config: Optional[Path] = typer.Option(None, "--config", "-c"),
     password_from_stdin: bool = typer.Option(
         False,
         "--password-from-stdin",
         "-x",
-        help="read password from stdin (single line) instead of interactive prompts",
+        help=t("HELP.USER.OPT.STDIN"),
     ),
 ):
     """Change password for existing user (Argon2id, interactive)."""
@@ -142,10 +145,10 @@ def user_passwd(
 
 @user_app.command("del", help=t("HELP.USER.DEL"))
 def user_del(
-    username: str = typer.Argument(..., help="username to delete"),
+    username: str = typer.Argument(..., help=t("HELP.USER.DEL.USERNAME")),
     data_dir: Optional[Path] = typer.Option(None, "--data-dir", "-d"),
     config: Optional[Path] = typer.Option(None, "--config", "-c"),
-    force: bool = typer.Option(False, "--force", "-f", help="do not error if missing"),
+    force: bool = typer.Option(False, "--force", "-f", help=t("HELP.USER.OPT.FORCE")),
 ):
     """Delete a user record."""
     dd = resolve_data_dir(data_dir, config)
@@ -174,7 +177,7 @@ def user_del(
 def user_list(
     data_dir: Optional[Path] = typer.Option(None, "--data-dir", "-d"),
     config: Optional[Path] = typer.Option(None, "--config", "-c"),
-    json_out: bool = typer.Option(False, "--json", "-j", help="print JSON array"),
+    json_out: bool = typer.Option(False, "--json", "-j", help=t("HELP.USER.OPT.JSON")),
 ):
     """List users (format only; no hashes)."""
     dd = resolve_data_dir(data_dir, config)

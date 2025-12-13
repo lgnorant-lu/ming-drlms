@@ -9,6 +9,7 @@ from typing import Optional
 
 import typer
 from ming_drlms.proto.schema.v2 import room_pb2
+from ..i18n import t
 
 from ..core.e2ee_store import LocalKeyStore
 from ..core.relay_client import LocalEventStore, RelayHTTPClient, RelaySyncManager
@@ -35,11 +36,12 @@ from ..relay import (
 )
 
 relay_app = typer.Typer(
-    help="[Advanced] Relay 底层调试命令 (post/sync/identity - 开发者使用)"
+    help=t("HELP.RELAY.DESC"),
+    context_settings={"help_option_names": ["-h", "--help"]},
 )
 
 
-@relay_app.command("post")
+@relay_app.command("post", help=t("HELP.RELAY.POST"))
 def relay_post(
     room: str = typer.Option(..., "--room", "-r"),
     base_url: str = typer.Option("http://127.0.0.1:15019", "--base-url"),
@@ -235,7 +237,7 @@ def relay_post(
         client.close()
 
 
-@relay_app.command("sync")
+@relay_app.command("sync", help=t("HELP.RELAY.SYNC"))
 def relay_sync(
     room: str = typer.Option(..., "--room", "-r"),
     base_url: str = typer.Option("http://127.0.0.1:15019", "--base-url"),
@@ -309,14 +311,16 @@ def relay_sync(
 
 
 # Phase 15C: Simplified post using IdentityManager
-@relay_app.command("post-simple")
+@relay_app.command("post-simple", help=t("HELP.RELAY.POST_SIMPLE"))
 def relay_post_simple(
-    room: str = typer.Option(..., "--room", "-r", help="Target room"),
-    content: str = typer.Option(..., "--content", "-c", help="Message content"),
+    room: str = typer.Option(..., "--room", "-r", help=t("HELP.RELAY.OPT.ROOM")),
+    content: str = typer.Option(
+        ..., "--content", "-c", help=t("HELP.RELAY.OPT.CONTENT")
+    ),
     base_url: str = typer.Option("http://127.0.0.1:15019", "--base-url"),
     content_type: str = typer.Option("text", "--content-type"),
     username: Optional[str] = typer.Option(
-        None, "--user", "-u", help="Username for identity lookup"
+        None, "--user", "-u", help=t("HELP.RELAY.OPT.USER")
     ),
 ):
     """Post event using IdentityManager (Phase 15.5 XEdDSA signing).
@@ -379,18 +383,18 @@ def relay_post_simple(
         raise typer.Exit(1)
 
 
-@relay_app.command("post-multi")
+@relay_app.command("post-multi", help=t("HELP.RELAY.POST_MULTI"))
 def relay_post_multi(
-    room: str = typer.Option(..., "--room", "-r", help="Target room"),
-    ciphertext: str = typer.Option(..., "--ciphertext", help="Base64 ciphertext"),
+    room: str = typer.Option(..., "--room", "-r", help=t("HELP.RELAY.OPT.ROOM")),
+    ciphertext: str = typer.Option(
+        ..., "--ciphertext", help=t("HELP.RELAY.OPT.CIPHERTEXT")
+    ),
     client_event_hash: str = typer.Option(
-        ..., "--client-hash", help="Client event hash"
+        ..., "--client-hash", help=t("HELP.RELAY.OPT.HASH")
     ),
     content_len: int = typer.Option(0, "--content-len"),
     client_ts: int = typer.Option(0, "--client-ts"),
-    config_path: str = typer.Option(
-        "", "--config", help="Path to relays.toml (optional)"
-    ),
+    config_path: str = typer.Option("", "--config", help=t("HELP.RELAY.OPT.CONFIG")),
 ):
     """Post an event to all healthy relays from relays.toml.
 
@@ -435,12 +439,10 @@ def relay_post_multi(
     )
 
 
-@relay_app.command("sync-multi")
+@relay_app.command("sync-multi", help=t("HELP.RELAY.SYNC_MULTI"))
 def relay_sync_multi(
     room: str = typer.Option(..., "--room", "-r"),
-    config_path: str = typer.Option(
-        "", "--config", help="Path to relays.toml (optional)"
-    ),
+    config_path: str = typer.Option("", "--config", help=t("HELP.RELAY.OPT.CONFIG")),
 ):
     """Sync a room from multiple relays using MultiRelaySyncManager."""
     cfg_path = Path(config_path) if config_path else get_default_config_path()
@@ -480,11 +482,11 @@ def relay_sync_multi(
     )
 
 
-@relay_app.command("identity")
+@relay_app.command("identity", help=t("HELP.RELAY.IDENTITY"))
 def relay_identity(
-    action: str = typer.Argument("show", help="Action: show, create, export"),
+    action: str = typer.Argument("show", help=t("HELP.RELAY.ARG.ACTION")),
     username: Optional[str] = typer.Option(
-        None, "--user", "-u", help="Username for identity lookup"
+        None, "--user", "-u", help=t("HELP.RELAY.OPT.USER")
     ),
 ):
     """Manage client identity (Phase 15.5 XEdDSA).

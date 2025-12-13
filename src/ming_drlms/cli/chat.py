@@ -23,9 +23,11 @@ from rich.table import Table
 
 from ..core.backend import BackendConfig, BackendMode
 from ..identity import LocalIdentityManager
+from ..i18n import t
 
 chat_app = typer.Typer(
-    help="[Relay Only] Relay 模式聊天命令 (send/recv/publish-bundle)"
+    help=t("HELP.CHAT.DESC"),
+    context_settings={"help_option_names": ["-h", "--help"]},
 )
 
 
@@ -52,11 +54,15 @@ def _get_identity() -> "LocalIdentityManager":
     return manager
 
 
-@chat_app.command("send", help="发送加密消息")
+@chat_app.command("send", help=t("HELP.CHAT.SEND"))
 def send_message(
-    to: str = typer.Option(..., "--to", "-t", help="接收者公钥 (hex) 或指纹前缀"),
-    message: str = typer.Option(..., "--message", "-m", help="消息内容"),
-    room: Optional[str] = typer.Option(None, "--room", "-r", help="房间 ID (可选)"),
+    to: str = typer.Option(..., "--to", "-t", help=t("HELP.CHAT.OPT.TO")),
+    message: str = typer.Option(
+        ..., "--message", "-m", help=t("HELP.CHAT.OPT.MESSAGE")
+    ),
+    room: Optional[str] = typer.Option(
+        None, "--room", "-r", help=t("HELP.CHAT.OPT.ROOM_OPTIONAL")
+    ),
 ):
     """发送端到端加密消息到 Relay。
 
@@ -252,11 +258,15 @@ def send_message(
     print(f"[dim]房间: {room_id}[/dim]")
 
 
-@chat_app.command("recv", help="接收消息")
+@chat_app.command("recv", help=t("HELP.CHAT.RECV"))
 def receive_messages(
-    room: Optional[str] = typer.Option(None, "--room", "-r", help="房间 ID"),
-    limit: int = typer.Option(20, "--limit", "-n", help="消息数量限制"),
-    since: Optional[int] = typer.Option(None, "--since", "-s", help="起始序号"),
+    room: Optional[str] = typer.Option(
+        None, "--room", "-r", help=t("HELP.CHAT.OPT.ROOM")
+    ),
+    limit: int = typer.Option(20, "--limit", "-n", help=t("HELP.CHAT.OPT.LIMIT")),
+    since: Optional[int] = typer.Option(
+        None, "--since", "-s", help=t("HELP.CHAT.OPT.SINCE")
+    ),
 ):
     """从 Relay 接收并解密消息。
 
@@ -373,7 +383,7 @@ def receive_messages(
         raise typer.Exit(code=1)
 
 
-@chat_app.command("publish-bundle", help="发布密钥包")
+@chat_app.command("publish-bundle", help=t("HELP.CHAT.PUBLISH_BUNDLE"))
 def publish_bundle():
     """发布本地身份的 PreKeyBundle 到 Keyserver。
 

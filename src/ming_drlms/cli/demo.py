@@ -10,7 +10,10 @@ from ..i18n import t
 from .utils import ROOT, maybe_banner, BIN_AGENT, BIN_SERVER, find_binary
 
 
-demo_app = typer.Typer(help="demos")
+demo_app = typer.Typer(
+    help=t("HELP.DEMO.DESC"),
+    context_settings={"help_option_names": ["-h", "--help"]},
+)
 
 
 @demo_app.command("quickstart", help=t("HELP.DEMO.QUICKSTART"))

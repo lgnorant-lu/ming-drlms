@@ -18,7 +18,10 @@ from ..config import apply_local_config as _apply
 from ..config_paths import get_config_file
 
 
-config_app = typer.Typer(help="配置管理命令 (get/set/list/init)")
+config_app = typer.Typer(
+    help=t("HELP.CONFIG.DESC"),
+    context_settings={"help_option_names": ["-h", "--help"]},
+)
 
 
 @config_app.command("init", help=t("HELP.CONFIG.INIT"))
@@ -29,14 +32,12 @@ def config_init(path: Path = typer.Option(Path("drlms.yaml"), "--path")):
     print(f"[green]wrote config template to {path}[/green]")
 
 
-@config_app.command(
-    "init-tui", help="initialize TUI config.toml template (local/home/both)"
-)
+@config_app.command("init-tui", help=t("HELP.CONFIG.INIT_TUI"))
 def config_init_tui(
     target: str = typer.Option(
         "both",
         "--target",
-        help="where to write: local (repo ./.drlms), home (user config dir), both",
+        help=t("HELP.CONFIG.OPT.TARGET"),
     ),
 ):
     from rich import print
@@ -57,14 +58,12 @@ def config_init_tui(
         print(f"[green]wrote user TUI config to {home_path}[/green]")
 
 
-@config_app.command(
-    "init-cli", help="initialize server CLI drlms.yaml (local/home/both)"
-)
+@config_app.command("init-cli", help=t("HELP.CONFIG.INIT_CLI"))
 def config_init_cli(
     target: str = typer.Option(
         "both",
         "--target",
-        help="where to write: local (repo ./.drlms), home (user config dir), both",
+        help=t("HELP.CONFIG.OPT.TARGET"),
     ),
 ):
     from rich import print
@@ -90,11 +89,11 @@ def config_init_cli(
 
 @config_app.command(
     "apply-cli",
-    help="apply local repo ./.drlms/drlms.yaml to user ~/.drlms/drlms.yaml (manual confirm)",
+    help=t("HELP.CONFIG.APPLY_CLI"),
 )
 def config_apply_cli(
     overwrite: bool = typer.Option(
-        False, "--overwrite/--no-overwrite", help="overwrite existing user config"
+        False, "--overwrite/--no-overwrite", help=t("HELP.CONFIG.OPT.OVERWRITE")
     ),
 ):
     from rich import print
@@ -120,12 +119,12 @@ def config_apply_cli(
         raise typer.Exit(code=1)
 
 
-@config_app.command("show", help="show raw/effective config view")
+@config_app.command("show", help=t("HELP.CONFIG.SHOW"))
 def config_show(
     effective: bool = typer.Option(
         False,
         "--effective/--raw",
-        help="show merged view with ENV overrides (effective) or raw file",
+        help=t("HELP.CONFIG.GET.EFFECTIVE"),
     ),
 ):
     from rich import print as rprint
@@ -139,7 +138,7 @@ def config_show(
         rprint({"source": "RAW", "config_path": str(s.config_path), "raw": s.raw})
 
 
-@config_app.command("validate", help="validate config minimal requirements")
+@config_app.command("validate", help=t("HELP.CONFIG.VALIDATE"))
 def config_validate() -> None:
     from rich import print as rprint
     from ..app_settings import (
@@ -173,11 +172,11 @@ def config_validate() -> None:
 
 @config_app.command(
     "apply-tui",
-    help="apply local repo ./.drlms/config.toml to user ~/.drlms/config.toml (manual confirm)",
+    help=t("HELP.CONFIG.APPLY_TUI"),
 )
 def config_apply_tui(
     overwrite: bool = typer.Option(
-        False, "--overwrite/--no-overwrite", help="overwrite existing user config"
+        False, "--overwrite/--no-overwrite", help=t("HELP.CONFIG.OPT.OVERWRITE")
     ),
 ):
     from rich import print
@@ -252,15 +251,13 @@ def _parse_value(value_str: str) -> object:
     return value_str
 
 
-@config_app.command("get", help="获取配置项的值")
+@config_app.command("get", help=t("HELP.CONFIG.GET"))
 def config_get(
-    key: str = typer.Argument(
-        ..., help="配置键 (例如: backend.mode, backend.relay.urls)"
-    ),
+    key: str = typer.Argument(..., help=t("HELP.CONFIG.GET.KEY")),
     effective: bool = typer.Option(
         True,
         "--effective/--file-only",
-        help="显示生效值(含环境变量覆盖)还是仅文件值",
+        help=t("HELP.CONFIG.GET.EFFECTIVE"),
     ),
 ):
     """Get a configuration value by key path.
@@ -300,10 +297,10 @@ def config_get(
         raise typer.Exit(code=1)
 
 
-@config_app.command("set", help="设置配置项的值")
+@config_app.command("set", help=t("HELP.CONFIG.SET"))
 def config_set(
-    key: str = typer.Argument(..., help="配置键 (例如: backend.mode)"),
-    value: str = typer.Argument(..., help="配置值"),
+    key: str = typer.Argument(..., help=t("HELP.CONFIG.SET.KEY")),
+    value: str = typer.Argument(..., help=t("HELP.CONFIG.SET.VALUE")),
 ):
     """Set a configuration value by key path.
 
@@ -341,15 +338,17 @@ def config_set(
         raise typer.Exit(code=1)
 
 
-@config_app.command("list", help="列出所有配置项")
+@config_app.command("list", help=t("HELP.CONFIG.LIST"))
 def config_list(
     section: Optional[str] = typer.Option(
         None,
         "--section",
         "-s",
-        help="仅显示指定分区 (general, backend, identity, trust, logging)",
+        help=t("HELP.CONFIG.LIST.SECTION"),
     ),
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="显示详细信息"),
+    verbose: bool = typer.Option(
+        False, "--verbose", "-v", help=t("HELP.CONFIG.LIST.VERBOSE")
+    ),
 ):
     """List all configuration keys and their current values.
 
@@ -419,7 +418,7 @@ def config_list(
     rprint(f"\n[dim]配置文件: {get_config_file()}[/dim]")
 
 
-@config_app.command("path", help="显示配置文件路径")
+@config_app.command("path", help=t("HELP.CONFIG.PATH"))
 def config_path():
     """Show the path to the current config.toml file."""
     from rich import print as rprint
@@ -429,10 +428,12 @@ def config_path():
     rprint(f"[dim]文件存在: {'是' if path.exists() else '否'}[/dim]")
 
 
-@config_app.command("reset", help="重置配置项为默认值")
+@config_app.command("reset", help=t("HELP.CONFIG.RESET"))
 def config_reset(
-    key: Optional[str] = typer.Argument(None, help="要重置的配置键 (留空重置所有)"),
-    confirm: bool = typer.Option(False, "--yes", "-y", help="跳过确认"),
+    key: Optional[str] = typer.Argument(None, help=t("HELP.CONFIG.RESET.KEY")),
+    confirm: bool = typer.Option(
+        False, "--yes", "-y", help=t("HELP.CONFIG.RESET.CONFIRM")
+    ),
 ):
     """Reset configuration to default values.
 

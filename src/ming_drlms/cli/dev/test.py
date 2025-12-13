@@ -7,7 +7,10 @@ from ...i18n import t
 from ..utils import ROOT, env_with
 
 
-test_app = typer.Typer(help=t("HELP.DEV.TEST"))
+test_app = typer.Typer(
+    help=t("HELP.DEV.TEST"),
+    context_settings={"help_option_names": ["-h", "--help"]},
+)
 
 
 @test_app.command("ipc", help=t("HELP.TEST.IPC"))

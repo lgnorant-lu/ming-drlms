@@ -25,7 +25,10 @@ from .utils import (
 )
 
 
-server_app = typer.Typer(help="server operations (up/down/status/logs)")
+server_app = typer.Typer(
+    help=t("HELP.SERVER.DESC"),
+    context_settings={"help_option_names": ["-h", "--help"]},
+)
 logger = log.get_logger("cli.server")
 
 
@@ -185,8 +188,10 @@ def server_up(
     data_dir: Path = typer.Option(DATA_DIR, "--data-dir", "-d"),
     strict: bool = typer.Option(True, "--strict/--no-strict", "-S"),
     max_conn: int = typer.Option(128, "--max-conn", "-m"),
-    config: Path = typer.Option(None, "--config", "-c", help="config yaml path"),
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show server output"),
+    config: Path = typer.Option(None, "--config", "-c", help=t("HELP.USER.OPT.CONFIG")),
+    verbose: bool = typer.Option(
+        False, "--verbose", "-v", help=t("HELP.SERVER.OPT.VERBOSE")
+    ),
 ):
     """Start server in background with health check."""
     maybe_banner()
@@ -422,10 +427,12 @@ def server_logs(n: int = typer.Option(50, "-n")):
 
 def register_top_level_aliases(app: typer.Typer) -> None:
     """Register backward-compatible top-level aliases: server-up/down/status/logs."""
-    app.command("server-up")(server_up)
-    app.command("server-down")(server_down)
-    app.command("server-status")(server_status)
-    app.command("server-logs")(server_logs)
+    from ..i18n import t
+
+    app.command("server-up", help=t("HELP.SERVER.UP"))(server_up)
+    app.command("server-down", help=t("HELP.SERVER.DOWN"))(server_down)
+    app.command("server-status", help=t("HELP.SERVER.STATUS"))(server_status)
+    app.command("server-logs", help=t("HELP.SERVER.LOGS"))(server_logs)
 
 
 __all__ = [

@@ -8,7 +8,10 @@ from . import pkg as _pkg
 from . import artifacts as _artifacts
 
 
-dev_app = typer.Typer(help="developer utilities (test/coverage/pkg/artifacts)")
+dev_app = typer.Typer(
+    help="开发者工具 (test/coverage/pkg/artifacts)",
+    context_settings={"help_option_names": ["-h", "--help"]},
+)
 
 dev_app.add_typer(_test.test_app, name="test")
 dev_app.add_typer(_coverage.coverage_app, name="coverage")

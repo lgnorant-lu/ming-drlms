@@ -9,12 +9,15 @@ from ...i18n import t
 from ..utils import ROOT, SERVER_LOG, gather_metadata, safe_add
 
 
-artifacts_app = typer.Typer(help=t("HELP.DEV.ARTIFACTS"))
+artifacts_app = typer.Typer(
+    help=t("HELP.DEV.ARTIFACTS"),
+    context_settings={"help_option_names": ["-h", "--help"]},
+)
 
 
 @artifacts_app.command("artifacts", help=t("HELP.COLLECT.ARTIFACTS"))
 def collect_artifacts(
-    out: Path = typer.Option(Path("artifacts"), "--out", help="output directory"),
+    out: Path = typer.Option(Path("artifacts"), "--out", help="输出目录"),
 ):
     """Pack logs/coverage/meta into a tar.gz under --out directory."""
     out.mkdir(parents=True, exist_ok=True)
@@ -43,7 +46,7 @@ def collect_artifacts(
 
 @artifacts_app.command("run", help=t("HELP.COLLECT.RUN"))
 def collect_run(
-    out: Path = typer.Option(Path("artifacts"), "--out", help="output directory"),
+    out: Path = typer.Option(Path("artifacts"), "--out", help="输出目录"),
 ):
     """Run minimal coverage flow then pack artifacts."""
     import subprocess

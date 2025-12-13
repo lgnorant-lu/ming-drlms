@@ -19,9 +19,12 @@ from rich import print
 from rich.console import Console
 from rich.table import Table
 import typer
+from ..i18n import t
 
 trust_app = typer.Typer(
-    help="[Relay Only] 联系人信任管理 (list/verify/anchor/accept/block)"
+    help=t("HELP.TRUST.DESC"),
+    epilog=t("HELP.TRUST.EPILOG"),
+    context_settings={"help_option_names": ["-h", "--help"]},
 )
 
 
@@ -49,13 +52,13 @@ def _get_trust_name(level: int) -> str:
     return names.get(level, "未知")
 
 
-@trust_app.command("list", help="列出所有联系人信任状态")
+@trust_app.command("list", help=t("HELP.TRUST.LIST"))
 def list_contacts_command(
     all_levels: bool = typer.Option(
-        False, "--all", "-a", help="显示所有信任级别（包括 UNKNOWN）"
+        False, "--all", "-a", help=t("HELP.TRUST.OPT.ALL_LEVELS")
     ),
     include_blocked: bool = typer.Option(
-        False, "--blocked", "-b", help="包含已屏蔽联系人"
+        False, "--blocked", "-b", help=t("HELP.TRUST.OPT.BLOCKED")
     ),
 ):
     """列出所有已知联系人及其信任状态。"""
@@ -103,9 +106,9 @@ def list_contacts_command(
     console.print(table)
 
 
-@trust_app.command("show", help="显示联系人详细信任信息")
+@trust_app.command("show", help=t("HELP.TRUST.SHOW"))
 def show_contact_command(
-    pubkey_hex: str = typer.Argument(..., help="联系人公钥 (hex) 或指纹前缀"),
+    pubkey_hex: str = typer.Argument(..., help=t("HELP.TRUST.ARG.PUBKEY")),
 ):
     """显示指定联系人的详细信任信息。"""
     from ..identity import TrustStore
@@ -187,11 +190,11 @@ def show_contact_command(
         console.print(k_table)
 
 
-@trust_app.command("verify", help="手动验证联系人（指纹比对）")
+@trust_app.command("verify", help=t("HELP.TRUST.VERIFY"))
 def verify_manual_command(
-    pubkey_hex: str = typer.Argument(..., help="联系人公钥 (hex) 或指纹前缀"),
+    pubkey_hex: str = typer.Argument(..., help=t("HELP.TRUST.ARG.PUBKEY")),
     fingerprint: Optional[str] = typer.Option(
-        None, "--fingerprint", "-f", help="期望的指纹（用于自动比对）"
+        None, "--fingerprint", "-f", help=t("HELP.TRUST.OPT.FINGERPRINT")
     ),
 ):
     """手动验证联系人身份（通过指纹比对）。"""
@@ -238,14 +241,14 @@ def verify_manual_command(
             print("[yellow]验证已取消[/yellow]")
 
 
-@trust_app.command("anchor", help="通过外部锚定验证联系人")
+@trust_app.command("anchor", help=t("HELP.TRUST.ANCHOR"))
 def verify_anchor_command(
-    pubkey_hex: str = typer.Argument(..., help="联系人公钥 (hex) 或指纹前缀"),
+    pubkey_hex: str = typer.Argument(..., help=t("HELP.TRUST.ARG.PUBKEY")),
     anchor_type: str = typer.Option(
-        ..., "--type", "-t", help="锚定类型: dns, https, github"
+        ..., "--type", "-t", help=t("HELP.TRUST.OPT.ANCHOR_TYPE")
     ),
     anchor_id: str = typer.Option(
-        ..., "--id", "-i", help="锚定标识: 域名、URL 或 GitHub 用户名"
+        ..., "--id", "-i", help=t("HELP.TRUST.OPT.ANCHOR_ID")
     ),
 ):
     """通过外部锚定（DNS/HTTPS/GitHub）验证联系人身份。"""
@@ -283,9 +286,9 @@ def verify_anchor_command(
         raise typer.Exit(code=1)
 
 
-@trust_app.command("accept", help="接受联系人密钥变更")
+@trust_app.command("accept", help=t("HELP.TRUST.ACCEPT"))
 def accept_key_change_command(
-    pubkey_hex: str = typer.Argument(..., help="联系人公钥 (hex) 或指纹前缀"),
+    pubkey_hex: str = typer.Argument(..., help=t("HELP.TRUST.ARG.PUBKEY")),
 ):
     """接受联系人的密钥变更。"""
     from ..identity import TrustStore
@@ -306,9 +309,9 @@ def accept_key_change_command(
         print("[yellow]没有待处理的密钥变更[/yellow]")
 
 
-@trust_app.command("revoke", help="撤销联系人信任")
+@trust_app.command("revoke", help=t("HELP.TRUST.REVOKE"))
 def revoke_trust_command(
-    pubkey_hex: str = typer.Argument(..., help="联系人公钥 (hex) 或指纹前缀"),
+    pubkey_hex: str = typer.Argument(..., help=t("HELP.TRUST.ARG.PUBKEY")),
 ):
     """撤销联系人的所有验证，重置为 TOFU。"""
     from ..identity import TrustStore
@@ -328,10 +331,12 @@ def revoke_trust_command(
         print("[yellow]操作已取消[/yellow]")
 
 
-@trust_app.command("block", help="屏蔽联系人")
+@trust_app.command("block", help=t("HELP.TRUST.BLOCK"))
 def block_contact_command(
-    pubkey_hex: str = typer.Argument(..., help="联系人公钥 (hex) 或指纹前缀"),
-    reason: Optional[str] = typer.Option(None, "--reason", "-r", help="屏蔽原因"),
+    pubkey_hex: str = typer.Argument(..., help=t("HELP.TRUST.ARG.PUBKEY")),
+    reason: Optional[str] = typer.Option(
+        None, "--reason", "-r", help=t("HELP.TRUST.OPT.REASON")
+    ),
 ):
     """屏蔽联系人，阻止通信。"""
     from ..identity import TrustStore
@@ -350,9 +355,9 @@ def block_contact_command(
     print("[green]✓ 联系人已屏蔽[/green]")
 
 
-@trust_app.command("unblock", help="取消屏蔽联系人")
+@trust_app.command("unblock", help=t("HELP.TRUST.UNBLOCK"))
 def unblock_contact_command(
-    pubkey_hex: str = typer.Argument(..., help="联系人公钥 (hex) 或指纹前缀"),
+    pubkey_hex: str = typer.Argument(..., help=t("HELP.TRUST.ARG.PUBKEY")),
 ):
     """取消屏蔽联系人。"""
     from ..identity import TrustStore

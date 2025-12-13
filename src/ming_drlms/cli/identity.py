@@ -17,19 +17,25 @@ from rich import print
 from rich.console import Console
 from rich.table import Table
 import typer
+from ..i18n import t
 
 identity_app = typer.Typer(
-    help="[Relay Only] 本地身份管理 (create/show/fingerprint/export/import)"
+    help=t("HELP.IDENTITY.DESC"),
+    context_settings={"help_option_names": ["-h", "--help"]},
 )
 
 
-@identity_app.command("create", help="创建新的本地身份")
+@identity_app.command("create", help=t("HELP.IDENTITY.CREATE"))
 def create_identity_command(
-    display_name: Optional[str] = typer.Option(None, "--name", "-n", help="显示名称"),
-    username: Optional[str] = typer.Option(
-        None, "--user", "-u", help="用户名（用于 LocalKeyStore 兼容）"
+    display_name: Optional[str] = typer.Option(
+        None, "--name", "-n", help=t("HELP.IDENTITY.OPT.NAME")
     ),
-    force: bool = typer.Option(False, "--force", "-f", help="强制覆盖已有身份"),
+    username: Optional[str] = typer.Option(
+        None, "--user", "-u", help=t("HELP.IDENTITY.OPT.USER")
+    ),
+    force: bool = typer.Option(
+        False, "--force", "-f", help=t("HELP.IDENTITY.OPT.FORCE")
+    ),
 ):
     """创建新的本地身份密钥对。"""
     from ..identity import LocalIdentityManager
@@ -64,7 +70,7 @@ def create_identity_command(
         raise typer.Exit(code=2)
 
 
-@identity_app.command("show", help="显示当前身份信息")
+@identity_app.command("show", help=t("HELP.IDENTITY.SHOW"))
 def show_identity_command():
     """显示当前身份详细信息。"""
     from ..identity import LocalIdentityManager, FingerprintDisplay
@@ -97,10 +103,10 @@ def show_identity_command():
     console.print(table)
 
 
-@identity_app.command("fingerprint", help="显示指纹（用于手动验证）")
+@identity_app.command("fingerprint", help=t("HELP.IDENTITY.FINGERPRINT"))
 def fingerprint_command(
     format: str = typer.Option(
-        "groups", "--format", "-f", help="格式: groups, compact, lines, numeric, emoji"
+        "groups", "--format", "-f", help=t("HELP.IDENTITY.OPT.FORMAT")
     ),
 ):
     """显示公钥指纹，用于手动验证。"""
@@ -131,14 +137,24 @@ def fingerprint_command(
         raise typer.Exit(code=1)
 
 
-@identity_app.command("export", help="导出身份到文件")
+@identity_app.command("export", help=t("HELP.IDENTITY.EXPORT"))
 def export_identity_command(
-    output: Path = typer.Option(
-        Path("identity_backup.json"), "--output", "-o", help="输出文件路径"
+    output: Optional[Path] = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help=t("HELP.IDENTITY.OPT.OUTPUT"),
     ),
 ):
     """导出身份密钥到文件用于备份。"""
     from ..identity import LocalIdentityManager
+
+    # 使用默认路径: ~/.drlms/identity_backup.json
+    if output is None:
+        output = Path.home() / ".drlms" / "identity_backup.json"
+
+    # 确保父目录存在
+    output.parent.mkdir(parents=True, exist_ok=True)
 
     manager = LocalIdentityManager()
 
@@ -155,13 +171,15 @@ def export_identity_command(
         raise typer.Exit(code=2)
 
 
-@identity_app.command("import", help="从文件导入身份")
+@identity_app.command("import", help=t("HELP.IDENTITY.IMPORT"))
 def import_identity_command(
-    input_file: Path = typer.Argument(..., help="身份备份文件路径"),
+    input_file: Path = typer.Argument(..., help=t("HELP.IDENTITY.OPT.INPUT")),
     username: Optional[str] = typer.Option(
-        None, "--user", "-u", help="用户名（用于 LocalKeyStore 兼容）"
+        None, "--user", "-u", help=t("HELP.IDENTITY.OPT.USER")
     ),
-    force: bool = typer.Option(False, "--force", "-f", help="强制覆盖已有身份"),
+    force: bool = typer.Option(
+        False, "--force", "-f", help=t("HELP.IDENTITY.OPT.FORCE")
+    ),
 ):
     """从备份文件导入身份。"""
     from ..identity import LocalIdentityManager
@@ -185,7 +203,7 @@ def import_identity_command(
         raise typer.Exit(code=2)
 
 
-@identity_app.command("qr", help="生成身份验证二维码数据")
+@identity_app.command("qr", help=t("HELP.IDENTITY.QR"))
 def qr_command():
     """生成用于身份验证的二维码数据。"""
     from ..identity import LocalIdentityManager, create_verification_qr_data

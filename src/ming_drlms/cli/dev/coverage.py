@@ -7,7 +7,10 @@ from ...i18n import t
 from ..utils import ROOT
 
 
-coverage_app = typer.Typer(help=t("HELP.DEV.COVERAGE"))
+coverage_app = typer.Typer(
+    help=t("HELP.DEV.COVERAGE"),
+    context_settings={"help_option_names": ["-h", "--help"]},
+)
 
 
 @coverage_app.command("run", help=t("HELP.COVERAGE.RUN"))
