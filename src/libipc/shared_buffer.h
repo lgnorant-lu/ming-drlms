@@ -7,10 +7,10 @@
 #include <stddef.h>
 
 #define BUFFER_SIZE 16384
-#define MAX_MSG_SIZE 4096
-#define NUM_SLOTS 2 /* 保证至少两个槽位以完成分片重组，减少竞争 */
+#define SLOT_SIZE 4096
+#define NUM_SLOTS 2
 
-#define SHARED_BUFFER_MAGIC 0x44524c4du /* 'DRLM' */
+#define SHARED_BUFFER_MAGIC 0x44524c4du
 #define SHARED_BUFFER_VERSION 3u
 
 // 分片头（位于每个槽位起始处）
@@ -24,13 +24,14 @@ typedef struct {
 typedef struct {
     uint32_t magic;
     uint32_t version;
-    int lock;
-    unsigned char buffer[NUM_SLOTS][MAX_MSG_SIZE]; // 每个槽位：MsgHdr + payload
-    int write_index;
-    int read_index;
-    int count;
-    platform_semaphore_t sem_empty; // 空槽位信号量
-    platform_semaphore_t sem_full;  // 满消息信号量
+    volatile uint32_t lock;
+    uint32_t write_index;
+    uint32_t read_index;
+    uint32_t count;
+    uint32_t shm_segment_owner;
+    unsigned char buffer[NUM_SLOTS][SLOT_SIZE];
+    // NOTE: Semaphores moved to process-local storage (see shared_buffer.c)
+    // to avoid Windows GS protection issues
 } SharedLogBuffer;
 
 // API（文档口径）

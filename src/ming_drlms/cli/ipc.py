@@ -5,85 +5,114 @@ from pathlib import Path
 from typing import Optional
 
 import typer
-
-from ..i18n import t
-from .utils import ROOT, env_with
+from rich import print
 
 
-ipc_app = typer.Typer(help="ipc helpers (send/tail via shared memory)")
+ipc_app = typer.Typer(help="Inter-Process Communication (Shared Memory) tools")
 
 
-@ipc_app.command("send", help=t("HELP.IPC.SEND"))
+def _find_tool(tool_name: str) -> Path:
+    """
+    Locate the C-based IPC tool binary.
+    Prioritizes build directories, then falls back to PATH.
+    """
+    # 1. Try common build directories relative to the package root
+    # Assuming we are in src/ming_drlms/cli/ipc.py
+    # We want to find build_win_ninja_x64/{tool_name}.exe
+
+    # Go up from src/ming_drlms/cli to project root
+    # __file__ = .../src/ming_drlms/cli/ipc.py
+    # parents[3] = .../ (project root)
+    current_file = Path(__file__).resolve()
+    project_root = current_file.parents[3]
+
+    candidates = [
+        # Ninja build output is often flat in the build root
+        project_root / "build_win_ninja_x64" / f"{tool_name}.exe",
+        project_root / "build_win_ninja_x64" / "src" / "tools" / f"{tool_name}.exe",
+        project_root / "build" / f"{tool_name}.exe",
+        project_root / "build" / "src" / "tools" / f"{tool_name}.exe",
+        # Add fallback for when running from source but different build dir structure
+        Path("build_win_ninja_x64") / f"{tool_name}.exe",
+    ]
+
+    for cand in candidates:
+        if cand.exists():
+            return cand.resolve()
+
+    # 2. Fallback: assume it's in PATH or current directory
+    return Path(tool_name)
+
+
+@ipc_app.command("send", help="Send a message via shared memory (wraps ipc_sender)")
 def ipc_send(
-    text: Optional[str] = typer.Option(
-        None, "--text", help="text to send (mutually exclusive with --file)"
+    message: Optional[str] = typer.Option(
+        None, "--message", "-m", help="Text message to send"
     ),
-    file: Optional[Path] = typer.Option(None, "--file", help="file to send"),
-    key: Optional[str] = typer.Option(
-        None, "--key", help="DRLMS_SHM_KEY like 0x4c4f4755"
-    ),
-    interactive: bool = typer.Option(
-        False,
-        "--interactive",
-        "-i",
-        help="read from stdin interactively (line by line)",
-    ),
-    chunk: Optional[int] = typer.Option(
-        None, "--chunk", help="chunk bytes for stdin/file streaming"
-    ),
+    file_path: Optional[Path] = typer.Option(None, "--file", "-f", help="File to send"),
+    key: str = typer.Option("0x1234", "--key", "-k", help="Shared memory key (hex)"),
+    chunk_size: int = typer.Option(0, "--chunk", help="Chunk size in bytes (0=auto)"),
 ):
-    """Send one message into shared memory using ipc_sender."""
-    bin_sender = ROOT / "ipc_sender"
-    if not bin_sender.exists():
-        print("ipc_sender not built; run 'make ipc_sender'")
-        raise typer.Exit(code=2)
-    env = env_with()
-    if key:
-        env["DRLMS_SHM_KEY"] = key
-    cmd = [str(bin_sender)]
-    if sum(1 for v in [text is not None, file is not None, interactive] if v) > 1:
-        print("--text, --file and --interactive are mutually exclusive")
-        raise typer.Exit(code=2)
-    if file is not None:
-        cmd += ["--file", str(file)]
-        if chunk:
-            cmd += ["--chunk", str(chunk)]
-        subprocess.run(cmd, env=env, check=False)
-    elif text is not None:
-        p = subprocess.run(cmd, input=text.encode(), env=env)
-        raise typer.Exit(code=p.returncode)
-    elif interactive:
-        if chunk:
-            cmd += ["--chunk", str(chunk)]
-        cmd += ["--interactive"]
-        p = subprocess.run(cmd, env=env)
-        raise typer.Exit(code=p.returncode)
+    """
+    Send data to the shared memory buffer.
+    Wrapper for the C-based `ipc_sender` tool.
+    """
+    tool = _find_tool("ipc_sender")
+
+    cmd = [str(tool), "--key", key]
+
+    if message:
+        cmd.extend(["--message", message])
+    elif file_path:
+        cmd.extend(["--file", str(file_path)])
     else:
-        if chunk:
-            cmd += ["--chunk", str(chunk)]
-        p = subprocess.run(cmd, env=env)
-        raise typer.Exit(code=p.returncode)
+        # Interactive mode (stdin)
+        print("[yellow]Enter message (Ctrl+D/Ctrl+Z to finish):[/yellow]")
+        cmd.append("--interactive")
+
+    if chunk_size > 0:
+        cmd.extend(["--chunk", str(chunk_size)])
+
+    try:
+        # Pass through stdin/stdout/stderr
+        subprocess.run(cmd, check=True)
+        print(f"[green]Message sent to shared memory (key={key})[/green]")
+    except subprocess.CalledProcessError as e:
+        print(f"[red]Failed to send message (exit code {e.returncode})[/red]")
+        raise typer.Exit(code=e.returncode)
+    except FileNotFoundError:
+        print(f"[red]Error: Could not find ipc_sender tool at {tool}[/red]")
+        print(
+            "[yellow]Please ensure the C tools are compiled (e.g. in build_win_ninja_x64/src/tools/)[/yellow]"
+        )
+        raise typer.Exit(code=1)
 
 
-@ipc_app.command("tail", help=t("HELP.IPC.TAIL"))
-def ipc_tail(
-    key: Optional[str] = typer.Option(None, "--key", help="DRLMS_SHM_KEY"),
-    max_msgs: Optional[int] = typer.Option(
-        None, "--max", "-n", help="exit after N messages"
-    ),
+@ipc_app.command(
+    "listen", help="Listen for messages from shared memory (wraps log_consumer)"
+)
+def ipc_listen(
+    key: str = typer.Option("0x1234", "--key", "-k", help="Shared memory key (hex)"),
 ):
-    """Tail messages from shared memory using log_consumer."""
-    bin_cons = ROOT / "log_consumer"
-    if not bin_cons.exists():
-        print("log_consumer not built; run 'make log_consumer'")
-        raise typer.Exit(code=2)
-    env = env_with()
-    if key:
-        env["DRLMS_SHM_KEY"] = key
-    cmd = [str(bin_cons)]
-    if max_msgs is not None:
-        cmd += ["--max", str(max_msgs)]
-    subprocess.run(cmd, env=env)
+    """
+    Listen for data from the shared memory buffer.
+    Wrapper for the C-based `log_consumer` tool.
+    """
+    tool = _find_tool("log_consumer")
 
+    cmd = [str(tool), "--key", key]
 
-__all__ = ["ipc_app", "ipc_send", "ipc_tail"]
+    print(f"[blue]Listening on shared memory key {key}... (Ctrl+C to stop)[/blue]")
+    try:
+        subprocess.run(cmd, check=True)
+    except KeyboardInterrupt:
+        print("\n[yellow]Stopped listening[/yellow]")
+    except subprocess.CalledProcessError as e:
+        print(f"[red]Consumer exited with error (code {e.returncode})[/red]")
+        raise typer.Exit(code=e.returncode)
+    except FileNotFoundError:
+        print(f"[red]Error: Could not find log_consumer tool at {tool}[/red]")
+        print(
+            "[yellow]Please ensure the C tools are compiled (e.g. in build_win_ninja_x64/src/tools/)[/yellow]"
+        )
+        raise typer.Exit(code=1)

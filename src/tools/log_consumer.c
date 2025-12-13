@@ -50,7 +50,10 @@ int main(int argc, char **argv) {
         perror("shm_init");
         return 1;
     }
-    setvbuf(stdout, NULL, _IOLBF, 0);
+
+    // NOTE: setvbuf removed due to VS 2026 Preview bug
+    // (STATUS_STACK_BUFFER_OVERRUN) setvbuf(stdout, NULL, _IOLBF, 0);
+
     unsigned char *buf = (unsigned char *)malloc(65536);
     if (!buf)
         return 1;

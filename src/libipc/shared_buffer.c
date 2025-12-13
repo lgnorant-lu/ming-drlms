@@ -1,4 +1,4 @@
-#include <string.h>
+﻿#include <string.h>
 #include <errno.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -60,6 +60,10 @@ static void platform_thread_yield(void) {
 #endif
 
 #define LAST_FLAG 0x1
+
+// Process-local semaphore storage (not in shared memory)
+static platform_semaphore_t local_sem_empty;
+static platform_semaphore_t local_sem_full;
 
 #if defined(_WIN32)
 #define SHM_INVALID_HANDLE NULL
@@ -135,8 +139,8 @@ static void append_trace(const char *tag, const MsgHdr *hdr,
         tag, (unsigned long)GetCurrentProcessId(),
         (unsigned long)GetCurrentThreadId(), shared ? shared->read_index : -1,
         shared ? shared->write_index : -1, shared ? shared->count : -1,
-        shared ? shared->sem_empty.handle : NULL,
-        shared ? shared->sem_full.handle : NULL, hdr ? hdr->msg_id : 0,
+        shared ? local_sem_empty.handle : NULL,
+        shared ? local_sem_full.handle : NULL, hdr ? hdr->msg_id : 0,
         hdr ? hdr->seq : 0, hdr ? hdr->flags : 0, hdr ? hdr->len : 0,
         payload_len);
     if (len > 0) {
@@ -223,52 +227,75 @@ int shm_init(void) {
         shared->magic = SHARED_BUFFER_MAGIC;
         shared->version = SHARED_BUFFER_VERSION;
         shared->lock = 0;
+
+        // Generate semaphore names before init
+        const char *env = getenv("DRLMS_SHM_KEY");
+        platform_ipc_key_t init_key = 0x4c4f4742;
+        if (env && *env) {
+            char *endptr = NULL;
+            unsigned long val = strtoul(env, &endptr, 0);
+            if (endptr != env && val > 0 && val <= 0xFFFFFFFFul) {
+                init_key = (platform_ipc_key_t)val;
+            }
+        }
+
         // Initialize semaphores using platform functions
-#if defined(_WIN32)
-        shared->sem_empty.is_named = 1;
-        if (platform_internal_generate_semaphore_name(&shared->sem_empty,
-                                                     "_empty") != 0)
-            goto init_fail;
-#endif
-        if (platform_semaphore_init(&shared->sem_empty, 1, NUM_SLOTS) != 0)
+        local_sem_empty.is_named = 1;
+        _snwprintf_s(local_sem_empty.name, PLATFORM_SEMAPHORE_NAME_MAX,
+                     _TRUNCATE, L"Local\\drlms_shm_sem_%08lx_empty",
+                     (unsigned long)init_key);
+        if (platform_semaphore_init(&local_sem_empty, 1, NUM_SLOTS) != 0)
             goto init_fail;
 
-#if defined(_WIN32)
-        shared->sem_full.is_named = 1;
-        if (platform_internal_generate_semaphore_name(&shared->sem_full,
-                                                     "_full") != 0)
+        local_sem_full.is_named = 1;
+        _snwprintf_s(local_sem_full.name, PLATFORM_SEMAPHORE_NAME_MAX,
+                     _TRUNCATE, L"Local\\drlms_shm_sem_%08lx_full",
+                     (unsigned long)init_key);
+        if (platform_semaphore_init(&local_sem_full, 1, 0) != 0)
             goto init_fail;
-#endif
-        if (platform_semaphore_init(&shared->sem_full, 1, 0) != 0)
-            goto init_fail;
-        shm_segment_owner = 1;
+
+        shared->shm_segment_owner = 1;
     } else {
         shm_segment_owner = 0;
     }
     shm_segment_release = created || need_init;
 
     // If we didn't initialize, attach to existing semaphores
-    // If we did initialize, semaphores are already attached
     if (!need_init) {
-        // Clear handles from shared memory (they're not valid in this process)
-#if defined(_WIN32)
-        shared->sem_empty.handle = NULL;
-        shared->sem_full.handle = NULL;
-#endif
-        // Retry semaphore attach with exponential backoff for Windows
-        // robustness
+        local_sem_empty.is_named = 1;
+        local_sem_full.is_named = 1;
+
+        // Set name hints for attach
+        const char *env_key = getenv("DRLMS_SHM_KEY");
+        platform_ipc_key_t attach_key = 0x4c4f4742;
+        if (env_key && *env_key) {
+            char *endptr = NULL;
+            unsigned long val = strtoul(env_key, &endptr, 0);
+            if (endptr != env_key && val > 0 && val <= 0xFFFFFFFFul) {
+                attach_key = (platform_ipc_key_t)val;
+            }
+        }
+
+        _snwprintf_s(local_sem_empty.name, PLATFORM_SEMAPHORE_NAME_MAX,
+                     _TRUNCATE, L"Local\\drlms_shm_sem_%08lx_empty",
+                     (unsigned long)attach_key);
+        _snwprintf_s(local_sem_full.name, PLATFORM_SEMAPHORE_NAME_MAX,
+                     _TRUNCATE, L"Local\\drlms_shm_sem_%08lx_full",
+                     (unsigned long)attach_key);
+
+        // Retry semaphore attach with exponential backoff
         int retry_count = 0;
         const int max_retries = 10;
         const int base_delay_ms = 10;
         while (retry_count < max_retries) {
-            if (platform_semaphore_attach(&shared->sem_empty) == 0 &&
-                platform_semaphore_attach(&shared->sem_full) == 0) {
+            if (platform_semaphore_attach(&local_sem_empty) == 0 &&
+                platform_semaphore_attach(&local_sem_full) == 0) {
                 break; // Success
             }
             if (retry_count > 0) {
                 // Detach any partially attached semaphores before retry
-                platform_semaphore_detach(&shared->sem_empty);
-                platform_semaphore_detach(&shared->sem_full);
+                platform_semaphore_detach(&local_sem_empty);
+                platform_semaphore_detach(&local_sem_full);
             }
             retry_count++;
             if (retry_count < max_retries) {
@@ -288,8 +315,8 @@ int shm_init(void) {
 
 attach_fail:
     if (need_init || shm_segment_owner) {
-        platform_semaphore_destroy(&shared->sem_empty);
-        platform_semaphore_destroy(&shared->sem_full);
+        platform_semaphore_destroy(&local_sem_empty);
+        platform_semaphore_destroy(&local_sem_full);
         shared->magic = 0;
         shared->version = 0;
         shared->lock = 0;
@@ -327,7 +354,7 @@ int shm_write(const unsigned char *data, size_t len) {
     uint32_t seq = 0;
     uint32_t msg_id = next_msg_id();
     const size_t max_payload =
-        (MAX_MSG_SIZE > sizeof(MsgHdr)) ? (MAX_MSG_SIZE - sizeof(MsgHdr)) : 0;
+        (SLOT_SIZE > sizeof(MsgHdr)) ? (SLOT_SIZE - sizeof(MsgHdr)) : 0;
     if (max_payload == 0) {
         errno = EMSGSIZE;
         return -1;
@@ -344,14 +371,14 @@ int shm_write(const unsigned char *data, size_t len) {
         if (offset + payload >= len)
             hdr.flags |= LAST_FLAG;
 
-        if (platform_semaphore_wait(&shared->sem_empty) != 0) {
+        if (platform_semaphore_wait(&local_sem_empty) != 0) {
             append_trace("write-sem-empty-error", &hdr, payload);
             return -1;
         }
 
         shared_lock();
         unsigned char *slot = shared->buffer[shared->write_index];
-        memset(slot, 0, MAX_MSG_SIZE);
+        memset(slot, 0, SLOT_SIZE);
         memcpy(slot, &hdr, sizeof(MsgHdr));
         memcpy(slot + sizeof(MsgHdr), data + offset, payload);
         shared->write_index = (shared->write_index + 1) % NUM_SLOTS;
@@ -362,7 +389,7 @@ int shm_write(const unsigned char *data, size_t len) {
             shared->count = NUM_SLOTS;
         }
         shared_unlock();
-        platform_semaphore_post(&shared->sem_full);
+        platform_semaphore_post(&local_sem_full);
         offset += payload;
     }
     return 0;
@@ -382,7 +409,7 @@ ssize_t shm_read(unsigned char *out, size_t out_size) {
     uint32_t current_msg_id = 0;
     int has_msg_id = 0;
     for (;;) {
-        if (platform_semaphore_wait(&shared->sem_full) != 0) {
+        if (platform_semaphore_wait(&local_sem_full) != 0) {
             append_trace("read-sem-full-error", NULL, 0);
             return (total > 0) ? (ssize_t)total : -1;
         }
@@ -395,15 +422,15 @@ ssize_t shm_read(unsigned char *out, size_t out_size) {
             has_msg_id = 1;
             append_trace("read-first", &hdr, hdr.len);
         } else if (hdr.msg_id != current_msg_id) {
-            append_trace("read-skip-msg", &hdr, 0);
-            shared->read_index = (shared->read_index + 1) % NUM_SLOTS;
-            if (shared->count > 0)
-                shared->count--;
-            else
-                append_trace("read-count-underflow", &hdr, 0);
-            shared_unlock();
-            platform_semaphore_post(&shared->sem_empty);
-            continue;
+            // Encountered a new message
+            if (total > 0) {
+                // We already have data from previous message, return it
+                shared_unlock();
+                return (ssize_t)total;
+            } else {
+                // No data yet, start reading this new message
+                current_msg_id = hdr.msg_id;
+            }
         }
 
         if (hdr.len == 0) {
@@ -414,7 +441,7 @@ ssize_t shm_read(unsigned char *out, size_t out_size) {
             else
                 append_trace("read-count-underflow", &hdr, 0);
             shared_unlock();
-            platform_semaphore_post(&shared->sem_empty);
+            platform_semaphore_post(&local_sem_empty);
             // Continue the loop to wait for the next frame via semaphore
             continue;
         }
@@ -434,7 +461,7 @@ ssize_t shm_read(unsigned char *out, size_t out_size) {
         else
             append_trace("read-count-underflow", &hdr, payload);
         shared_unlock();
-        platform_semaphore_post(&shared->sem_empty);
+        platform_semaphore_post(&local_sem_empty);
         if (hdr.flags & LAST_FLAG)
             break;
     }
@@ -444,11 +471,11 @@ ssize_t shm_read(unsigned char *out, size_t out_size) {
 int shm_cleanup(void) {
     if (!shared)
         return 0;
-    platform_semaphore_detach(&shared->sem_empty);
-    platform_semaphore_detach(&shared->sem_full);
+    platform_semaphore_detach(&local_sem_empty);
+    platform_semaphore_detach(&local_sem_full);
     if (shm_segment_owner) {
-        platform_semaphore_destroy(&shared->sem_empty);
-        platform_semaphore_destroy(&shared->sem_full);
+        platform_semaphore_destroy(&local_sem_empty);
+        platform_semaphore_destroy(&local_sem_full);
         shared->magic = 0;
         shared->version = 0;
         shared->lock = 0;

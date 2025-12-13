@@ -263,15 +263,40 @@ int platform_semaphore_attach(platform_semaphore_t *sem) {
     fprintf(stderr,
             "platform_semaphore_attach: named semaphore, attempting to open\n");
     if (!sem->handle) {
-        fwprintf(stderr, L"platform_semaphore_attach: current name='%ls'\n",
-                 sem->name);
-        if (sem->name[0] == L'\0') {
-            fprintf(stderr, "platform_semaphore_attach: name is empty, this "
-                            "should not happen for named semaphores\n");
-            errno = EINVAL;
-            return -1;
+        // Try name hint first, then generate locally
+        const char *env = getenv("DRLMS_SHM_KEY");
+        platform_ipc_key_t key = 0x4c4f4742;
+        if (env && *env) {
+            char *endptr = NULL;
+            unsigned long val = strtoul(env, &endptr, 0);
+            if (endptr != env && val > 0 && val <= 0xFFFFFFFFul) {
+                key = (platform_ipc_key_t)val;
+            }
         }
-        HANDLE opened = platform_internal_open_named_semaphore(sem->name);
+
+        wchar_t local_name[PLATFORM_SEMAPHORE_NAME_MAX];
+        HANDLE opened = NULL;
+
+        // Try name hint first (if set by caller)
+        if (sem->name[0] != L'\0') {
+            wcsncpy_s(local_name, PLATFORM_SEMAPHORE_NAME_MAX, sem->name,
+                      _TRUNCATE);
+            opened = platform_internal_open_named_semaphore(local_name);
+            if (opened) {
+                sem->handle = opened;
+                return 0;
+            }
+        }
+
+        // Fallback: try both suffixes
+        const wchar_t *suffixes[] = {L"_empty", L"_full"};
+        for (int i = 0; i < 2 && !opened; i++) {
+            _snwprintf_s(local_name, PLATFORM_SEMAPHORE_NAME_MAX, _TRUNCATE,
+                         L"Local\\drlms_shm_sem_%08lx%ls", (unsigned long)key,
+                         suffixes[i]);
+            opened = platform_internal_open_named_semaphore(local_name);
+        }
+
         if (!opened) {
             return -1;
         }
