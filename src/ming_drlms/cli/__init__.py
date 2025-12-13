@@ -176,10 +176,8 @@ def cli_logout(
 
 
 # Import and register top-level command groups
-from . import client as _client  # noqa: E402
 from . import user as _user  # noqa: E402
-from . import ipc as _ipc  # noqa: E402
-from . import space as _space  # noqa: E402
+
 from . import help as _help  # noqa: E402
 from . import demo as _demo  # noqa: E402
 from . import config as _config  # noqa: E402
@@ -192,13 +190,12 @@ from . import identity as _identity  # noqa: E402
 from . import trust as _trust  # noqa: E402
 from . import relay_room as _relay_room  # noqa: E402
 from . import chat as _chat  # noqa: E402
+from . import ipc as _ipc  # noqa: E402
 
-app.add_typer(_client.client_app, name="client")
 app.add_typer(_config.config_app, name="config")
 app.add_typer(_user.user_app, name="user")
-app.add_typer(_space.space_app, name="space")
 app.add_typer(_room.room_app, name="room")
-app.add_typer(_ipc.ipc_app, name="ipc")
+
 app.add_typer(_help.help_app, name="help")
 app.add_typer(_demo.demo_app, name="demo")
 app.add_typer(_server.server_app, name="server")
@@ -209,6 +206,7 @@ app.add_typer(_identity.identity_app, name="identity")
 app.add_typer(_trust.trust_app, name="trust")
 app.add_typer(_relay_room.relay_room_app, name="relay-room")
 app.add_typer(_chat.chat_app, name="chat")
+app.add_typer(_ipc.ipc_app, name="ipc")
 _server.register_top_level_aliases(app)
 
 

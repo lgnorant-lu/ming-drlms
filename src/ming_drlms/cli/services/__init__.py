@@ -7,14 +7,6 @@ from .room_service import (
     PublishResult,
     CommandResult,
 )
-from .space_service import (
-    SpaceService,
-    SpaceServiceError,
-    SpaceJoinOptions,
-    SpaceJoinCallbacks,
-    SpaceHistoryCallbacks,
-    SpaceHistoryOptions,
-)
 
 __all__ = [
     "RoomInfo",
@@ -22,10 +14,4 @@ __all__ = [
     "RoomServiceError",
     "PublishResult",
     "CommandResult",
-    "SpaceService",
-    "SpaceServiceError",
-    "SpaceJoinOptions",
-    "SpaceJoinCallbacks",
-    "SpaceHistoryOptions",
-    "SpaceHistoryCallbacks",
 ]

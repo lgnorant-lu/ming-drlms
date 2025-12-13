@@ -55,8 +55,8 @@ ming-drlms [全局选项] <命令组> <子命令> [选项]
 | `server` | 服务器管理 | - |
 | `relay` | Relay 底层调试命令 | [Advanced] |
 | `client` | 客户端文件传输 | - |
-| `space` | 房间化空间命令 | - |
 | `config` | 配置管理 | - |
+
 
 ### 工具命令
 
@@ -100,22 +100,6 @@ ming-drlms identity show
 
 # 显示指纹
 ming-drlms identity fingerprint
-```
-
-### 信任管理
-
-```bash
-# 列出联系人
-ming-drlms trust list
-
-# 手动验证联系人
-ming-drlms trust verify <pubkey>
-
-# 设为信任锚点
-ming-drlms trust anchor <pubkey>
-```
-
-### 聊天（Relay 模式）
 
 ```bash
 # 发布密钥包
@@ -166,21 +150,6 @@ ming-drlms identity --help
 
 # 子命令帮助
 ming-drlms identity create --help
-```
-
-### 教学式帮助
-
-```bash
-# 主题式教学帮助
-ming-drlms help show user
-ming-drlms help show space
-ming-drlms help show server
-ming-drlms help show ipc
-ming-drlms help show room
-```
-
----
-
 ## 输出格式
 
 大多数命令使用 Rich 渲染彩色输出：

@@ -20,24 +20,11 @@ en_texts: Dict[str, str] = {
     "HELP.USER.PASSWD": "Change password for an existing user (Argon2id).\n\nSecurity: avoid plain passwords in shell history; prefer stdin.\nExamples:\n  echo 'new' | ming-drlms user passwd myuser -d server_files -x\n",
     "HELP.USER.LIST": "List users and formats (argon2/legacy).\n\nExamples:\n  ming-drlms user list -d server_files --json\n",
     "HELP.USER.DEL": "Delete a user. Use --force to ignore missing.\n\nExamples:\n  ming-drlms user del myuser -d server_files\n  ming-drlms user del ghost -d server_files --force\n",
-    # Space
-    "HELP.SPACE.JOIN": "Subscribe to a room and tail events (with resume).\n\nExamples:\n  ming-drlms space join -r demo -H 127.0.0.1 -p 15035 -R -j\n",
-    "HELP.SPACE.SEND": "Publish text or file into a room.\n\nExamples:\n  ming-drlms space send -r demo -t 'hello'\n  ming-drlms space send -r demo -f /path/to/file\n",
-    "HELP.SPACE.HISTORY": "Fetch historical events for a room.\n\nExamples:\n  ming-drlms space history -r demo -n 10 -s 0\n",
-    "HELP.SPACE.LEAVE": "Unsubscribe from a room.\n\nExamples:\n  ming-drlms space leave -r demo -H 127.0.0.1 -p 15035 -u $DRLMS_USER -P $DRLMS_PASSWORD\n",
-    "HELP.SPACE.CHAT": "Interactive room chat: stdout tails, stdin publishes.\n\nExamples:\n  ming-drlms space chat --room demo -H 127.0.0.1 -p 15035 -u $DRLMS_USER -P $DRLMS_PASSWORD\n",
     # IPC
     "HELP.IPC.SEND": "Send one message via shared memory (ipc_sender).\n\nExamples:\n  echo 'hi' | ming-drlms ipc send\n  ming-drlms ipc send --file /tmp/file.txt\n",
     "HELP.IPC.TAIL": "Tail messages via shared memory (log_consumer).\n\nExamples:\n  ming-drlms ipc tail -n 3\n",
     # Teaching help
-    "HELP.TOPIC": "Show rich help for a topic (user|space|server|ipc).\n\nExamples:\n  ming-drlms help user\n",
-    # Client
-    "HELP.CLIENT.LIST": "List files on server (LOGIN -> LIST).\n\nExamples:\n  ming-drlms client list -H 127.0.0.1 -p 15035 -u $DRLMS_USER -P $DRLMS_PASSWORD\n",
-    "HELP.CLIENT.UPLOAD": "Upload a file to server (LOGIN -> UPLOAD).\n\nExamples:\n  ming-drlms client upload README.md -H 127.0.0.1 -p 15035 -u $DRLMS_USER -P $DRLMS_PASSWORD\n",
-    "HELP.CLIENT.DOWNLOAD": "Download a file from server (LOGIN -> DOWNLOAD).\n\nExamples:\n  ming-drlms client download README.md -o /tmp/README.md -H 127.0.0.1 -p 15035 -u $DRLMS_USER -P $DRLMS_PASSWORD\n",
-    "HELP.CLIENT.LOG": "Send a single LOG message.\n\nExamples:\n  ming-drlms client log "
-    "hello"
-    " -H 127.0.0.1 -p 15035 -u $DRLMS_USER -P $DRLMS_PASSWORD\n",
+    "HELP.TOPIC": "Show rich help for a topic (user|server|ipc).\n\nExamples:\n  ming-drlms help user\n",
     # Room
     "HELP.ROOM.INFO": "Query room info.\n\nExamples:\n  ming-drlms room info --room demo --user $DRLMS_USER\n",
     "HELP.ROOM.SUB": "Subscribe to a room via M-Proto-v2 and print events.\n\nExamples:\n  ming-drlms room sub --room demo --user $DRLMS_USER --limit 10\n  ming-drlms room sub --room demo --user $DRLMS_USER --json\n",
