@@ -11,7 +11,7 @@ DRLMS 支持通过 TOML 格式的配置文件进行配置。
 
 | 平台 | 路径 |
 |------|------|
-| Linux | `~/.config/drlms/config.toml` |
+| Linux | `~/.drlms/config.toml` |
 | Windows | `%APPDATA%\DRLMS\config.toml` |
 
 复制 `config_example.toml` 作为起点：
@@ -19,8 +19,8 @@ DRLMS 支持通过 TOML 格式的配置文件进行配置。
 <Tabs>
   <Tab title="Linux/WSL">
     ```bash
-    mkdir -p ~/.config/drlms
-    cp config_example.toml ~/.config/drlms/config.toml
+    mkdir -p ~/.drlms
+    cp config_example.toml ~/.drlms/config.toml
     ```
   </Tab>
   <Tab title="Windows">
@@ -41,7 +41,7 @@ DRLMS 支持通过 TOML 格式的配置文件进行配置。
 # =============================================================================
 # 位置：
 #   Windows: %APPDATA%\DRLMS\config.toml
-#   Linux:   ~/.config/drlms/config.toml
+#   Linux:   ~/.drlms/config.toml
 #
 # 优先级：环境变量 > config.toml > 默认值
 # =============================================================================
@@ -196,7 +196,7 @@ max_mb = 10
 # data_dir = ""
 
 # 配置目录覆盖（通常不需要设置）
-# 默认: Windows: %APPDATA%\DRLMS, Linux: ~/.config/drlms
+# 默认: Windows: %APPDATA%\DRLMS, Linux: ~/.drlms
 # config_dir = ""
 ```
 
@@ -317,8 +317,8 @@ text = "#ebdbb2"
 
 | 平台 | 路径 |
 |------|------|
-| Linux | `~/.config/drlms/config.toml` |
-| macOS | `~/.config/drlms/config.toml` |
+| Linux | `~/.drlms/config.toml` |
+| macOS | `~/.drlms/config.toml` |
 | Windows | `%APPDATA%\DRLMS\config.toml` |
 
 可通过 `DRLMS_CONFIG_FILE` 环境变量覆盖。

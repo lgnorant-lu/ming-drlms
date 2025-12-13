@@ -113,7 +113,7 @@ def _default_rooms_dir() -> Path:
         base = os.environ.get("APPDATA") or os.environ.get("LOCALAPPDATA")
         if base:
             return Path(base) / "DRLMS"
-    return Path.home() / ".config" / "drlms"
+    return Path.home() / ".drlms"
 
 
 def _default_rooms_path() -> Path:

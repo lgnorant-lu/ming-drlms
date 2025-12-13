@@ -18,7 +18,6 @@ __all__ = [
 
 
 _CONFIG_DIR_ENV = "MING_DRLMS_CONFIG_DIR"
-_DEFAULT_CONFIG_SUBDIR = "ming-drlms"
 _KEYSTORE_FILENAME = "e2ee_keys.json"
 
 
@@ -29,8 +28,8 @@ def _default_config_dir() -> Path:
     if os.name == "nt":
         base = os.environ.get("APPDATA") or os.environ.get("LOCALAPPDATA")
         if base:
-            return Path(base) / _DEFAULT_CONFIG_SUBDIR
-    return Path.home() / ".config" / _DEFAULT_CONFIG_SUBDIR
+            return Path(base) / "DRLMS"
+    return Path.home() / ".drlms"
 
 
 def _default_store_path() -> Path:

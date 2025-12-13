@@ -327,9 +327,9 @@ def get_default_config_path() -> Path:
     if os.name == "nt":
         base = Path(os.environ.get("APPDATA", os.environ.get("LOCALAPPDATA", ".")))
     else:
-        base = Path.home() / ".config"
+        base = Path.home()
 
-    return base / "ming-drlms" / "relays.toml"
+    return base / ".drlms" / "relays.toml"
 
 
 __all__ = [

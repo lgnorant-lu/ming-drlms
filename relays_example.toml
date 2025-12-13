@@ -3,7 +3,7 @@
 # =============================================================================
 # 复制此文件到以下位置之一：
 #   - Windows: %APPDATA%\ming-drlms\relays.toml
-#   - Linux/WSL: ~/.config/ming-drlms/relays.toml
+#   - Linux/WSL: ~/.drlms/relays.toml
 #   - 或通过 DRLMS_RELAYS_CONFIG 环境变量指定
 # =============================================================================
 

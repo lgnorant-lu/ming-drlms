@@ -66,7 +66,7 @@ class LocalEventStore:
 
         Args:
             db_path: Path to SQLite database. Defaults to
-                     ~/.config/drlms/events.db (Linux) or
+                     ~/.drlms/events.db (Linux) or
                      %APPDATA%/DRLMS/events.db (Windows)
         """
         if db_path is None:

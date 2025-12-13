@@ -14,11 +14,11 @@ from .app_settings import load_settings, get_update_settings
 
 
 def _cache_dir() -> Path:
-    xdg = os.environ.get("XDG_CACHE_HOME")
-    if xdg:
-        p = Path(xdg) / "ming-drlms"
+    if os.name == "nt":
+        base = os.environ.get("LOCALAPPDATA") or (Path.home() / "AppData" / "Local")
+        p = Path(base) / "DRLMS"
     else:
-        p = Path.home() / ".cache" / "ming-drlms"
+        p = Path.home() / ".cache" / "drlms"
     p.mkdir(parents=True, exist_ok=True)
     return p
 

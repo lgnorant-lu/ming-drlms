@@ -41,14 +41,14 @@ ming-drlms identity create --name "myuser"
 
 | 平台 | 路径 |
 |------|------|
-| Linux/macOS | `~/.config/drlms/local_identity.json` |
+| Linux/macOS | `~/.drlms/local_identity.json` |
 | Windows | `%APPDATA%\DRLMS\local_identity.json` |
 
 **E2EE 密钥文件**（Signal 协议兼容）：
 
 | 平台 | 路径 |
 |------|------|
-| Linux/macOS | `~/.config/drlms/e2ee_keys.json` |
+| Linux/macOS | `~/.drlms/e2ee_keys.json` |
 | Windows | `%APPDATA%\DRLMS\e2ee_keys.json` |
 
 ```json
@@ -310,10 +310,10 @@ GET /.well-known/drlms-relay.json
 
 ```bash
 # 安全删除（覆写后删除）
-shred -u ~/.config/drlms/e2ee_keys.json
+shred -u ~/.drlms/e2ee_keys.json
 
 # 或手动
-rm -P ~/.config/drlms/e2ee_keys.json  # macOS
+rm -P ~/.drlms/e2ee_keys.json  # macOS
 ```
 
 ### 会话清理
@@ -321,7 +321,7 @@ rm -P ~/.config/drlms/e2ee_keys.json  # macOS
 ```bash
 # 清除所有会话（会话存储在 e2ee_keys.json 中）
 # 删除整个密钥文件会同时清除身份和会话
-shred -u ~/.config/drlms/e2ee_keys.json
+shred -u ~/.drlms/e2ee_keys.json
 ```
 
 ### 内存密钥

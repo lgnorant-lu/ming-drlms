@@ -250,8 +250,8 @@ class BundleCache:
         if os.name == "nt":
             base = os.environ.get("APPDATA") or os.environ.get("LOCALAPPDATA")
             if base:
-                return Path(base) / "ming-drlms" / BundleCache.DEFAULT_CACHE_FILE
-        return Path.home() / ".config" / "ming-drlms" / BundleCache.DEFAULT_CACHE_FILE
+                return Path(base) / "DRLMS" / BundleCache.DEFAULT_CACHE_FILE
+        return Path.home() / ".drlms" / BundleCache.DEFAULT_CACHE_FILE
 
     def _fingerprint(self, identity_key: bytes | str) -> str:
         """Compute fingerprint for cache key."""
@@ -345,8 +345,8 @@ class OPKManager:
         if os.name == "nt":
             base = os.environ.get("APPDATA") or os.environ.get("LOCALAPPDATA")
             if base:
-                return Path(base) / "ming-drlms" / "opk_state.json"
-        return Path.home() / ".config" / "ming-drlms" / "opk_state.json"
+                return Path(base) / "DRLMS" / "opk_state.json"
+        return Path.home() / ".drlms" / "opk_state.json"
 
     def _load(self) -> None:
         if not self._store_path.exists():

@@ -250,7 +250,7 @@ ming-drlms identity show
 
 | 平台 | 路径 |
 |------|------|
-| Linux/macOS | `~/.config/drlms/e2ee_keys.json` |
+| Linux/macOS | `~/.drlms/e2ee_keys.json` |
 | Windows | `%APPDATA%\DRLMS\e2ee_keys.json` |
 
 <Note>
@@ -277,7 +277,7 @@ ming-drlms identity show
 确保文件权限正确：
 
 ```bash
-chmod 600 ~/.config/drlms/e2ee_keys.json
+chmod 600 ~/.drlms/e2ee_keys.json
 ```
 
 ---
@@ -332,8 +332,8 @@ chmod 600 ~/.config/drlms/e2ee_keys.json
 检查目录权限：
 
 ```bash
-mkdir -p ~/.config/drlms
-chmod 700 ~/.config/drlms
+mkdir -p ~/.drlms
+chmod 700 ~/.drlms
 ```
 
 ---

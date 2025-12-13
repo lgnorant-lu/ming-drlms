@@ -1,7 +1,7 @@
 """Persistent storage for M-Proto-v2 client credentials.
 
 Tokens are cached per (host, port, username) triple and saved as JSON under
-``~/.config/ming-drlms/tokens.json`` (Windows uses ``%APPDATA%``).
+``~/.drlms/tokens.json`` (Windows uses ``%APPDATA%\DRLMS`` or local ``.drlms``).
 """
 
 from __future__ import annotations
@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import Dict, Optional
 
 _CONFIG_DIR_ENV = "MING_DRLMS_CONFIG_DIR"
-_DEFAULT_CONFIG_SUBDIR = "ming-drlms"
 _TOKEN_FILENAME = "tokens.json"
 
 
@@ -24,8 +23,8 @@ def _default_config_dir() -> Path:
     if os.name == "nt":
         base = os.environ.get("APPDATA") or os.environ.get("LOCALAPPDATA")
         if base:
-            return Path(base) / _DEFAULT_CONFIG_SUBDIR
-    return Path.home() / ".config" / _DEFAULT_CONFIG_SUBDIR
+            return Path(base) / "DRLMS"
+    return Path.home() / ".drlms"
 
 
 def _token_file() -> Path:

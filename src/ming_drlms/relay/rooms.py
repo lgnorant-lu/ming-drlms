@@ -363,8 +363,8 @@ class RoomStore:
         if os.name == "nt":
             base = os.environ.get("APPDATA") or os.environ.get("LOCALAPPDATA")
             if base:
-                return Path(base) / "ming-drlms" / RoomStore.DEFAULT_FILENAME
-        return Path.home() / ".config" / "ming-drlms" / RoomStore.DEFAULT_FILENAME
+                return Path(base) / "DRLMS" / RoomStore.DEFAULT_FILENAME
+        return Path.home() / ".drlms" / RoomStore.DEFAULT_FILENAME
 
     def _load(self) -> None:
         if not self._store_path.exists():

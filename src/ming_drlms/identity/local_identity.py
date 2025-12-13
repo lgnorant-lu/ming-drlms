@@ -190,8 +190,8 @@ class LocalIdentityManager:
         if os.name == "nt":
             base = os.environ.get("APPDATA") or os.environ.get("LOCALAPPDATA")
             if base:
-                return Path(base) / "ming-drlms"
-        return Path.home() / ".config" / "ming-drlms"
+                return Path(base) / "DRLMS"
+        return Path.home() / ".drlms"
 
     def _ensure_keystore(self) -> "LocalKeyStore":
         """Lazily initialize keystore."""

@@ -283,8 +283,8 @@ class TrustStore:
         if os.name == "nt":
             base = os.environ.get("APPDATA") or os.environ.get("LOCALAPPDATA")
             if base:
-                return Path(base) / "ming-drlms" / TrustStore.DEFAULT_FILENAME
-        return Path.home() / ".config" / "ming-drlms" / TrustStore.DEFAULT_FILENAME
+                return Path(base) / "DRLMS" / TrustStore.DEFAULT_FILENAME
+        return Path.home() / ".drlms" / TrustStore.DEFAULT_FILENAME
 
     def _fingerprint(self, public_key: bytes) -> str:
         """Compute fingerprint for indexing."""

@@ -20,10 +20,7 @@ def get_config_dir() -> Path:
         appdata = os.environ.get("APPDATA")
         base = Path(appdata) if appdata else (Path.home() / "AppData" / "Roaming")
         return base / "DRLMS"
-    xdg = os.environ.get("XDG_CONFIG_HOME")
-    if xdg:
-        return Path(xdg) / "drlms"
-    return Path.home() / ".config" / "drlms"
+    return Path.home() / ".drlms"
 
 
 def get_config_file() -> Path:

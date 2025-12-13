@@ -25,7 +25,7 @@ Get-Content .env.local | ForEach-Object {
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `MING_DRLMS_CONFIG_DIR` | Windows: `%APPDATA%\DRLMS`, Linux: `~/.config/drlms` | 配置目录 |
+| `MING_DRLMS_CONFIG_DIR` | Windows: `%APPDATA%\DRLMS`, Linux: `~/.drlms` | 配置目录 |
 | `MING_DRLMS_STATE_DIR` | `~/.drlms` | TUI 状态目录（离线队列、令牌等） |
 | `DRLMS_CONFIG_FILE` | - | 配置文件完整路径（优先级高于目录） |
 | `DRLMS_DATA_DIR` | Windows: `%LOCALAPPDATA%\drlms`, Linux: `~/.local/share/drlms` | 数据目录 |
@@ -245,7 +245,7 @@ C 服务器使用独立的日志环境变量，会回退到 Python 日志变量�
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `XDG_CONFIG_HOME` | `~/.config` | 配置目录（影响 `MING_DRLMS_CONFIG_DIR` 默认值） |
+| `XDG_CONFIG_HOME` | `~/.config` | **已废弃影响**：DRLMS 不再使用 XDG 标准，直接使用 `~/.drlms`（除非显式设置 `MING_DRLMS_CONFIG_DIR`） |
 
 ---
 

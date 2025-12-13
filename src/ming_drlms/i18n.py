@@ -19,7 +19,7 @@ zh_texts: Dict[str, str] = {
     "HELP.OPT.HOST": "服务器主机",
     "HELP.OPT.PORT": "服务器端口",
     "HELP.OPT.TIMEOUT": "socket 超时时间（秒）",
-    "HELP.OPT.TOKEN_STORE": "覆盖 token 缓存路径（默认: ~/.config/ming-drlms/tokens.json）",
+    "HELP.OPT.TOKEN_STORE": "覆盖 token 缓存路径（默认: ~/.drlms/tokens.json）",
     # Auth Specific
     "HELP.AUTH.LOGIN": "登录到 DRLMS 服务器并缓存 token",
     "HELP.AUTH.LOGOUT": "撤销用户会话的缓存 token",
@@ -62,7 +62,7 @@ zh_texts: Dict[str, str] = {
     "HELP.ROOM.OPT.JSON": "以 JSON 输出事件",
     "HELP.ROOM.OPT.JSON_OUT": "以 JSON 方式输出",
     "HELP.ROOM.OPT.JSON_OUTPUT": "JSON格式输出",
-    "HELP.ROOM.OPT.E2EE_STORE": "端到端密钥仓库路径 (默认 ~/.config/ming-drlms/e2ee_keys.json)",
+    "HELP.ROOM.OPT.E2EE_STORE": "端到端密钥仓库路径 (默认 ~/.drlms/e2ee_keys.json)",
     "HELP.ROOM.OPT.TEXT": "发送文本内容",
     "HELP.ROOM.OPT.FILE": "发送文件",
     "HELP.ROOM.OPT.STDIN": "从标准输入读取内容",

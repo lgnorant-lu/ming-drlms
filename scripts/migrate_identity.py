@@ -39,7 +39,7 @@ def get_identity_json_path() -> Path:
         base = os.environ.get("APPDATA") or os.environ.get("LOCALAPPDATA")
         if base:
             return Path(base) / "DRLMS" / "identity.json"
-    return Path.home() / ".config" / "drlms" / "identity.json"
+    return Path.home() / ".drlms" / "identity.json"
 
 
 def get_keystore_path() -> Path:
@@ -51,7 +51,7 @@ def get_keystore_path() -> Path:
         base = os.environ.get("APPDATA") or os.environ.get("LOCALAPPDATA")
         if base:
             return Path(base) / "ming-drlms" / "e2ee_keys.json"
-    return Path.home() / ".config" / "ming-drlms" / "e2ee_keys.json"
+    return Path.home() / ".drlms" / "e2ee_keys.json"
 
 
 def load_old_identity(path: Path) -> dict | None:
