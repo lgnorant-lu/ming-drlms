@@ -332,36 +332,6 @@ class RoomService:
         except (MP2Error, AuthenticationError) as exc:
             raise RoomServiceError(str(exc)) from exc
 
-    # ------------------------------------------------------------------
-    # Legacy protocol helpers
-    # ------------------------------------------------------------------
-    @contextmanager
-    def _legacy_connection(
-        self,
-        *,
-        host: str,
-        port: int,
-        user: str,
-        password: str,
-    ) -> Iterator[object]:
-        try:
-            sock = self._tcp_connect(host, port)
-        except OSError as exc:
-            raise RoomServiceError(str(exc)) from exc
-        try:
-            if not self._login(sock, user, password):
-                raise RoomServiceError("login failed")
-            yield sock
-        finally:
-            try:
-                try:
-                    sock.sendall(b"QUIT\n")
-                except Exception:
-                    pass
-                sock.close()
-            except Exception:
-                pass
-
     def fetch_info(
         self,
         *,
@@ -403,25 +373,7 @@ class RoomService:
             except (AuthenticationError, MP2Error, OSError) as exc:
                 raise RoomServiceError(str(exc)) from exc
 
-        # Legacy text-protocol fallback (used by older tests exercising ROOMINFO)
-        if password is None:
-            raise RoomServiceError("password required for legacy protocol")
-
-        with self._legacy_connection(
-            host=host, port=port, user=user, password=password
-        ) as sock:
-            lines: List[str] = []
-            while True:
-                line = self._recv_line(sock)
-                if not line:
-                    break
-                lines.append(line)
-
-        if not lines:
-            raise RoomServiceError("no response received")
-
-        room_name, data = self._parse_roominfo(lines[0])
-        return RoomInfo(name=room_name, details=data, raw=lines)
+        raise RoomServiceError("token_store_path is required for MP2 protocol")
 
     @staticmethod
     def _build_key_store(path: Optional[Path | str]) -> LocalKeyStore:
@@ -558,37 +510,6 @@ class RoomService:
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
-    def _execute_simple_command(
-        self,
-        *,
-        host: str,
-        port: int,
-        user: str,
-        password: str,
-        command: str,
-        capture_additional: bool = False,
-    ) -> CommandResult:
-        with self._legacy_connection(
-            host=host, port=port, user=user, password=password
-        ) as sock:
-            sock.sendall(command.encode())
-            lines: List[str] = []
-            while True:
-                line = self._recv_line(sock)
-                if not line:
-                    break
-                lines.append(line)
-                if line.startswith("ERR|"):
-                    raise RoomServiceError(line)
-                if line.startswith("OK") and not capture_additional:
-                    break
-                if not capture_additional:
-                    break
-                if len(lines) >= 2:
-                    break
-            if not lines:
-                raise RoomServiceError("no response received")
-            return CommandResult(lines=lines)
 
     @staticmethod
     def _parse_roominfo(payload: str) -> tuple[str, dict[str, object]]:
