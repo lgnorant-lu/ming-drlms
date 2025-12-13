@@ -1,6 +1,6 @@
 ---
 title: "relay"
-description: "[Advanced] Relay 底层操作命令"
+description: "[高级/实验] Relay 底层操作命令"
 ---
 
 ## 概述
@@ -17,92 +17,16 @@ ming-drlms relay --help
 
 | 命令 | 说明 |
 |------|------|
-| `post` | 向 Relay 投递事件（完整选项） |
-| `sync` | 从 Relay 同步事件 |
-| `post-simple` | 简化投递（使用 IdentityManager） |
+| `post-simple` | 发布消息（使用 IdentityManager） |
 | `post-multi` | 多 Relay 投递 |
 | `sync-multi` | 多 Relay 同步 |
 | `identity` | 管理 Relay 身份 |
 
 ---
 
-## relay post
-
-[LEGACY] 向 Relay 服务器投递原始事件（使用 LocalKeyStore + CFFI 签名）。
-
-<Note>
-这是遗留命令，建议使用 `relay post-simple` 代替。
-</Note>
-
-### 语法
-
-```bash
-ming-drlms relay post [选项]
-```
-
-### 主要选项
-
-| 选项 | 说明 |
-|------|------|
-| `--room`, `-r` | 目标房间（必需） |
-| `--base-url` | Relay 服务器 URL（默认 http://127.0.0.1:15019） |
-| `--ciphertext`, `-c` | Base64 密文（已加密的消息） |
-| `--content` | 原始消息内容（未加密，需要 DRLMS_USER） |
-| `--content-file` | 从文件读取内容 |
-| `--encrypt/--no-encrypt` | 使用 Signal 加密 |
-| `--peer` | 加密目标用户 |
-| `--peer-bundle-file` | 目标用户的 PreKeyBundle 文件 |
-
-### 示例
-
-<Tabs>
-  <Tab title="Linux/WSL">
-    ```bash
-    # 简单投递（需要 DRLMS_USER）
-    export DRLMS_USER=myuser
-    ming-drlms relay post -r general --content "Hello" --base-url http://localhost:15019
-    ```
-  </Tab>
-  <Tab title="Windows">
-    ```powershell
-    # 简单投递（需要 DRLMS_USER）
-    $env:DRLMS_USER = "myuser"
-    ming-drlms relay post -r general --content "Hello" --base-url http://localhost:15019
-    ```
-  </Tab>
-</Tabs>
-
----
-
-## relay sync
-
-从 Relay 同步事件到本地存储。
-
-### 语法
-
-```bash
-ming-drlms relay sync [选项]
-```
-
-### 选项
-
-| 选项 | 默认值 | 说明 |
-|------|--------|------|
-| `--room`, `-r` | 必需 | 房间 ID |
-| `--base-url` | `http://127.0.0.1:15019` | Relay 服务器 URL |
-| `--limit` | `100` | 数量限制 |
-
-### 示例
-
-```bash
-ming-drlms relay sync -r general --limit 50 --base-url http://localhost:15019
-```
-
----
-
 ## relay post-simple
 
-使用 IdentityManager（Phase 15.5 XEdDSA）简化投递。
+使用 IdentityManager（Phase 15.5 XEdDSA）发布消息到 Relay。
 
 ### 语法
 
