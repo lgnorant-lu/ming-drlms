@@ -167,8 +167,6 @@ zh_texts: Dict[str, str] = {
     "HELP.IDENTITY.QR": "生成身份验证二维码数据",
     # Relay Debug
     "HELP.RELAY.DESC": "[高级/实验] Relay 底层调试命令 (post/sync/identity - 开发者使用)",
-    "HELP.RELAY.POST": "[旧版] 发布签名消息 (已弃用)",
-    "HELP.RELAY.SYNC": "[旧版] 同步消息",
     "HELP.RELAY.POST_SIMPLE": "发布消息 (使用 IdentityManager)",
     "HELP.RELAY.OPT.ROOM": "目标房间",
     "HELP.RELAY.OPT.CONTENT": "消息内容",
