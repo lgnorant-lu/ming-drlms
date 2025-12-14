@@ -1,0 +1,58 @@
+---
+title: "故障排查"
+description: "常见问题与解决方案指南"
+---
+
+## 端到端加密 (E2EE) 问题
+
+### 接收消息显示 `[binary XX bytes]`
+
+**症状**: 在聊天窗口中，接收到的消息内容显示为 `[binary ...]` 而不是可读文本。
+
+**原因**:
+客户端未能成功解密消息，通常是因为缺少发送者的 **Sender Key**。即使启用了 E2EE，如果发送者没有将其 Sender Key 分发给您（例如您是在他们发送消息后才加入房间且错过了 Push），您将无法解密。
+
+**解决方案**:
+1.  **自动修复 (v0.4.0+)**: 系统具备自动 Sender Key 分发机制。请等待几秒钟，或尝试退出并重新进入房间。
+2.  **手动操作**: 重启客户端 (`ming-drlms tui`)。
+3.  **日志检查**: 查看 `.drlms/logs/drlms.log` 是否包含 `PermissionError` 或 `AttributeError`。
+
+---
+
+### `AttributeError: 'RoomEvent' object has no attribute 'ciphertext'`
+
+**原因**:
+这是早期版本（Pre-Phase 25）的一个 Bug。代码试图访问使用了旧命名的属性。
+
+**解决方案**:
+请更新到最新版本。此问题已在 Phase 25 修复。
+
+---
+
+### `PermissionError: [WinError 32]`
+
+**症状**:
+日志中出现关于 `e2ee_keys.json` 的文件访问错误，导致 Key 无法保存。
+
+**原因**:
+Windows 文件锁争用。当多个进程（或同一进程的多个线程）同时尝试写入 Key Store 时发生。
+
+**解决方案**:
+最新版本已包含重试机制。如果问题持续，请确保没有其他 `ming-drlms` 实例在后台运行（使用 Task Manager 关闭僵尸进程）。
+
+---
+
+## 连接问题
+
+### 登录失败或连接超时
+
+**检查步骤**:
+1.  确认服务器正在运行 (`log_collector_server.exe`)。
+2.  检查防火墙设置，确保端口 `15035` (或配置端口) 开放。
+3.  如果是 WSL 环境连接 Windows 服务器，请使用 Windows IP 而非 `localhost`，并确保防火墙允许 WSL 访问。
+
+## 日志位置
+
+- **Windows**: `.drlms\logs\` (通常在当前目录或用户目录下)
+- **Linux/WSL**: `~/.drlms/logs/`
+- **TUI 调试模式**: 启动时使用 `ming-drlms tui --debug` 或设置环境变量 `DRLMS_LOG_LEVEL=DEBUG`。

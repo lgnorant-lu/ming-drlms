@@ -316,6 +316,25 @@ distribution = builder.create_session(name)
 builder.process_session(name, distribution_bytes)
 ```
 
+### MP2 分发机制 (Push)
+
+DRLMS 在 MP2 协议层实现了自动化的 Sender Key 分发：
+
+1.  **成员加入 (MEMBER_JOINED)**:
+    - 原有成员侦测到新成员加入。
+    - 调用 `distribute_sender_key(target=new_member)`。
+    - 使用 `MSG_TYPE_E2EE_SENDER_KEY_PUSH` 消息类型通过服务器中继 Key 分发包。
+
+2.  **自动接收**:
+    - 新成员收到 Push 消息。
+    - 调用 `process_sender_key_distribution` 将 Key 存入本地数据库。
+
+3.  **消息发送前检查**:
+    - 发送方在加密群消息前，也会检查是否已向所有成员分发了 Sender Key。
+    - 如有遗漏，会自动触发分发。
+
+此机制确保了群聊的无缝加密体验，无需用户手动干预。
+
 ### 加解密
 
 ```python
