@@ -39,6 +39,9 @@ message SignalEncryptedPayload {
   uint32 signed_pre_key_id = 7;
   string group_id = 8;
   uint32 sender_key_iteration = 9;
+  
+  // Phase 23: Compression
+  int32 compression_type = 15; // 0=NONE, 1=ZLIB, 2=ZSTD
 }
 
 // Shared structs ----------------------------------------------------------
@@ -49,6 +52,7 @@ message RoomFileMetadata {
   string sha256_hex = 3;
   bool ephemeral = 4;
   string timestamp = 5; // RFC3339
+  int32 compression_type = 6; // 0=NONE, 1=ZLIB, 2=ZSTD
 }
 
 message RoomSummary {
@@ -229,6 +233,7 @@ message RoomFilePublishBegin {
   string sha256_hex = 5;
   bool ephemeral = 6;
   string upload_id = 7;
+  int32 compression_type = 8; // 0=NONE, 1=ZLIB, 2=ZSTD
 }
 
 message RoomFilePublishChunk {

@@ -484,9 +484,9 @@ class ChatScreen(Screen):
         """Check E2EE availability and update status indicator."""
         has_keys = False
         try:
-            config_dir = Path(
-                os.environ.get("MING_DRLMS_CONFIG_DIR") or (Path.home() / ".drlms")
-            )
+            from ...config_paths import get_config_dir
+
+            config_dir = get_config_dir()
             e2ee_path = config_dir / "e2ee_keys.json"
             exists = e2ee_path.exists()
             if exists:
@@ -892,8 +892,11 @@ class ChatScreen(Screen):
             else event.event_id
         )
 
+        # Phase 23: Extract compression type
+        comp_type = getattr(event.file, "compression_type", 0)
+
         self.app.run_worker(
-            lambda: self._download_worker(use_id, out_path, total_bytes),
+            lambda: self._download_worker(use_id, out_path, total_bytes, comp_type),
             exclusive=False,
             thread=True,
         )
@@ -903,11 +906,12 @@ class ChatScreen(Screen):
         event_id: int,
         out_path: Path,
         total_bytes: int | None = None,
+        compression_type: int = 0,  # Phase 23
     ) -> None:
         """Worker function to perform file download and report result."""
         try:
             self.controller.download_file(
-                self.current_room, event_id, out_path, total_bytes
+                self.current_room, event_id, out_path, total_bytes, compression_type
             )
             # On success, show a concise system message
             self.app.call_from_thread(

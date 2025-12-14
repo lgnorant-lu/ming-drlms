@@ -16,6 +16,10 @@ from ming_drlms.proto.schema.v2 import room_pb2
 from ming_drlms.core.pysignal import SignalBridgeError
 from ming_drlms.core.e2ee_store import LocalKeyStore
 from ming_drlms.core.e2ee_runtime import E2EEngine, proto_type_from_lib
+from ming_drlms.core import compression
+from ming_drlms import config
+import tempfile
+import os
 
 from ..mproto_runtime import create_mp2_client
 from ..utils import tcp_connect, recv_line, login
@@ -223,19 +227,90 @@ class RoomService:
         chunk_size: int = 64 * 1024,  # 64KB chunks
     ) -> PublishResult:
         """Publish a file to the room."""
+        # Phase 23: Compression
+        # Strategy:
+        # 1. Check global config if compression enabled.
+        # 2. Try to compress to a temp file.
+        # 3. If successful/beneficial, upload temp file with compression_type set.
+        # 4. Else, upload original file with compression_type=NONE.
+
         path = Path(file_path)
         if not path.exists():
             raise RoomServiceError(f"File not found: {path}")
 
-        # Calculate size and hash
-        file_size = path.stat().st_size
-        sha256 = hashlib.sha256()
-        with open(path, "rb") as f:
-            while chunk := f.read(8192):
-                sha256.update(chunk)
-        file_hash = sha256.hexdigest()
+        # Check config (using hardcoded defaults or reading from config module if available)
+        # Assuming we want defaults: enabled=True, min_size=128
+        # We can try to import config, but config_example.toml suggests it's global
+        from ming_drlms.core import compression
+        import tempfile
+        import os
+
+        # Load config - may return CLIConfig (dataclass) or None
+        # Phase 23 compression uses sensible defaults if not configured
+        enabled = True
+        min_size = 128
+        min_ratio = 0.1
 
         try:
+            cfg = config.load_config(None)
+            if cfg is not None:
+                # Check if cfg has compression attribute (newer config format)
+                if hasattr(cfg, "compression"):
+                    comp_cfg = cfg.compression
+                    if comp_cfg is not None:
+                        enabled = getattr(comp_cfg, "enabled", True)
+                        min_size = getattr(comp_cfg, "min_size", 128)
+                        min_ratio = getattr(comp_cfg, "min_ratio", 0.1)
+                elif isinstance(cfg, dict):
+                    # Fallback for dict-based config
+                    comp_cfg = cfg.get("compression", {})
+                    enabled = comp_cfg.get("enabled", True)
+                    min_size = comp_cfg.get("min_size", 128)
+                    min_ratio = comp_cfg.get("min_ratio", 0.1)
+        except Exception:
+            pass  # Use defaults
+
+        final_path = path
+        comp_type = compression.CompressionAlgo.NONE
+        temp_file = None
+
+        if enabled:
+            try:
+                # Create temp file
+                fd, temp_path = tempfile.mkstemp(prefix="drlms_upload_", suffix=".zst")
+                os.close(fd)
+                temp_file = Path(temp_path)
+
+                success, algo = compression.compress_file(
+                    str(path), str(temp_file), min_size=min_size, min_ratio=min_ratio
+                )
+
+                if success:
+                    final_path = temp_file
+                    comp_type = algo
+                else:
+                    # Cleanup unused temp
+                    if temp_file.exists():
+                        temp_file.unlink()
+                    temp_file = None
+            except Exception:
+                if temp_file and temp_file.exists():
+                    try:
+                        temp_file.unlink()
+                    except OSError:
+                        pass
+                temp_file = None
+                comp_type = compression.CompressionAlgo.NONE
+
+        try:
+            # Calculate size and hash of final path (original or compressed)
+            file_size = final_path.stat().st_size
+            sha256 = hashlib.sha256()
+            with open(final_path, "rb") as f:
+                while chunk := f.read(8192):
+                    sha256.update(chunk)
+            file_hash = sha256.hexdigest()
+
             with self._client_factory(
                 host,
                 port,
@@ -243,6 +318,7 @@ class RoomService:
                 token_store_path=token_store,
             ) as client:
                 # 1. Begin upload
+                # Note: filename is always ORIGINAL name
                 upload_id = client.publish_file_begin(
                     user,
                     room,
@@ -250,10 +326,11 @@ class RoomService:
                     file_size,
                     file_hash,
                     ephemeral=ephemeral,
+                    compression_type=int(comp_type),
                 )
 
                 # 2. Send chunks
-                with open(path, "rb") as f:
+                with open(final_path, "rb") as f:
                     offset = 0
                     while True:
                         chunk = f.read(chunk_size)
@@ -273,40 +350,14 @@ class RoomService:
 
         except (AuthenticationError, MP2Error, OSError) as exc:
             raise RoomServiceError(str(exc)) from exc
+        finally:
+            if temp_file and temp_file.exists():
+                try:
+                    temp_file.unlink()
+                except OSError:
+                    pass
 
         return PublishResult(bytes_sent=file_size, ephemeral=ephemeral)
-
-    def download_file(
-        self,
-        *,
-        host: str,
-        port: int,
-        user: str,
-        room: str,
-        event_id: int,
-        output_path: Path | str,
-        token_store: Optional[object] = None,
-        timeout: float = 30.0,
-    ) -> int:
-        """Download a file from the room. Returns bytes downloaded."""
-        out_path = Path(output_path)
-        bytes_downloaded = 0
-
-        try:
-            with self._client_factory(
-                host,
-                port,
-                timeout=timeout,
-                token_store_path=token_store,
-            ) as client:
-                with open(out_path, "wb") as f:
-                    for chunk in client.download_file(user, room, event_id):
-                        f.write(chunk)
-                        bytes_downloaded += len(chunk)
-        except (AuthenticationError, MP2Error, OSError) as exc:
-            raise RoomServiceError(str(exc)) from exc
-
-        return bytes_downloaded
 
     def list_rooms(
         self,
@@ -479,6 +530,71 @@ class RoomService:
                 return client.transfer_room_ownership(user, room, new_owner)
         except (AuthenticationError, MP2Error, OSError) as exc:
             raise RoomServiceError(str(exc)) from exc
+
+    def download_file(
+        self,
+        *,
+        host: str,
+        port: int,
+        user: str,
+        room: str,
+        event_id: int,
+        output_path: Path | str,
+        token_store: Optional[object] = None,
+        timeout: float = 30.0,
+        compression_type: int = 0,  # Phase 23
+    ) -> int:
+        """Download a file from the room. Returns bytes downloaded."""
+        out_path = Path(output_path)
+        bytes_downloaded = 0
+
+        # If compressed, download to temp first
+        is_compressed = compression_type != compression.CompressionAlgo.NONE
+        target_file = out_path
+        temp_file = None
+
+        if is_compressed:
+            try:
+                fd, temp_path = tempfile.mkstemp(prefix="drlms_down_", suffix=".tmp")
+                os.close(fd)
+                target_file = Path(temp_path)
+                temp_file = target_file
+            except OSError:
+                # Fallback to direct write if temp creation fails (will fail decompression likely)
+                target_file = out_path
+                is_compressed = False
+
+        try:
+            with self._client_factory(
+                host,
+                port,
+                timeout=timeout,
+                token_store_path=token_store,
+            ) as client:
+                with open(target_file, "wb") as f:
+                    for chunk in client.download_file(user, room, event_id):
+                        f.write(chunk)
+                        bytes_downloaded += len(chunk)
+
+            # Decompress if needed
+            if is_compressed and temp_file:
+                try:
+                    compression.decompress_file(
+                        str(temp_file), str(out_path), compression_type
+                    )
+                except Exception as e:
+                    raise RoomServiceError(f"Decompression failed: {e}") from e
+
+        except (AuthenticationError, MP2Error, OSError) as exc:
+            raise RoomServiceError(str(exc)) from exc
+        finally:
+            if temp_file and temp_file.exists():
+                try:
+                    temp_file.unlink()
+                except OSError:
+                    pass
+
+        return bytes_downloaded
 
     def clear_owner(
         self,

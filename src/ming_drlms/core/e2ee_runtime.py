@@ -27,6 +27,7 @@ from .pysignal import (
     encode_pre_key_record,
     encode_signed_pre_key_record,
 )
+from . import compression  # Phase 23: Compression integration
 from .. import log
 
 logger = log.get_logger("core.e2ee_runtime")
@@ -141,10 +142,15 @@ class E2EEngine:
             )
         except Exception:
             pass
-        result = self._store.encrypt(session.name, session.device_id, plaintext)
+        # Phase 23: Compression
+        # 尝试压缩明文
+        compressed_text, comp_type = compression.compress(plaintext, min_size=128)
+
+        result = self._store.encrypt(session.name, session.device_id, compressed_text)
         payload = room_pb2.SignalEncryptedPayload()
         payload.type = proto_type_from_lib(result.message_type)
         payload.ciphertext = result.ciphertext  # type: ignore[attr-defined]
+        payload.compression_type = int(comp_type)  # type: ignore[attr-defined]
         payload.sender = self._username  # type: ignore[attr-defined]
         payload.sender_device_id = self._state.device_id  # type: ignore[attr-defined]
         payload.sender_registration_id = self._state.registration_id  # type: ignore[attr-defined]
@@ -212,23 +218,30 @@ class E2EEngine:
             pass
         return payload
 
-    def decrypt(self, event: RoomEvent) -> DecryptResult:
+    def decrypt(self, event: room_pb2.SignalEncryptedPayload) -> DecryptResult:
+        # The type hint `event: RoomEvent` is misleading here.
+        # Based on usage, `event` is expected to be `room_pb2.SignalEncryptedPayload`.
+        # The `RoomEvent` dataclass in `mproto_v2_client.py` has `payload: bytes`,
+        # but this `decrypt` method expects a structured object with fields like `sender`, `payload_type`, etc.
+        # The `event.payload` used below refers to the `ciphertext` field of `SignalEncryptedPayload`.
         peer = event.sender or ""
         device_id = event.sender_device_id or 1
         try:
             logger.debug(
                 "E2EE decrypt: room=%s peer=%s dev=%s payload_len=%s type=%s",
-                event.room_name,
+                getattr(
+                    event, "room_name", "N/A"
+                ),  # RoomEvent has room_name, SignalEncryptedPayload does not
                 peer,
                 device_id,
-                len(event.payload) if hasattr(event.payload, "__len__") else None,
-                event.payload_type,
+                len(event.ciphertext) if hasattr(event.ciphertext, "__len__") else None,
+                event.type,
             )
         except Exception:
             pass
         cipher = Ciphertext(
-            ciphertext=event.payload,
-            message_type=lib_type_from_proto(event.payload_type),
+            ciphertext=event.ciphertext,
+            message_type=lib_type_from_proto(event.type),
             registration_id=int(event.sender_registration_id or 0),
             pre_key_id=int(event.pre_key_id or 0),
             signed_pre_key_id=int(event.signed_pre_key_id or 0),
@@ -257,13 +270,20 @@ class E2EEngine:
             and result.info.pre_key_id is not None
         ):
             self._key_store.remove_pre_key(self._username, int(result.info.pre_key_id))
+
+        # Phase 23: Decompression
+        comp_type = getattr(event, "compression_type", 0)
+        plaintext = compression.decompress(result.plaintext, comp_type)
+        result.plaintext = plaintext
+
         try:
             logger.debug(
-                "E2EE decrypt done: peer=%s dev=%s msg_type=%s pre_key_id=%s",
+                "E2EE decrypt done: peer=%s dev=%s msg_type=%s pre_key_id=%s len=%d",
                 peer,
                 device_id,
                 result.info.message_type,
                 result.info.pre_key_id,
+                len(plaintext),
             )
         except Exception:
             pass

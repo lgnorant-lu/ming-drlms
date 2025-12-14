@@ -405,17 +405,21 @@ class TestE2EEngine:
         decrypt_result = MagicMock()
         decrypt_result.info.message_type = 3  # PREKEY_TYPE
         decrypt_result.info.pre_key_id = 1
+        decrypt_result.plaintext = (
+            b"decrypted"  # Phase 23: Add plaintext for decompression
+        )
         mock_signal_store.decrypt.return_value = decrypt_result
 
-        # Mock event
+        # Mock event with Phase 23 fields
         event = MagicMock()
         event.sender = "bob"
         event.sender_device_id = 1
-        event.payload = b"cipher"
-        event.payload_type = 1  # PREKEY
+        event.ciphertext = b"cipher"  # Changed from payload
+        event.type = 1  # PREKEY (changed from payload_type)
         event.sender_registration_id = 100
         event.pre_key_id = 1
         event.signed_pre_key_id = 1
+        event.compression_type = 0  # Phase 23: No compression
 
         engine.decrypt(event)
 

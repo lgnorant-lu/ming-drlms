@@ -285,7 +285,9 @@ def test_decrypt_records_identity_and_removes_pre_key() -> None:
         def decrypt(self, name: str, device_id: int, cipher: Any):  # type: ignore[override]
             self.decrypt_calls.append((name, device_id))
             info = SimpleNamespace(message_type=3, pre_key_id=7)
-            return SimpleNamespace(info=info)
+            return SimpleNamespace(
+                info=info, plaintext=b"decrypted"
+            )  # Phase 23: Add plaintext
 
         def get_remote_identity(self, name: str, device_id: int) -> bytes | None:  # type: ignore[override]
             return b"peer-id"
@@ -297,11 +299,12 @@ def test_decrypt_records_identity_and_removes_pre_key() -> None:
         room_name="room",
         sender="bob",
         sender_device_id=1,
-        payload=b"encrypted",
-        payload_type=room_pb2.SignalCiphertextType.SIGNAL_CIPHERTEXT_TYPE_PREKEY,
+        ciphertext=b"encrypted",  # Changed from payload to ciphertext
+        type=room_pb2.SignalCiphertextType.SIGNAL_CIPHERTEXT_TYPE_PREKEY,
         sender_registration_id=42,
         pre_key_id=7,
         signed_pre_key_id=None,
+        compression_type=0,  # Phase 23: Add compression_type
     )
 
     result = eng.decrypt(event)  # type: ignore[attr-defined]

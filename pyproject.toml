@@ -33,6 +33,7 @@ dependencies = [
     "textual>=6.6.0",
     "tomli>=2.0.0; python_version < '3.11'",
     "tomli-w>=1.0.0",
+    "zstandard>=0.25.0",  # New for Phase 23: Compression support
 ]
 
 [project.optional-dependencies]

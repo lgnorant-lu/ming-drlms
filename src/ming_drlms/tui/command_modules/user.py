@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from typing import Any
-from pathlib import Path
 import os
 
 
@@ -44,8 +43,10 @@ def register_user_commands(handler: Any) -> None:
             except Exception:
                 pass
 
+            from ....config_paths import get_config_dir
+
             env_cfg_dir = os.environ.get("MING_DRLMS_CONFIG_DIR") or str(
-                Path.home() / ".drlms"
+                get_config_dir()
             )
 
             handler.screen.show_system_message(

@@ -59,6 +59,7 @@ class RoomFileMeta:
     ephemeral: bool
     timestamp: str
     file_id: int | None = None
+    compression_type: int = 0  # Phase 23
 
 
 @dataclass(slots=True)
@@ -259,7 +260,7 @@ class MP2Client:
         auth_req.response = response_digest
 
         # 14C: attach ClientInfo with device/identity and binding signature (robust path)
-        # Phase 18+: Use LocalIdentityManager + SignalStore for XEdDSA signing
+        # Phase 22+: Use LocalIdentityManager + SignalStore for XEdDSA signing
         try:
             # Import logging for debug output
             import logging
@@ -1127,17 +1128,19 @@ class MP2Client:
         size_bytes: int,
         sha256_hex: str,
         ephemeral: bool = False,
+        compression_type: int = 0,
     ) -> str:
         """Begin file upload. Returns upload_id."""
         try:
             logger.debug(
-                "file_publish_begin: user=%s room=%s filename=%s size=%s sha=%s ephemeral=%s",
+                "file_publish_begin: user=%s room=%s filename=%s size=%s sha=%s ephemeral=%s comp=%s",
                 username,
                 room_name,
                 filename,
                 size_bytes,
                 sha256_hex,
                 ephemeral,
+                compression_type,
             )
         except Exception:
             pass
@@ -1153,6 +1156,7 @@ class MP2Client:
         req.sha256_hex = sha256_hex
         req.ephemeral = ephemeral
         req.upload_id = str(uuid.uuid4())
+        req.compression_type = compression_type
 
         write_frame(
             sock,
@@ -1309,6 +1313,27 @@ class MP2Client:
                     )
                 except Exception:
                     pass
+
+                # Phase 23: Compression Handling
+                # Note: Decompression logic needs to happen AFTER receiving all chunks if using stream APIs,
+                # BUT since we use "Whole File Compression", the client receives compressed chunks.
+                # The client logic (caller of this generator) must handle saving chunks and then decompressing.
+                # HOWEVER, to make it transparent, we can't easily decompress stream per chunk if it's Zstd without a streaming decompressor context.
+                #
+                # Given we agreed on "Temp-File Strategy":
+                # 1. Receiver must know compression_type (from RoomFileMetadata in Event).
+                # 2. download_file here yields chunks.
+                #
+                # The `download_file` generator just yields RAW protocol bytes.
+                # Higher level function `RoomService.download_file` or `ChatController.download_file`
+                # must handle the decompression after writing all chunks (or using streaming decompressor).
+                #
+                # The PROTOCOL chunk message `RoomFileDownloadChunk` has `compression_type`?
+                # No, `RoomFileMetadata` (in Event) has it.
+                # `RoomFileDownloadChunk` (Line 260 of proto) matches download request.
+                #
+                # We will pass the raw compressed bytes here. Decompression is higher-layer responsibility.
+
                 yield chunk.data
                 if chunk.last_chunk:
                     break

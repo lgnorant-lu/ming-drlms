@@ -76,6 +76,7 @@ zh_texts: Dict[str, str] = {
     "HELP.ROOM.OPT.USER": "执行者用户名",
     "HELP.ROOM.OPT.LIMIT_ALT": "最大返回数量",
     "HELP.ROOM.OPT.SINCE_SEQ": "从指定 server_seq 之后开始",
+    "HELP.ROOM.OPT.COMPRESSION": "压缩类型 (0=None, 1=Zlib, 2=Zstd)",
     # Relay Rooms (Relay Native)
     "HELP.R_ROOM.DESC": "[Relay模式] Relay-native 房间管理 (create/list/join/leave/invite)",
     "HELP.R_ROOM.CREATE": "创建新房间",

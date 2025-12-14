@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
 import httpx
@@ -64,20 +65,101 @@ class RelayHTTPClient:
         r.raise_for_status()
         return r.json()
 
-    def upload_file(
-        self, *, file_path: str, room: Optional[str] = None
-    ) -> Dict[str, Any]:
-        data: Dict[str, Any] = {}
-        if room:
-            data["room"] = room
-        file_name = os.path.basename(file_path)
-        with open(file_path, "rb") as fp:
-            files = {"file": (file_name, fp, "application/octet-stream")}
-            r = self._client.post(f"{self._base}/files", data=data, files=files)
-            r.raise_for_status()
-            return r.json()
+    def upload_file(self, file_path: str, room: str) -> str:
+        """Upload a file to the relay. Returns the file URL."""
+        path = Path(file_path)
+        if not path.exists():
+            raise FileNotFoundError(f"File not found: {path}")
+
+        # Phase 23: Compression Strategy
+        from . import compression
+        import tempfile
+        import os
+        from ming_drlms import config
+
+        # Load config - may return CLIConfig (dataclass) or None
+        # For Phase 23 compression, we use sensible defaults if not configured
+        enabled = True
+        min_size = 128
+        min_ratio = 0.1
+
+        try:
+            cfg = config.load_config(None)
+            if cfg is not None:
+                # Check if cfg has compression attribute (newer config format)
+                if hasattr(cfg, "compression"):
+                    comp_cfg = cfg.compression
+                    if comp_cfg is not None:
+                        enabled = getattr(comp_cfg, "enabled", True)
+                        min_size = getattr(comp_cfg, "min_size", 128)
+                        min_ratio = getattr(comp_cfg, "min_ratio", 0.1)
+                elif isinstance(cfg, dict):
+                    # Fallback for dict-based config
+                    comp_cfg = cfg.get("compression", {})
+                    enabled = comp_cfg.get("enabled", True)
+                    min_size = comp_cfg.get("min_size", 128)
+                    min_ratio = comp_cfg.get("min_ratio", 0.1)
+        except Exception:
+            pass  # Use defaults
+
+        final_path = path
+        comp_type = compression.CompressionAlgo.NONE
+        temp_file = None
+
+        if enabled:
+            try:
+                fd, temp_path = tempfile.mkstemp(prefix="relay_up_", suffix=".zst")
+                os.close(fd)
+                temp_file = Path(temp_path)
+
+                success, algo = compression.compress_file(
+                    str(path), str(temp_file), min_size=min_size, min_ratio=min_ratio
+                )
+
+                if success:
+                    final_path = temp_file
+                    comp_type = algo
+                else:
+                    if temp_file.exists():
+                        temp_file.unlink()
+                    temp_file = None
+            except Exception:
+                if temp_file and temp_file.exists():
+                    try:
+                        temp_file.unlink()
+                    except OSError:
+                        pass
+                temp_file = None
+                comp_type = compression.CompressionAlgo.NONE
+
+        try:
+            url = f"{self._base}/files"  # Changed from /upload to /files to match existing API
+
+            # Prepare headers
+            # Note: We don't set Content-Type here, requests sets it for multipart
+            # We add custom header for compression
+            headers = {"X-DRLMS-Compression": str(int(comp_type))}
+
+            with open(final_path, "rb") as f:
+                files = {"file": (path.name, f)}  # Keep original filename
+                data = {"room": room}
+                response = self._client.post(
+                    url, files=files, data=data, headers=headers
+                )
+                response.raise_for_status()
+                result = response.json()
+                return result["url"]  # Assuming the relay returns a URL
+        finally:
+            if temp_file and temp_file.exists():
+                try:
+                    temp_file.unlink()
+                except OSError:
+                    pass
 
     def download_file(self, file_id: int) -> Iterable[bytes]:
+        """Download a file from the relay."""
+        # Note: This yields RAW bytes (potentially compressed).
+        # Wrapper logic (TUI/Client) must handle decompression.
         with self._client.stream("GET", f"{self._base}/files/{int(file_id)}") as r:
             r.raise_for_status()
             yield from r.iter_bytes()
@@ -93,6 +175,7 @@ class RelayHTTPClient:
             "size_bytes": int(h.get("X-DRLMS-Size", "0") or 0),
             "sha256_hex": h.get("X-DRLMS-SHA256"),
             "ephemeral": (h.get("X-DRLMS-Ephemeral", "0") == "1"),
+            "compression_type": int(h.get("X-DRLMS-Compression", "0") or 0),  # Phase 23
         }
         return meta
 

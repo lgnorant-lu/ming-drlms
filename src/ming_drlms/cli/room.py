@@ -550,6 +550,9 @@ def room_download(
     user: str = typer.Option(None, "--user", "-u", envvar="DRLMS_USER"),
     token_store: Optional[Path] = typer.Option(None, "--token-store"),
     timeout: float = typer.Option(10.0, "--timeout", help=t("HELP.OPT.TIMEOUT")),
+    compression: int = typer.Option(
+        0, "--compression", "-c", help=t("HELP.ROOM.OPT.COMPRESSION")
+    ),
 ):
     """下载房间中的文件。"""
     try:
@@ -562,6 +565,7 @@ def room_download(
             output_path=output,
             token_store=token_store,
             timeout=timeout,
+            compression_type=compression,
         )
         print(f"[green]Downloaded {bytes_downloaded} bytes to {output}[/green]")
     except RoomServiceError as exc:

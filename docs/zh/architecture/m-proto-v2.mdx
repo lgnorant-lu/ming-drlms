@@ -11,10 +11,15 @@ M-Proto-v2 是 DRLMS 的核心通信协议，用于客户端与 C 服务器之�
 
 ## 协议分层
 
+## 协议分层
+
 ```
 ┌─────────────────────────────────────┐
 │        应用层 (Protobuf)            │
 │   认证、房间、消息、联邦消息         │
+├─────────────────────────────────────┤
+│         压缩层 (Phase 23)           │
+│      Compress-Then-Encrypt          │
 ├─────────────────────────────────────┤
 │        分帧层 (Binary Frame)        │
 │   Magic + Length + Type + Payload   │
@@ -297,6 +302,17 @@ enum RoomEventKind {
   ROOM_EVENT_KIND_MEMBER_LEFT = 3;
 }
 
+// 房间文件元数据 (Phase 23+)
+message RoomFileMetadata {
+  string name = 1;
+  uint64 size = 2;
+  string content_type = 3;
+  string sha256 = 4;
+  string url = 5;         // Relay URL (RELAY mode) or empty (MP2 mode)
+  string relay_token = 6; // Relay token
+  int32 compression_type = 7; // 0=None, 1=Zlib, 2=Zstd
+}
+
 // Signal 加密信封
 message SignalEncryptedPayload {
   SignalCiphertextType type = 1;
@@ -308,6 +324,7 @@ message SignalEncryptedPayload {
   uint32 signed_pre_key_id = 7;
   string group_id = 8;              // 群组 ID
   uint32 sender_key_iteration = 9;  // 发送者密钥迭代
+  int32 compression_type = 10;      // Phase 23: 0=None, 1=Zlib, 2=Zstd
 }
 ```
 

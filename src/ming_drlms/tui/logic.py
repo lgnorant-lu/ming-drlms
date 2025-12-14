@@ -68,7 +68,7 @@ def _state_dir() -> Path:
 
     Priority:
     1. MING_DRLMS_STATE_DIR environment variable (for test isolation)
-    2. Path.home() / ".drlms" (default)
+    2. Unified config directory (via config_paths)
 
     Tests should set MING_DRLMS_STATE_DIR to a temporary directory to
     avoid polluting the user's real state (offline_queue.db, etc.).
@@ -78,7 +78,11 @@ def _state_dir() -> Path:
     state_dir_env = environ.get("MING_DRLMS_STATE_DIR")
     if state_dir_env:
         return Path(state_dir_env)
-    return Path.home() / ".drlms"
+
+    # Use standardized config directory
+    from ..config_paths import get_config_dir
+
+    return get_config_dir()
 
 
 class ChatController:
@@ -203,7 +207,9 @@ class ChatController:
 
         # Check for E2EE keys (JSON keystore) using the configurable
         # config directory, defaulting to the state dir when unset.
-        config_dir = Path(os.environ.get("MING_DRLMS_CONFIG_DIR") or state_dir)
+        config_dir = (
+            state_dir  # state_dir already uses get_config_dir() when env not set
+        )
         e2ee_path = config_dir / "e2ee_keys.json"
         use_e2ee = False
         if e2ee_path.exists():
@@ -707,9 +713,24 @@ class ChatController:
         event_id: int,
         output_path: Path,
         total_bytes: Optional[int] = None,
+        compression_type: int = 0,  # Phase 23
     ) -> None:
         """Download a file (blocking, run in worker)."""
+        from ming_drlms.core import compression
+        import tempfile
+        import os
+
+        # Phase 23: Compression Setup
+        is_compressed = compression_type != compression.CompressionAlgo.NONE
+        target_file = output_path
+        temp_file = None
+
+        # If we know it's compressed (MP2 case mainly, or Relay if implicit), setup temp
+        # For Relay, we might discover it's compressed via HEAD below, so we handle that logic inside.
+
         if self._progress_cb is None:
+            # Fallback to RoomService (MP2-only logic in update above)
+            # We must pass compression_type if we have it
             service = RoomService()
             token_path = _state_dir() / "tokens.json"
             service.download_file(
@@ -720,13 +741,17 @@ class ChatController:
                 event_id=event_id,
                 output_path=output_path,
                 token_store=token_path,
+                compression_type=compression_type,
             )
             return
+
         if self._backend == "relay":
             http = RelayHTTPClient(self._relay_base_url)
             try:
                 expected_size = None
                 expected_sha = None
+                relay_comp_type = 0
+
                 try:
                     meta = http.head_file(int(event_id))
                     if meta:
@@ -734,12 +759,37 @@ class ChatController:
                             expected_size = int(meta["size_bytes"])  # type: ignore[index]
                         if meta.get("sha256_hex"):
                             expected_sha = str(meta["sha256_hex"])  # type: ignore[index]
+                        if meta.get("compression_type"):
+                            relay_comp_type = int(meta["compression_type"])  # type: ignore[index]
                 except Exception:
                     pass
+
+                # Use Relay header info if available, else fallback to arg
+                final_comp_type = (
+                    relay_comp_type if relay_comp_type > 0 else compression_type
+                )
+                is_compressed_relay = (
+                    final_comp_type != compression.CompressionAlgo.NONE
+                )
+
+                if is_compressed_relay:
+                    try:
+                        fd, t_path = tempfile.mkstemp(
+                            prefix="tui_relay_down_", suffix=".tmp"
+                        )
+                        os.close(fd)
+                        temp_file = Path(t_path)
+                        target_file = temp_file
+                    except OSError:
+                        target_file = output_path
+                        is_compressed_relay = False
+
                 hasher = hashlib.sha256() if expected_sha else None
                 total = total_bytes or expected_size
                 bytes_done = 0
-                with open(output_path, "wb") as f:
+
+                with open(target_file, "wb") as f:
+                    # Note: http.download_file yields chunks (we reverted signature)
                     for chunk in http.download_file(int(event_id)):
                         f.write(chunk)
                         bytes_done += len(chunk)
@@ -765,14 +815,33 @@ class ChatController:
                                         )
                                     except Exception:
                                         pass
+
                 if hasher and expected_sha:
                     actual = hasher.hexdigest()
                     if actual.lower() != str(expected_sha).lower():
                         try:
-                            os.remove(output_path)
+                            if temp_file and temp_file.exists():
+                                temp_file.unlink()
+                            elif output_path.exists():
+                                output_path.unlink()
                         except Exception:
                             pass
                         raise RuntimeError("download sha256 mismatch")
+
+                # Decompress if needed
+                if is_compressed_relay and temp_file and temp_file.exists():
+                    try:
+                        compression.decompress_file(
+                            str(temp_file), str(output_path), final_comp_type
+                        )
+                    except Exception as e:
+                        raise RuntimeError(f"Decompression failed: {e}") from e
+                    finally:
+                        try:
+                            temp_file.unlink()
+                        except OSError:
+                            pass
+
                 try:
                     if self._progress_cb:
                         self._progress_cb(
@@ -785,14 +854,26 @@ class ChatController:
                 http.close()
             return
 
+        # MP2 Path
         from ..core.token_store import TokenStore
+
+        # Setup temp file if MP2 compression is indicated
+        if is_compressed:
+            try:
+                fd, t_path = tempfile.mkstemp(prefix="tui_mp2_down_", suffix=".tmp")
+                os.close(fd)
+                temp_file = Path(t_path)
+                target_file = temp_file
+            except OSError:
+                target_file = output_path
+                is_compressed = False
 
         store = TokenStore(_state_dir() / "tokens.json")
         client = MP2Client(self.host, self.port, timeout=30.0, token_store=store)
         try:
             client.ensure_access_token(self.username)
             bytes_done = 0
-            with open(output_path, "wb") as f:
+            with open(target_file, "wb") as f:
                 for chunk in client.download_file(self.username, room, event_id):
                     f.write(chunk)
                     bytes_done += len(chunk)
@@ -815,6 +896,21 @@ class ChatController:
                             )
                         except Exception:
                             pass
+
+            # Decompress if needed (MP2)
+            if is_compressed and temp_file and temp_file.exists():
+                try:
+                    compression.decompress_file(
+                        str(temp_file), str(output_path), compression_type
+                    )
+                except Exception as e:
+                    raise RuntimeError(f"Decompression failed: {e}") from e
+                finally:
+                    try:
+                        temp_file.unlink()
+                    except OSError:
+                        pass
+
             try:
                 if self._progress_cb:
                     self._progress_cb(
@@ -830,6 +926,12 @@ class ChatController:
                 pass
             self._test_sync.notify_sync(SyncEvent.FILE_DOWNLOAD_COMPLETE)
         except Exception as e:
+            # Cleanup temp if failed
+            if temp_file and temp_file.exists():
+                try:
+                    temp_file.unlink()
+                except OSError:
+                    pass
             raise RuntimeError(str(e))
         finally:
             try:
@@ -886,9 +988,9 @@ class ChatController:
     def get_fingerprint(self) -> str | None:
         """Get the E2EE identity key fingerprint."""
         try:
-            config_dir = Path(
-                os.environ.get("MING_DRLMS_CONFIG_DIR") or (Path.home() / ".drlms")
-            )
+            from ..config_paths import get_config_dir
+
+            config_dir = get_config_dir()
             e2ee_path = config_dir / "e2ee_keys.json"
             if not e2ee_path.exists():
                 return None
@@ -1475,6 +1577,9 @@ class ChatController:
                                                 if meta.get("file_id") is not None
                                                 else None
                                             ),
+                                            compression_type=int(
+                                                meta.get("compression_type") or 0
+                                            ),  # Phase 23
                                         )
                                     except Exception:
                                         file_meta = None

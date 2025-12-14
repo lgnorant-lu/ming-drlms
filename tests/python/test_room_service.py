@@ -54,9 +54,19 @@ class DummyClient:
 
     # File upload/download
     def publish_file_begin(
-        self, user, room, filename, size, sha_hex, *, ephemeral=False
+        self,
+        user,
+        room,
+        filename,
+        size,
+        sha_hex,
+        *,
+        ephemeral=False,
+        compression_type=0,
     ):  # type: ignore[override]
-        self.file_begin_calls.append((user, room, filename, size, sha_hex, ephemeral))
+        self.file_begin_calls.append(
+            (user, room, filename, size, sha_hex, ephemeral, compression_type)
+        )
         return "up-1"
 
     def publish_file_chunk(self, upload_id, chunk, offset, is_last):  # type: ignore[override]

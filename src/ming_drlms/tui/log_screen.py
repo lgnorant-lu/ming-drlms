@@ -93,7 +93,9 @@ class LogScreen(Screen):
     def _update_paths(self) -> None:
         py_dir = log.get_log_dir()
         if not py_dir:
-            py_dir = Path.home() / ".drlms" / "logs"
+            from ...config_paths import get_config_dir
+
+            py_dir = get_config_dir() / "logs"
         c_dir = os.environ.get("DRLMS_C_LOG_DIR")
         if not c_dir:
             c_dir = os.environ.get("DRLMS_LOG_DIR")
@@ -108,7 +110,9 @@ class LogScreen(Screen):
     def action_save_log(self) -> None:
         # Quick-save: copy current main log file to a timestamped file
         try:
-            log_dir = log.get_log_dir() or (Path.home() / ".drlms" / "logs")
+            from ...config_paths import get_config_dir
+
+            log_dir = log.get_log_dir() or (get_config_dir() / "logs")
             src = log_dir / "drlms.log"
             if not src.exists():
                 self.app.notify("No log file to save yet", severity="warning")
