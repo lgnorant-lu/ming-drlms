@@ -69,14 +69,31 @@ def register_file_commands(handler: Any) -> None:
         parts = args.split()
         if not parts:
             handler.screen.show_system_message(
-                "Usage: /download <event_id> [output_path]"
+                "Usage: /download <event_id> [output_path] [-c <0|1|2>]"
             )
             return
+
+        # 解析压缩参数
+        compression_type = 0
+        if "-c" in parts:
+            try:
+                c_idx = parts.index("-c")
+                if c_idx + 1 < len(parts):
+                    compression_type = int(parts[c_idx + 1])
+                    # 移除 -c 及其值
+                    parts.pop(c_idx + 1)
+                    parts.pop(c_idx)
+            except (ValueError, IndexError):
+                handler.screen.show_system_message(
+                    "Invalid compression value. Use 0 (none), 1 (zlib), or 2 (zstd)"
+                )
+                return
+
         try:
             event_id = int(parts[0])
         except Exception:
             handler.screen.show_system_message(
-                "Usage: /download <event_id> [output_path]"
+                "Usage: /download <event_id> [output_path] [-c <0|1|2>]"
             )
             return
         if len(parts) > 1:
@@ -92,7 +109,7 @@ def register_file_commands(handler: Any) -> None:
         handler.screen.show_system_message(f"Downloading {out_path.name}...")
 
         def _worker():
-            handler.screen._download_worker(event_id, out_path, None)
+            handler.screen._download_worker(event_id, out_path, None, compression_type)
 
         handler.screen.app.run_worker(_worker, exclusive=False, thread=True)
 

@@ -418,8 +418,13 @@ static void rooms_instance_trim_ephemeral(RoomInstance *instance) {
         if (oldest->type == EPHEMERAL_EVENT_TEXT) {
             free(oldest->payload.text.data);
         } else if (oldest->type == EPHEMERAL_EVENT_FILE) {
-            if (oldest->payload.file.path)
-                remove(oldest->payload.file.path);
+            if (oldest->payload.file.path) {
+                // Phase 23-C: 添加文件删除失败日志
+                if (remove(oldest->payload.file.path) != 0) {
+                    LOG_WARN("Failed to remove ephemeral file: %s (errno=%d)",
+                             oldest->payload.file.path, errno);
+                }
+            }
             safe_free(oldest->payload.file.path);
         }
         free(oldest);

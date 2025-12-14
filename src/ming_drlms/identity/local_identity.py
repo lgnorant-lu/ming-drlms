@@ -198,9 +198,7 @@ class LocalIdentityManager:
         if self._keystore is None:
             from ..core.e2ee_store import LocalKeyStore
 
-            self._keystore = LocalKeyStore(
-                store_path=self._identity_dir / "e2ee_keys.json"
-            )
+            self._keystore = LocalKeyStore(path=self._identity_dir / "e2ee_keys.json")
         return self._keystore
 
     def has_identity(self, username: Optional[str] = None) -> bool:
@@ -292,7 +290,6 @@ class LocalIdentityManager:
 
     def _persist_to_keystore(self, identity: LocalIdentity, username: str) -> None:
         """Persist identity to LocalKeyStore for E2EE compatibility."""
-        from ..core.e2ee_store import LocalKeyState
         from ..core.mproto_v2_client import SignalKeyPair
 
         ks = self._ensure_keystore()
@@ -304,13 +301,16 @@ class LocalIdentityManager:
             private_key=identity.private_key,
         )
 
-        state = LocalKeyState(
-            identity_key=identity_key,
+        # Use store_keys method instead of creating LocalKeyState directly
+        # LocalKeyState requires 7 fields, so let store_keys handle the initialization
+        ks.store_keys(
+            username,
             registration_id=identity.registration_id,
             device_id=identity.device_id,
+            identity=identity_key,
+            signed_pre_key=None,  # Will be generated when needed
+            pre_keys=[],  # Empty initially
         )
-
-        ks.store_keys(username, state)
 
     def _save_identity(self, identity: LocalIdentity) -> None:
         """Save identity to local file."""

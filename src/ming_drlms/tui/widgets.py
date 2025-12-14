@@ -52,11 +52,13 @@ class FileMessage(Static):
         self.file_meta = event.file
 
     def render(self) -> Text:
-        icon = "📄"
-        size_str = f"{self.file_meta.size_bytes / 1024:.1f}KB"
-        eph = " (ephemeral)" if getattr(self.file_meta, "ephemeral", False) else ""
-        return Text(
-            f"{icon} {self.file_meta.filename} ({size_str}){eph}\n[Click to Download]",
+        """Render file message."""
+        file = self.file_meta
+        size = file.size_bytes / (1024 * 1024)
+        # Phase 23-C: 添加阅后即焚视觉标识
+        ephemeral_marker = "⌛ " if getattr(self.event, "ephemeral", False) else ""
+        return Text.from_markup(
+            f"{ephemeral_marker}📎 [bold]{file.filename}[/bold] ({size:.2f} MB)\n[Click to Download]",
             style="bold",
         )
 
@@ -487,6 +489,7 @@ class UnifiedStatusBar(Horizontal):
         super().__init__(**kwargs)
         self._connection_widget: Optional[Static] = None
         self._e2ee_widget: Optional[Static] = None
+        self._relay_widget: Optional[Static] = None  # Phase 23-B
         self._sync_widget: Optional[Static] = None
 
     def compose(self):
@@ -494,10 +497,14 @@ class UnifiedStatusBar(Horizontal):
             "⚡ 未连接", classes="status-item connection-status disconnected"
         )
         self._e2ee_widget = Static("", classes="status-item e2ee-status")
+        self._relay_widget = Static(
+            "", classes="status-item relay-status"
+        )  # Phase 23-B
         self._sync_widget = Static("", classes="status-item sync-status")
 
         yield self._connection_widget
         yield self._e2ee_widget
+        yield self._relay_widget  # Phase 23-B
         yield self._sync_widget
 
     def update_connection(self, state: "ConnectionState") -> None:
@@ -517,6 +524,14 @@ class UnifiedStatusBar(Horizontal):
 
         text, css_class = state_display.get(state, ("⚡ 未知", "disconnected"))
 
+        self._connection_widget.update(text)
+        self._connection_widget.remove_class("connected", "disconnected", "connecting")
+        self._connection_widget.add_class(css_class)
+
+    def set_connection_status(self, text: str, css_class: str) -> None:
+        """Set connection status manually (allows custom text)."""
+        if not self._connection_widget:
+            return
         self._connection_widget.update(text)
         self._connection_widget.remove_class("connected", "disconnected", "connecting")
         self._connection_widget.add_class(css_class)
@@ -545,3 +560,9 @@ class UnifiedStatusBar(Horizontal):
             self._sync_widget.update(f"✓ {status.message_count} 条消息 ({time_str})")
         else:
             self._sync_widget.update("")
+
+    def update_relay_status(self, text: str) -> None:
+        """Update relay status display (Phase 23-B)."""
+        if not self._relay_widget:
+            return
+        self._relay_widget.update(text)

@@ -579,6 +579,9 @@ class MP2Client:
                                 sha256_hex=event.file.sha256_hex or "",
                                 ephemeral=bool(event.file.ephemeral),
                                 timestamp=event.file.timestamp or "",
+                                compression_type=int(
+                                    getattr(event.file, "compression_type", 0)
+                                ),
                             )
                     except Exception:
                         file_meta = None
@@ -793,6 +796,9 @@ class MP2Client:
                                 sha256_hex=event.file.sha256_hex or "",
                                 ephemeral=bool(event.file.ephemeral),
                                 timestamp=event.file.timestamp or "",
+                                compression_type=int(
+                                    getattr(event.file, "compression_type", 0)
+                                ),
                             )
                     except Exception:
                         file_meta = None

@@ -46,6 +46,140 @@ tls = false
 
 ---
 
+## 跨平台连接配置
+
+### WSL/Linux 连接 Windows 服务器
+
+当 MP2 服务器运行在 Windows，而客户端在 WSL 或 Linux 时，需要额外配置。
+
+#### 1. 网络配置
+
+**获取 Windows 主机 IP**（在 WSL 中执行）:
+
+<Tabs>
+  <Tab title="WSL 2">
+    ```bash
+    # 查看 WSL 网关（即 Windows 主机 IP）
+    grep nameserver /etc/resolv.conf | awk '{print $2}'
+    # 输出示例: 10.255.255.254
+    ```
+  </Tab>
+  <Tab title="物理 Linux 机器">
+    ```bash
+    # 查看 Windows 服务器的实际 IP
+    # 例如通过 ping 或网络管理工具获取
+    # 示例: 192.168.1.100
+    ```
+  </Tab>
+</Tabs>
+
+**配置客户端连接此 IP**:
+
+<Tabs>
+  <Tab title="环境变量（临时）">
+    ```bash
+    export DRLMS_MP2_HOST=10.255.255.254  # 替换为实际 IP
+    export DRLMS_MP2_PORT=15035
+    ```
+  </Tab>
+  <Tab title="配置文件（永久）">
+    编辑 `~/.drlms/config.toml`:
+   ```toml
+    [backend.mp2]
+    host = "10.255.255.254"  # 替换为实际 IP
+    port = 15035
+    tls = false
+    ```
+  </Tab>
+</Tabs>
+
+#### 2. Windows 防火墙配置
+
+**问题**: 即使服务器监听 `0.0.0.0:15035`，Windows 防火墙默认阻止外部连接，导致 WSL 连接被拒绝。
+
+**解决**: 添加入站规则允许 15035 端口。
+
+**步骤** (Windows PowerShell 管理员):
+
+1. 打开管理员 PowerShell:
+   - 按 `Win + X`
+   - 选择 "Windows PowerShell (管理员)" 或 "终端 (管理员)"
+
+2. 执行防火墙规则添加命令:
+   ```powershell
+   New-NetFirewallRule -DisplayName "DRLMS MP2 Server (WSL Access)" `
+       -Direction Inbound `
+       -Action Allow `
+       -Protocol TCP `
+       -LocalPort 15035 `
+       -Profile Any
+   ```
+
+3. 验证规则已创建:
+   ```powershell
+   Get-NetFirewallRule -DisplayName "DRLMS MP2 Server (WSL Access)"
+   ```
+
+**预期输出**:
+```
+DisplayName : DRLMS MP2 Server (WSL Access)
+Enabled     : True
+Direction   : Inbound
+Action      : Allow
+```
+
+#### 3. 测试连接
+
+**在 WSL/Linux 中测试端口连通性**:
+
+<Tabs>
+  <Tab title="使用 nc (推荐)">
+    ```bash
+    nc -zv <Windows_IP> 15035
+    # 成功输出: Connection to <IP> 15035 port [tcp/*] succeeded!
+    ```
+  </Tab>
+  <Tab title="使用 telnet">
+    ```bash
+    telnet <Windows_IP>15035
+    # 成功: 显示空白屏幕（按 Ctrl+] 然后 quit 退出）
+    ```
+  </Tab>
+  <Tab title="使用 bash">
+    ```bash
+    timeout 3 bash -c '</dev/tcp/<Windows_IP>/15035' && \
+        echo "Port is open" || echo "Port is closed"
+    ```
+  </Tab>
+</Tabs>
+
+#### 4. 创建用户身份
+
+WSL 用户首次连接前需要创建本地身份：
+
+```bash
+# 创建身份（Relay 模式兼容层）
+ming-drlms identity create -u <用户名>
+
+# 查看身份
+ming-drlms identity show
+```
+
+<Note>
+MP2 模式使用 Relay 的本地身份系统。首次连接时，客户端会自动向服务器注册用户。
+</Note>
+
+#### 5. 常见错误排查
+
+| 错误信息 | 原因 | 解决方案 |
+|---------|------|---------|
+| `Connection refused` | 防火墙阻止 | 执行上述防火墙规则添加（步骤 2） |
+| `No route to host` | WSL 网络配置异常 | 重启 WSL: `wsl --shutdown` (Windows端) |
+| `Timeout` | 服务器未运行 | 启动服务器: `ming-drlms server up` |
+| `server did not return tokens` | 用户身份未创建 | 执行步骤 4 创建身份 |
+
+---
+
 ## 启动服务器
 
 ### 快速启动
