@@ -762,7 +762,16 @@ class MP2Client:
 
         def _event_iter() -> Generator[RoomEvent, None, None]:
             while True:
-                frame = read_frame(sock)
+                try:
+                    frame = read_frame(sock)
+                except socket.timeout:
+                    # Keep-alive timeout: just continue loop to keep listening
+                    # In a real impl we might want to send a PING here if idle too long
+                    continue
+                except (OSError, ConnectionError) as e:
+                    logger.error("connection error during subscribe: %s", e)
+                    break
+
                 if frame.msg_type == common_pb2.MSG_TYPE_ROOM_EVENT:
                     # Debug trace of raw frame payload for diagnostics
                     try:
