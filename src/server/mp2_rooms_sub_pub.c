@@ -7,6 +7,7 @@
 #include "federation.h"
 #include "rooms.h"
 #include "rooms_internal.h"
+#include "logger.h"
 
 #include <openssl/sha.h>
 #include <ctype.h>
@@ -69,11 +70,17 @@ static int mp2_rooms_perform_subscribe(platform_socket_t client_fd,
     }
     rooms_assign_owner_if_empty(room, room_name, username, client_fd);
 
+    LOG_INFO("[Phase24] Subscribe: calling rooms_add_subscriber for user=%s "
+             "room=%s fd=%d",
+             username ? username : "NULL", room_name ? room_name : "NULL",
+             (int)client_fd);
     if (rooms_add_subscriber(room, assigned_instance, client_fd, username) !=
         0) {
         mp2_protocol_dbgf("failed to add subscriber");
         return -3;
     }
+    LOG_INFO("[Phase24] Subscribe: rooms_add_subscriber SUCCESS for user=%s",
+             username ? username : "NULL");
 
     char instance_id_hex[33];
     rooms_uuid_to_hex(&assigned_uuid, instance_id_hex);

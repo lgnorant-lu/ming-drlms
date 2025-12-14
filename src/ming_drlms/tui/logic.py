@@ -513,6 +513,80 @@ class ChatController:
                 )
             except Exception:
                 pass
+
+            # Phase 24: Ensure Sender Key distribution before sending (CRITICAL FIX)
+            # This is the FALLBACK approach: distribute sender keys before every send
+            # to ensure recipients can decrypt, since MEMBER_JOINED events are unreliable.
+            if self.client and self.client.room:
+                try:
+                    # Access the E2E engine directly via _engine attribute
+                    engine = getattr(self.client, "_engine", None)
+                    if engine is not None:
+                        room_name = self.client.room
+                        # Phase 24 FIX: Create a new MP2Client connection for member list
+                        # to avoid socket competition with the subscription socket
+                        from ..core.mproto_v2_client import MP2Client
+                        from ..core.token_store import TokenStore
+
+                        try:
+                            # Use TokenStore for proper authentication
+                            token_path = _state_dir() / "tokens.json"
+                            token_store = TokenStore(token_path)
+
+                            temp_client = MP2Client(
+                                host=self.host,
+                                port=self.port,
+                                timeout=5.0,
+                                token_store=token_store,
+                            )
+
+                            # get_room_members uses username to get token
+                            members = temp_client.get_room_members(
+                                self.username, room_name
+                            )
+                            temp_client.close()
+
+                            logger.info(
+                                "Phase 24: Pre-send got %d members for room %s",
+                                len(members) if members else 0,
+                                room_name,
+                            )
+
+                            distributed_count = 0
+                            for member in members:
+                                try:
+                                    uid = getattr(member, "user_id", None)
+                                    if uid and uid != self.username:
+                                        # Distribute our Sender Key to this member
+                                        engine.distribute_sender_key(
+                                            room_name, room_name, uid
+                                        )
+                                        distributed_count += 1
+                                        logger.info(
+                                            "Phase 24: Pre-send distributed to %s", uid
+                                        )
+                                except Exception as e:
+                                    logger.debug(
+                                        "Phase 24: Pre-send dist failed for %s: %s",
+                                        uid if "uid" in locals() else "unknown",
+                                        e,
+                                    )
+
+                            if distributed_count > 0:
+                                logger.info(
+                                    "Phase 24: Pre-send distribution: %d members in %s",
+                                    distributed_count,
+                                    room_name,
+                                )
+                        except Exception as e:
+                            logger.warning(
+                                "Phase 24: Pre-send member fetch error: %s", e
+                            )
+                except Exception as e:
+                    logger.warning(
+                        "Phase 24: Pre-send distribution error: %s", e, exc_info=True
+                    )
+
             try:
                 self.client.publish(message.encode("utf-8"), ephemeral=use_ephemeral)
                 self._test_sync.notify_sync(SyncEvent.MESSAGE_SENT)

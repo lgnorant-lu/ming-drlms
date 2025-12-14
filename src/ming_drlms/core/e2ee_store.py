@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, Mapping, Optional, Tuple
 
 from .mproto_v2_client import SignalKeyPair, SignalPreKey, SignalSignedPreKey
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "LocalKeyState",
@@ -508,4 +511,32 @@ class LocalKeyStore:
         tmp.write_text(
             json.dumps(self._data, ensure_ascii=False, indent=2), encoding="utf-8"
         )
-        tmp.replace(path)
+        # Windows robustness: try/except with small sleep for replace
+        for i in range(5):
+            try:
+                tmp.replace(path)
+                return
+            except PermissionError:
+                if i == 4:
+                    # Improve error message
+                    import traceback
+
+                    logger.error(f"Failed to persist keys to {path} after 5 attempts.")
+                    try:
+                        logger.error(f"Last traceback: {traceback.format_exc()}")
+                    except Exception:
+                        pass
+                    raise
+                import time
+
+                time.sleep(0.1)
+                try:
+                    # Try proactive delete on Windows if replace fails (it might be atomic issue)
+                    # Note: on Windows os.replace is atomic only if dest doesn't exist or we have rights
+                    # but if file is open, we can't remove it either. Wait is best bet.
+                    if path.exists():
+                        # Optional: check if we can remove it. But replace should do that.
+                        # We just wait.
+                        pass
+                except Exception:
+                    pass

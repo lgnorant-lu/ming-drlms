@@ -506,7 +506,9 @@ class ChatScreen(Screen):
                 if state is not None:
                     has_keys = True
                     # E2EE enabled
-                    self.query_one(UnifiedStatusBar).update_e2ee(True)
+                    widget = self.query_one("#e2ee-status")
+                    widget.update("🔒")
+                    widget.add_class("encrypted")
             try:
                 logger.debug(
                     "ChatScreen._check_e2ee: user=%s config_dir=%s e2ee_path=%s exists=%s has_keys=%s",
@@ -524,7 +526,9 @@ class ChatScreen(Screen):
         # E2EE not available (only if keys are missing or errors occurred)
         if not has_keys:
             try:
-                self.query_one(UnifiedStatusBar).update_e2ee(False)
+                widget = self.query_one("#e2ee-status")
+                widget.update("🔓")
+                widget.remove_class("encrypted")
             except Exception:
                 pass
 
@@ -535,18 +539,12 @@ class ChatScreen(Screen):
 
     def _update_ephemeral_mode_indicator(self) -> None:
         try:
-            bar = self.query_one(UnifiedStatusBar)
-            # UnifiedStatusBar handles this in update_e2ee if we pass info,
-            # but here we might want to update unrelated to e2ee key check?
-            # Actually e2ee widget in UnifiedStatusBar handles text.
-            # Let's just reuse update_e2ee if we can.
-            # Or assume _check_e2ee covers it.
-
+            widget = self.query_one("#e2ee-status")
             ephemeral = bool(getattr(self.controller, "_ephemeral", False))
             # Use CSS class to determine lock state
-            lock = "🔒" if "encrypted" in bar.classes else "🔓"
+            lock = "🔒" if "encrypted" in widget.classes else "🔓"
             suffix = " e" if ephemeral else ""
-            bar.update_e2ee(f"{lock}{suffix}")
+            widget.update(f"{lock}{suffix}")
         except Exception:
             pass
 

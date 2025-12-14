@@ -802,49 +802,92 @@ class MP2Client:
                             )
                     except Exception:
                         file_meta = None
-                    ciphertext = bytes(event.payload.ciphertext)
-                    payload_type = (
-                        int(event.payload.type)
-                        if hasattr(event.payload, "type")
-                        else None
+
+                    # Phase 24 FIX: Handle events WITH and WITHOUT payload separately
+                    # MEMBER_JOINED/MEMBER_LEFT events only have presence, no payload
+                    has_payload = getattr(event, "payload", None) and getattr(
+                        getattr(event, "payload", None), "ciphertext", None
                     )
-                    sender = event.payload.sender or None
-                    sender_device_id = (
-                        int(event.payload.sender_device_id)
-                        if getattr(event.payload, "sender_device_id", 0)
-                        else None
-                    )
-                    sender_registration_id = (
-                        int(event.payload.sender_registration_id)
-                        if getattr(event.payload, "sender_registration_id", 0)
-                        else None
-                    )
-                    pre_key_id = (
-                        int(event.payload.pre_key_id)
-                        if getattr(event.payload, "pre_key_id", 0)
-                        else None
-                    )
-                    signed_pre_key_id = (
-                        int(event.payload.signed_pre_key_id)
-                        if getattr(event.payload, "signed_pre_key_id", 0)
-                        else None
-                    )
-                    group_id = getattr(event.payload, "group_id", "") or None
-                    sender_key_iteration = (
-                        int(event.payload.sender_key_iteration)
-                        if getattr(event.payload, "sender_key_iteration", 0)
-                        else None
-                    )
+
+                    if has_payload:
+                        ciphertext = bytes(event.payload.ciphertext)
+                        payload_type = (
+                            int(event.payload.type)
+                            if hasattr(event.payload, "type")
+                            else None
+                        )
+                        sender = event.payload.sender or None
+                        sender_device_id = (
+                            int(event.payload.sender_device_id)
+                            if getattr(event.payload, "sender_device_id", 0)
+                            else None
+                        )
+                        sender_registration_id = (
+                            int(event.payload.sender_registration_id)
+                            if getattr(event.payload, "sender_registration_id", 0)
+                            else None
+                        )
+                        pre_key_id = (
+                            int(event.payload.pre_key_id)
+                            if getattr(event.payload, "pre_key_id", 0)
+                            else None
+                        )
+                        signed_pre_key_id = (
+                            int(event.payload.signed_pre_key_id)
+                            if getattr(event.payload, "signed_pre_key_id", 0)
+                            else None
+                        )
+                        group_id = getattr(event.payload, "group_id", "") or None
+                        sender_key_iteration = (
+                            int(event.payload.sender_key_iteration)
+                            if getattr(event.payload, "sender_key_iteration", 0)
+                            else None
+                        )
+                    else:
+                        # Presence-only event (MEMBER_JOINED, MEMBER_LEFT)
+                        ciphertext = b""
+                        payload_type = None
+                        sender = None
+                        sender_device_id = None
+                        sender_registration_id = None
+                        pre_key_id = None
+                        signed_pre_key_id = None
+                        group_id = None
+                        sender_key_iteration = None
+
                     presence_data: dict[str, Any] | None = None
                     try:
                         if getattr(event, "presence", None):
-                            presence_data = {
-                                "user_id": event.presence.member.user_id,
-                                "device_id": int(event.presence.member.device_id),
-                                "timestamp": event.presence.member.timestamp,
-                                "instance_id": event.presence.instance_id,
-                            }
-                    except Exception:
+                            # Phase 24: Log presence parsing for debugging (use INFO to ensure visibility)
+                            logger.info(
+                                "Phase 24: Raw presence object: %r, has_member=%s",
+                                event.presence,
+                                hasattr(event.presence, "member"),
+                            )
+                            if hasattr(event.presence, "member"):
+                                logger.info(
+                                    "Phase 24: member object: %r, user_id=%r",
+                                    event.presence.member,
+                                    getattr(event.presence.member, "user_id", None)
+                                    if event.presence.member
+                                    else None,
+                                )
+                            if (
+                                hasattr(event.presence, "member")
+                                and event.presence.member
+                            ):
+                                presence_data = {
+                                    "user_id": event.presence.member.user_id,
+                                    "device_id": int(event.presence.member.device_id),
+                                    "timestamp": event.presence.member.timestamp,
+                                    "instance_id": event.presence.instance_id,
+                                }
+                                logger.info(
+                                    "Phase 24: Created presence_data: %r", presence_data
+                                )
+                    except Exception as e:
+                        # Phase 24: Log parse errors instead of silently swallowing
+                        logger.warning("Phase 24: Failed to parse presence: %s", e)
                         presence_data = None
                     yield RoomEvent(
                         room_name=event.room_name,

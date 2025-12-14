@@ -254,6 +254,65 @@ ming-drlms e2ee generate-keys -u <用户名> --force
 ming-drlms chat publish-bundle
 ```
 
+### Sender Key 缺失（消息显示为二进制）
+
+```
+症状: 消息显示为 [binary XX bytes] 而不是明文
+错误码: -1008 (NO_VALID_KEY)
+```
+
+**原因**: 新用户加入房间时缺少现有成员的 Sender Key
+
+**解决**（Phase 24 自动修复）：
+
+1. 系统自动检测并记录缺失的 Sender Key
+2. 等待几秒钟，对方发送下一条消息时会自动分发 Key
+3. 如仍无法解密，尝试退出并重新加入房间
+
+**验证日志**:
+
+<Tabs>
+  <Tab title="Linux/WSL">
+    ```bash
+    # 查看缺失的 Sender Key
+    grep "missing sender_key" ~/.drlms/logs/drlms.log
+
+    # 查看收到的 Sender Key Distribution
+    grep "process_sender_key_distribution" ~/.drlms/logs/drlms.log
+
+    # 查看 E2EE 详细状态
+    grep "E2EE" ~/.drlms/logs/drlms.log | tail -20
+    ```
+  </Tab>
+  <Tab title="Windows (PowerShell)">
+    ```powershell
+    # 查看缺失的 Sender Key
+    Select-String -Path "$env:APPDATA\DRLMS\logs\drlms.log" -Pattern "missing sender_key"
+
+    # 查看收到的 Sender Key Distribution
+    Select-String -Path "$env:APPDATA\DRLMS\logs\drlms.log" -Pattern "process_sender_key_distribution"
+
+    # 查看 E2EE 详细状态
+    Select-String -Path "$env:APPDATA\DRLMS\logs\drlms.log" -Pattern "E2EE" | Select-Object -Last 20
+    ```
+  </Tab>
+  <Tab title="Windows (CMD)">
+    ```cmd
+    REM 查看缺失的 Sender Key
+    findstr "missing sender_key" "%APPDATA%\DRLMS\logs\drlms.log"
+
+    REM 查看收到的 Sender Key Distribution
+    findstr "process_sender_key_distribution" "%APPDATA%\DRLMS\logs\drlms.log"
+    ```
+  </Tab>
+</Tabs>
+
+**手动修复**（旧版本）：
+
+1. 退出当前房间，重新加入
+2. 或等待对方发送下一条消息
+3. 或重启双方客户端
+
 ### 密钥变更警告
 
 收到警告时：

@@ -234,14 +234,14 @@ class E2EEngine:
                 ),  # RoomEvent has room_name, SignalEncryptedPayload does not
                 peer,
                 device_id,
-                len(event.ciphertext) if hasattr(event.ciphertext, "__len__") else None,
-                event.type,
+                len(event.payload) if hasattr(event, "payload") else None,
+                event.payload_type,
             )
         except Exception:
             pass
         cipher = Ciphertext(
-            ciphertext=event.ciphertext,
-            message_type=lib_type_from_proto(event.type),
+            ciphertext=event.payload,
+            message_type=lib_type_from_proto(event.payload_type),
             registration_id=int(event.sender_registration_id or 0),
             pre_key_id=int(event.pre_key_id or 0),
             signed_pre_key_id=int(event.signed_pre_key_id or 0),
@@ -600,6 +600,14 @@ class E2EEngine:
                 )
         except Exception:
             pass
+
+        logger.info(
+            "Phase 24: Processing Sender Key from %s for room %s (key_id=%s)",
+            distribution.sender,
+            distribution.room_name,
+            distribution.sender_key_id,
+        )
+
         record = SenderKeyRecord(
             room_name=distribution.room_name,
             group_id=distribution.group_id,
@@ -620,10 +628,12 @@ class E2EEngine:
     ) -> None:
         if target_user == self._username:
             return
-        cache_key = self._group_distribution_key(room_name, group_id)
-        sent = self._group_distribution_targets.setdefault(cache_key, set())
-        if target_user in sent:
-            return
+
+        # Phase 24 FIX: Remove deduplication check to ensure key is ALWAYS distributed
+        # Previous bug: if bob joins empty room (0 members), cache says "distributed to []"
+        # Then alice joins, but bob never redistributes because cache thinks it's done
+        # Solution: Always distribute, let network/protocol handle duplicates if any
+
         record = self._ensure_sender_key(room_name, group_id)
         distribution = SignalSenderKeyDistribution(
             room_name=room_name,
@@ -635,23 +645,160 @@ class E2EEngine:
             sender_key_id=record.sender_key_id,
             sender_key_iteration=record.sender_key_iteration,
         )
-        code, message = self._client.e2ee_sender_key_push(
-            self._username, target_user, distribution
-        )
+
+        # Phase 24 CRITICAL FIX: Use a SEPARATE MP2Client connection for sender key push
+        # The main self._client is used by the subscription loop, so we cannot use it
+        # for request-response operations without causing socket data corruption.
+        try:
+            from .mproto_v2_client import MP2Client
+
+            temp_client = MP2Client(
+                host=self._client.host,
+                port=self._client.port,
+                timeout=10.0,
+                token_store=self._client._token_store,
+            )
+            try:
+                code, message = temp_client.e2ee_sender_key_push(
+                    self._username, target_user, distribution
+                )
+            finally:
+                temp_client.close()
+        except Exception as e:
+            logger.warning(
+                "Phase 24: distribute_sender_key temp client failed: %s, retrying with main client",
+                e,
+            )
+            # Fallback to main client (may still fail due to socket contention)
+            code, message = self._client.e2ee_sender_key_push(
+                self._username, target_user, distribution
+            )
+
         if code != 0:
             raise SignalBridgeError(
                 f"sender key push to {target_user} failed: {code} {message}"
             )
         try:
-            logger.debug(
-                "E2EE distribute_sender_key: room=%s gid=%s target=%s key_id=%s iter=%s code=%s",
+            logger.info(
+                "Phase 24: Distributed Sender Key: room=%s target=%s key_id=%s iter=%s",
                 room_name,
-                group_id,
                 target_user,
                 record.sender_key_id,
                 record.sender_key_iteration,
-                code,
             )
         except Exception:
             pass
-        sent.add(target_user)
+
+    # -------------------------------------------------------------------------
+    # Phase 24: Sender Key 自动请求机制
+    # -------------------------------------------------------------------------
+
+    def request_sender_keys_for_room(
+        self,
+        room_name: str,
+        group_id: str,
+        members: list[tuple[str, int]],
+    ) -> None:
+        """Request Sender Keys from all room members.
+
+        Called when subscribing to a room to ensure we can decrypt messages
+        from all existing members. Phase 24 MVP records missing keys and
+        logs warnings; automatic distribution happens when members next send.
+
+        Args:
+            room_name: Room name
+            group_id: Group ID (usually same as room_name)
+            members: List of (username, device_id) tuples
+        """
+        missing_members: list[tuple[str, int]] = []
+        for username, device_id in members:
+            if username == self._username:
+                continue
+
+            index = f"{room_name}|{group_id}|{username}|{device_id}"
+            if index in self._group_sender_keys:
+                try:
+                    logger.debug(
+                        "E2EE already have sender_key: room=%s user=%s dev=%s",
+                        room_name,
+                        username,
+                        device_id,
+                    )
+                except Exception:
+                    pass
+                continue
+
+            missing_members.append((username, device_id))
+            try:
+                logger.info(
+                    "E2EE missing sender_key: room=%s user=%s dev=%s",
+                    room_name,
+                    username,
+                    device_id,
+                )
+            except Exception:
+                pass
+
+        if missing_members:
+            try:
+                logger.warning(
+                    "E2EE room=%s missing sender_keys from %d members: %s",
+                    room_name,
+                    len(missing_members),
+                    missing_members[:5],
+                )
+            except Exception:
+                pass
+
+    def handle_sender_key_request(
+        self,
+        room_name: str,
+        group_id: str,
+        requester: str,
+        requester_device: int,
+    ) -> None:
+        """Handle incoming Sender Key Request from another user.
+
+        Automatically re-distribute Sender Key to the requester.
+
+        Args:
+            room_name: Room name
+            group_id: Group ID
+            requester: Username of requester
+            requester_device: Device ID of requester (currently unused)
+        """
+        _ = requester_device  # Reserved for future use
+        try:
+            logger.debug(
+                "E2EE handle_sender_key_request: room=%s from=%s dev=%s",
+                room_name,
+                requester,
+                requester_device,
+            )
+        except Exception:
+            pass
+
+        try:
+            self.distribute_sender_key(
+                room_name=room_name,
+                group_id=group_id,
+                target_user=requester,
+            )
+            try:
+                logger.info(
+                    "E2EE responded to sender_key_request: room=%s to=%s",
+                    room_name,
+                    requester,
+                )
+            except Exception:
+                pass
+        except Exception as e:
+            try:
+                logger.error(
+                    "E2EE failed to handle sender_key_request: room=%s from=%s error=%s",
+                    room_name,
+                    requester,
+                    e,
+                )
+            except Exception:
+                pass

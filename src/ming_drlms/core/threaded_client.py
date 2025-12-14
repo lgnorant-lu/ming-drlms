@@ -429,6 +429,29 @@ class RobustThreadedRoomClient:
                     engine.process_sender_key_distribution if engine else None
                 )
 
+                # Phase 24 FIX: Get room members BEFORE subscribe() to avoid socket competition
+                # The subscribe() call occupies the socket for event streaming, so any
+                # subsequent get_room_members() call would block indefinitely.
+                pre_subscribe_members: list = []
+                if engine is not None:
+                    try:
+                        logger.info(
+                            "Phase 24: Getting room members BEFORE subscribe (socket safe)"
+                        )
+                        pre_subscribe_members = self._client.get_room_members(
+                            self.username, self.room
+                        )
+                        logger.info(
+                            "Phase 24: Got %d members for room %s (pre-subscribe)",
+                            len(pre_subscribe_members) if pre_subscribe_members else 0,
+                            self.room,
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            "Phase 24: Failed to get members before subscribe: %s", e
+                        )
+
+                # Start subscription - socket becomes busy after this
                 events = self._client.subscribe(
                     self.username,
                     self.room,
@@ -437,47 +460,154 @@ class RobustThreadedRoomClient:
                     pong_callback=self._on_pong,
                 )
 
-                # Proactively distribute our sender key to existing members so they
-                # can decrypt subsequent group messages, not only on member-join.
+                # Phase 24: Distribute sender keys using pre-fetched member list
+                # This is the MOST ROBUST approach - don't rely on server events
+                if engine is not None and pre_subscribe_members:
+                    logger.info(
+                        "Phase 24: Distributing Sender Key to %d pre-subscribe members",
+                        len(pre_subscribe_members),
+                    )
+                    member_tuples: list[tuple[str, int]] = []
+                    distributed_count = 0
+                    for member in pre_subscribe_members:
+                        try:
+                            uid = getattr(member, "user_id", None)
+                            dev = getattr(member, "device_id", 1)
+                            if uid:
+                                member_tuples.append((uid, dev))
+                                # Distribute our key to ALL others (健壮性关键)
+                                if uid != self.username:
+                                    try:
+                                        logger.info(
+                                            "Phase 24: Distributing to %s (device %d)",
+                                            uid,
+                                            dev,
+                                        )
+                                        engine.distribute_sender_key(
+                                            self.room, self.room, uid
+                                        )
+                                        distributed_count += 1
+                                        logger.info(
+                                            "Phase 24: Distributed Sender Key to %s (device %d)",
+                                            uid,
+                                            dev,
+                                        )
+                                    except Exception as e:
+                                        logger.error(
+                                            "Phase 24: Failed to distribute Sender Key to %s: %s",
+                                            uid,
+                                            e,
+                                            exc_info=True,
+                                        )
+                        except Exception as e:
+                            logger.error(
+                                "Phase 24: Error processing member: %s",
+                                e,
+                                exc_info=True,
+                            )
+
+                    if distributed_count > 0:
+                        logger.info(
+                            "Phase 24: Successfully distributed Sender Key to %d members in room %s",
+                            distributed_count,
+                            self.room,
+                        )
+
+                    # Phase 24: Request sender keys from all members
+                    if member_tuples:
+                        try:
+                            engine.request_sender_keys_for_room(
+                                room_name=self.room,
+                                group_id=self.room,
+                                members=member_tuples,
+                            )
+                        except Exception as e:
+                            logger.warning(
+                                "Failed to request sender keys: room=%s error=%s",
+                                self.room,
+                                e,
+                            )
+
+                # Phase 24 CRITICAL: After subscribe returns, we are now in the room
+                # We need to distribute our Sender Key to all existing members AGAIN
+                # because the pre-subscribe member list might have been empty/stale
                 if engine is not None:
                     try:
-                        members = self._client.get_room_members(
-                            self.username, self.room
+                        # Get fresh member list after we are subscribed
+                        # Use a separate connection for this
+                        logger.info(
+                            "Phase 24: Post-subscribe sender key distribution starting"
                         )
-                        for member in members:
-                            try:
+                        # Distribute to all known members (from pre-subscribe if available)
+                        if pre_subscribe_members:
+                            for member in pre_subscribe_members:
                                 uid = getattr(member, "user_id", None)
                                 if uid and uid != self.username:
-                                    engine.distribute_sender_key(
-                                        self.room, self.room, uid
-                                    )
-                            except Exception:
-                                # Continue best-effort on individual failures
-                                pass
-                    except Exception:
-                        # Non-fatal: if listing members fails, distribution will still
-                        # happen on member-join or on next publish fallback paths.
-                        pass
+                                    try:
+                                        engine.distribute_sender_key(
+                                            self.room, self.room, uid
+                                        )
+                                        logger.info(
+                                            "Phase 24: Post-subscribe distributed Sender Key to %s",
+                                            uid,
+                                        )
+                                    except Exception as e:
+                                        logger.warning(
+                                            "Phase 24: Post-subscribe distribution to %s failed: %s",
+                                            uid,
+                                            e,
+                                        )
+                    except Exception as e:
+                        logger.warning(
+                            "Phase 24: Post-subscribe distribution failed: %s", e
+                        )
 
                 for event in events:
                     if self._stop_event.is_set():
                         break
 
+                    # Phase 24: Handle new member joins BEFORE decryption
+                    # (MEMBER_JOINED events don't have payload)
+                    if (
+                        engine
+                        and event.kind
+                        == room_pb2.RoomEventKind.ROOM_EVENT_KIND_MEMBER_JOINED
+                    ):
+                        # Phase 24 FIX: presence_data is flat: {'user_id': x, ...}, not nested {'member': {...}}
+                        new_member = None
+                        if event.presence and isinstance(event.presence, dict):
+                            # Direct access since mproto_v2_client flattens the structure
+                            new_member = event.presence.get("user_id")
+                        # Fallback to sender if presence parsing fails
+                        if not new_member:
+                            new_member = event.sender
+
+                        logger.info(
+                            "Phase 24: MEMBER_JOINED event received, new_member=%s (from presence)",
+                            new_member,
+                        )
+                        if new_member and new_member != self.username:
+                            try:
+                                logger.info(
+                                    "Phase 24: Member %s joined, redistributing Sender Key",
+                                    new_member,
+                                )
+                                engine.distribute_sender_key(
+                                    self.room, self.room, new_member
+                                )
+                            except Exception as e:
+                                try:
+                                    logger.warning(
+                                        "Phase 24: Failed to redistribute Sender Key to %s: %s",
+                                        new_member,
+                                        e,
+                                    )
+                                except Exception:
+                                    pass
+
                     # Decrypt if needed
                     if engine and event.payload:
                         try:
-                            # Handle new member joins for sender key distribution
-                            if (
-                                event.kind
-                                == room_pb2.RoomEventKind.ROOM_EVENT_KIND_MEMBER_JOINED
-                                and event.presence is not None
-                            ):
-                                new_member = event.presence.get("user_id", "")
-                                if new_member and new_member != self.username:
-                                    engine.distribute_sender_key(
-                                        self.room, self.room, new_member
-                                    )
-
                             if event.group_id:
                                 group_result = engine.decrypt_group(event)
                                 event = replace(

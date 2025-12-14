@@ -388,6 +388,10 @@ void mp2_rooms_broadcast_presence_event(
             }
             if (sub->fd != PLATFORM_INVALID_SOCKET &&
                 mp2_protocol_is_fd_mp2(sub->fd)) {
+                LOG_INFO("[Phase24] DELIVERING MEMBER_JOINED: fd=%d "
+                         "event_user=%s -> subscriber=%s",
+                         (int)sub->fd, username ? username : "NULL",
+                         (sub->user[0] != '\0') ? sub->user : "<empty>");
                 mp2_protocol_dbgf("[presence] deliver to fd=%d event_user=%s "
                                   "subscriber_user=%s",
                                   (int)sub->fd, username,

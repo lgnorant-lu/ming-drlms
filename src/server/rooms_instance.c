@@ -4,6 +4,7 @@
 #include <time.h>
 
 #include "platform/platform.h"
+#include "logger.h"
 #include "rooms.h"
 #include "rooms_instance.h"
 #include "rooms_internal.h"
@@ -198,9 +199,19 @@ int rooms_inst_add_subscriber(Room *room, RoomInstance *instance,
 
     // Broadcast MEMBER_JOINED event to all existing room subscribers
     if (should_broadcast_join) {
+        LOG_INFO("[Phase24] Broadcasting MEMBER_JOINED: user=%s room=%s "
+                 "total_subs=%zu",
+                 username ? username : "NULL", room->name ? room->name : "NULL",
+                 total_subs_after_join);
         rooms_instance_broadcast_presence_event(room, instance, username,
                                                 new_presence_token, 2,
                                                 &instance->instance_id, fd);
+    } else {
+        LOG_DEBUG("[Phase24] MEMBER_JOINED NOT broadcast: user=%s room=%s "
+                  "user_already_present=%d total_subs=%zu",
+                  username ? username : "NULL",
+                  room->name ? room->name : "NULL", user_already_present,
+                  total_subs_after_join);
     }
 
     return 0;
