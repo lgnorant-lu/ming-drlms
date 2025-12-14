@@ -1,0 +1,285 @@
+---
+title: "Protobuf 多端编译规范"
+description: "DRLMS Protobuf 编译、路径和版本管理规范（C/Python/Relay 三端统一）"
+---
+
+## 概述
+
+本文档定义了 DRLMS 项目中 Protobuf 文件的编译、存储路径和版本管理规范。DRLMS 是一个多端项目，包含：
+
+- **C 端**：C 语言服务器 (`log_collector_server`)
+- **Python 端**：Python CLI/TUI 客户端 (`ming-drlms`)
+- **Relay 端**：Python Relay 服务（复用 Python 端协议）
+
+所有端共享同一套 `.proto` 源文件，确保协议一致性。
+
+---
+
+## 目录结构
+
+### 源文件位置（唯一真相来源）
+
+```
+schema/v2/
+├── auth.proto        # 认证协议
+├── common.proto      # 共享类型定义
+├── e2ee.proto        # E2EE 加密相关
+├── federation.proto  # 联邦协议
+└── room.proto        # 房间/消息协议
+```
+
+> [!IMPORTANT]
+> 所有 `.proto` 源文件必须位于 `schema/v2/` 目录下。版本号 `v2` 表示 M-Proto-v2 协议版本。**禁止在其他位置创建 `.proto` 文件**。
+
+### C 端编译输出
+
+```
+${CMAKE_CURRENT_BINARY_DIR}/generated/schema/v2/
+├── auth.pb-c.c       # C 消息实现
+├── auth.pb-c.h       # C 消息头文件
+├── common.pb-c.c
+├── common.pb-c.h
+├── e2ee.pb-c.c
+├── e2ee.pb-c.h
+├── federation.pb-c.c
+├── federation.pb-c.h
+├── room.pb-c.c
+└── room.pb-c.h
+```
+
+> [!NOTE]
+> C 端编译输出位于 CMake 构建目录内，不提交到 Git。编译由 CMake 自动管理。
+
+### Python 端编译输出
+
+```
+src/ming_drlms/proto/schema/v2/
+├── __init__.py          # 包初始化（空）
+├── auth_pb2.py          # 生成的消息类
+├── auth_pb2_grpc.py     # gRPC 服务存根（保留）
+├── common_pb2.py
+├── common_pb2_grpc.py
+├── e2ee_pb2.py
+├── e2ee_pb2_grpc.py
+├── federation_pb2.py
+├── federation_pb2_grpc.py
+├── message_types.py     # 手写的消息类型映射
+├── room_pb2.py
+└── room_pb2_grpc.py
+```
+
+> [!CAUTION]
+> **禁止手动编辑** `*_pb2.py` 和 `*_pb2_grpc.py` 文件！这些文件由编译器自动生成。`message_types.py` 是手写文件，可以编辑。
+
+### 兼容层（重导出包装）
+
+为保持向后兼容，存在重导出包装文件：
+
+```
+src/schema/v2/
+├── __init__.py
+├── auth_pb2.py      # → from ming_drlms.proto.schema.v2.auth_pb2 import *
+├── common_pb2.py    # → from ming_drlms.proto.schema.v2.common_pb2 import *
+├── federation_pb2.py
+└── room_pb2.py
+```
+
+**作用**：旧代码可能使用 `from schema.v2 import room_pb2` 导入，这些包装文件将请求转发到标准路径 `ming_drlms.proto.schema.v2`，避免修改所有旧代码。
+
+**新代码禁止使用此路径**，应直接使用标准导入。
+
+---
+
+## 编译命令
+
+### 方式 1：CMake 集成编译（推荐）
+
+运行 CMake 构建时自动编译 C 端和 Python 端：
+
+```bash
+# Windows
+cmake -B build_win_ninja_x64 -G Ninja
+cmake --build build_win_ninja_x64 --config Release
+
+# Linux/WSL
+cmake -B build_wsl -G Ninja
+cmake --build build_wsl
+```
+
+CMake 编译流程：
+1. 调用 `protoc-c` 生成 C 端 `.pb-c.c/.pb-c.h`
+2. 调用 `protoc` 生成 Python 端 `*_pb2.py`
+3. 后置命令自动复制 `*_pb2.py` 到 `src/ming_drlms/proto/schema/v2/`
+
+相关 CMake 配置：
+- `src/server/CMakeLists.txt` (L52-164)
+- `cmake/CopyGeneratedProtoPy.cmake`
+
+### 方式 2：手动 Python 编译
+
+当无需构建 C 端时，可手动编译 Python 端：
+
+```bash
+# 安装依赖
+pip install grpcio-tools
+
+# 从项目根目录执行
+python -m grpc_tools.protoc \
+  --proto_path=schema/v2 \
+  --python_out=src/ming_drlms/proto/schema/v2 \
+  --grpc_python_out=src/ming_drlms/proto/schema/v2 \
+  schema/v2/*.proto
+```
+
+---
+
+## 导入规范
+
+### Python 端标准导入
+
+```python
+# 推荐：完整模块路径
+from ming_drlms.proto.schema.v2 import room_pb2
+from ming_drlms.proto.schema.v2 import common_pb2
+
+# 使用消息类
+msg = room_pb2.RoomMessage()
+payload = room_pb2.SignalEncryptedPayload()
+```
+
+### 禁止的导入方式
+
+```python
+# 禁止：使用兼容层（仅为旧代码保留）
+from schema.v2 import room_pb2  # 已废弃
+
+# 禁止：从旧 generated 目录导入（已删除）
+from ming_drlms.core.generated.schema.v2 import room_pb2  # 不存在
+```
+
+### C 端标准 include
+
+```c
+// 包含生成的头文件
+#include "schema/v2/room.pb-c.h"
+#include "schema/v2/common.pb-c.h"
+```
+
+---
+
+## 多端协议一致性
+
+### 验证步骤
+
+修改 `.proto` 文件后，必须验证三端一致性：
+
+1. **重新编译所有端**
+   ```bash
+   # C 端
+   cmake --build build_win_ninja_x64 --target proto_gen
+   
+   # Python 端（如未通过 CMake）
+   python -m grpc_tools.protoc ...
+   ```
+
+2. **运行测试**
+   ```bash
+   pytest tests/python/test_compression.py -v
+   pytest tests/integration/test_compression_flow.py -v
+   ```
+
+3. **检查字段编号一致**
+   - 确保 C 端和 Python 端使用相同的字段编号
+   - 使用 `git diff schema/v2/*.proto` 检查变更
+
+### 常见不一致问题
+
+| 问题 | 症状 | 解决方案 |
+|------|------|----------|
+| 字段编号冲突 | 解码失败 | 检查 `.proto` 中 field number |
+| 编译版本不同 | 类型不匹配 | 删除旧文件重新编译 |
+| 未同步编译 | 缺少字段 | 重新运行 CMake 或手动编译 |
+
+---
+
+## 版本管理
+
+### 提交规范
+
+1. **协议变更**：`.proto` 文件修改后，必须重新编译并一起提交生成的 `*_pb2.py`
+2. **提交消息**：使用 `proto: ` 前缀，例如：
+   - `proto: add compression_type field to SignalEncryptedPayload`
+   - `proto: recompile after room.proto update`
+
+### 向后兼容性
+
+- **新增字段**：使用新字段编号，旧客户端会忽略
+- **删除字段**：标记为 `reserved`，不要重复使用编号
+- **修改字段类型**：需要更新协议版本 (e.g., v2 → v3)
+
+### 字段编号规范
+
+| 范围 | 用途 |
+|------|------|
+| 1-15 | 高频字段（1字节编码） |
+| 16-2047 | 普通字段（2字节编码） |
+| 19000-19999 | 保留（Protobuf 内部使用） |
+
+---
+
+## 测试兼容性
+
+### conftest.py 设置
+
+测试时需要强制使用 Python 实现以确保兼容性：
+
+```python
+# tests/python/conftest.py
+import os
+os.environ.setdefault("PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION", "python")
+```
+
+### 验证生成的文件
+
+```bash
+# 检查 Python 端
+python -c "from ming_drlms.proto.schema.v2 import room_pb2; print('OK')"
+
+# 检查 C 端编译
+cmake --build build_win_ninja_x64 --target proto_gen
+```
+
+---
+
+## 常见问题
+
+### Q: 什么是兼容层/重导出包装？
+
+**A**: `src/schema/v2/room_pb2.py` 等文件是薄包装，内容仅为：
+```python
+from ming_drlms.proto.schema.v2.room_pb2 import *  # re-export
+```
+作用是让旧代码 `from schema.v2 import room_pb2` 继续工作，实际加载的是标准路径的模块。
+
+### Q: 编译后出现导入错误
+
+**A**: 确保 `src/ming_drlms/proto/schema/v2/__init__.py` 存在（可以为空）。
+
+### Q: 字段缺失或类型不匹配
+
+**A**: 
+1. 删除旧的 `*_pb2.py` 和 `*.pb-c.*` 文件
+2. 重新编译
+3. 确保没有多个版本的生成文件
+
+### Q: C 端和 Python 端不兼容
+
+**A**: C 端使用 `protobuf-c`，Python 端使用 `grpcio-tools`。确保都从相同的 `.proto` 源文件编译，且字段编号一致。
+
+---
+
+## 相关文档
+
+- [M-Proto-v2 协议](/zh/architecture/m-proto-v2) - 协议规范
+- [构建指南](/zh/development/building) - 完整构建流程
+- [贡献指南](/zh/development/contributing) - 代码提交规范
