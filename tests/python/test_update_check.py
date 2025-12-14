@@ -11,6 +11,10 @@ sys.path.insert(0, str(_P(__file__).parents[3] / "src"))
 import ming_drlms.update_check as uc
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="XDG_CACHE_HOME is ignored on Windows; _cache_dir uses LOCALAPPDATA instead",
+)
 def test_cache_dir_uses_xdg_cache_home(
     tmp_path: _P, monkeypatch: pytest.MonkeyPatch
 ) -> None:
