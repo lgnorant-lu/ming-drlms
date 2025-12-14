@@ -451,12 +451,25 @@ class RobustThreadedRoomClient:
                             "Phase 24: Failed to get members before subscribe: %s", e
                         )
 
+                # Handler for Sender Key Requests (Phase 25)
+                def on_sender_key_request(dist) -> None:
+                    if engine:
+                        engine.handle_sender_key_request(
+                            room_name=dist.room_name,
+                            group_id=dist.group_id,
+                            requester=dist.sender,
+                            requester_device=dist.sender_device_id,
+                        )
+
                 # Start subscription - socket becomes busy after this
                 events = self._client.subscribe(
                     self.username,
                     self.room,
                     since_id=self.since_id,
                     sender_key_callback=sender_key_callback,
+                    sender_key_request_callback=on_sender_key_request
+                    if engine
+                    else None,
                     pong_callback=self._on_pong,
                 )
 

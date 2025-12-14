@@ -747,6 +747,9 @@ class MP2Client:
         sender_key_callback: Optional[
             Callable[[SignalSenderKeyDistribution], None]
         ] = None,
+        sender_key_request_callback: Optional[
+            Callable[[SignalSenderKeyDistribution], None]
+        ] = None,
         pong_callback: Optional[Callable[[int, int], None]] = None,
     ) -> Iterable[RoomEvent]:
         record = self.ensure_access_token(username)
@@ -932,6 +935,22 @@ class MP2Client:
                             sender_key_iteration=int(dist.sender_key_iteration),
                         )
                         sender_key_callback(distribution)
+                    continue
+                elif frame.msg_type == msg_types.MSG_TYPE_E2EE_SENDER_KEY_REQUEST:
+                    if sender_key_request_callback is not None:
+                        dist = e2ee_pb2.SignalSenderKeyDistribution()
+                        dist.ParseFromString(frame.payload)
+                        distribution = SignalSenderKeyDistribution(
+                            room_name=dist.room_name,
+                            group_id=dist.group_id,
+                            sender=dist.sender,
+                            sender_device_id=int(dist.sender_device_id),
+                            sender_registration_id=int(dist.sender_registration_id),
+                            distribution_message=bytes(dist.distribution_message),
+                            sender_key_id=int(dist.sender_key_id),
+                            sender_key_iteration=int(dist.sender_key_iteration),
+                        )
+                        sender_key_request_callback(distribution)
                     continue
                 elif frame.msg_type == common_pb2.MSG_TYPE_PING:
                     # Respond to server ping and continue
@@ -1158,6 +1177,7 @@ class MP2Client:
         req.distribution.sender_key_id = distribution.sender_key_id
         req.distribution.sender_key_iteration = distribution.sender_key_iteration
         req.distribution.distribution_message = distribution.distribution_message
+
         write_frame(
             sock,
             msg_types.MSG_TYPE_E2EE_SENDER_KEY_PUSH,
@@ -1174,6 +1194,47 @@ class MP2Client:
             err.ParseFromString(frame.payload)
             raise MP2Error(f"sender key push failed: {err.code}: {err.message}")
         raise MP2Error(f"unexpected msg_type={frame.msg_type} during sender key push")
+
+    def e2ee_sender_key_request(
+        self,
+        username: str,
+        target_user: str,
+        distribution: SignalSenderKeyDistribution,
+    ) -> tuple[int, str]:
+        record = self.ensure_access_token(username)
+        self.connect()
+        sock = self._require_socket()
+
+        req = e2ee_pb2.E2EESenderKeyPushRequest()
+        req.access_token = record.access_token
+        req.target_user = target_user
+        req.distribution.room_name = distribution.room_name
+        req.distribution.group_id = distribution.group_id
+        req.distribution.sender = distribution.sender
+        req.distribution.sender_device_id = distribution.sender_device_id
+        req.distribution.sender_registration_id = distribution.sender_registration_id
+        req.distribution.sender_key_id = distribution.sender_key_id
+        req.distribution.sender_key_iteration = distribution.sender_key_iteration
+        req.distribution.distribution_message = distribution.distribution_message
+
+        write_frame(
+            sock,
+            msg_types.MSG_TYPE_E2EE_SENDER_KEY_REQUEST,
+            req.SerializeToString(),
+        )
+
+        frame = read_frame(sock)
+        if frame.msg_type == msg_types.MSG_TYPE_E2EE_SENDER_KEY_REQUEST:
+            resp = e2ee_pb2.E2EESenderKeyPushResponse()
+            resp.ParseFromString(frame.payload)
+            return int(resp.code), resp.message
+        if frame.msg_type == common_pb2.MSG_TYPE_ERROR_RESPONSE:
+            err = common_pb2.ErrorResponse()
+            err.ParseFromString(frame.payload)
+            raise MP2Error(f"sender key request failed: {err.code}: {err.message}")
+        raise MP2Error(
+            f"unexpected msg_type={frame.msg_type} during sender key request"
+        )
 
     # ------------------------------------------------------------------
     # File Protocol

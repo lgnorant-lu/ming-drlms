@@ -13,9 +13,12 @@ description: "常见问题与解决方案指南"
 客户端未能成功解密消息，通常是因为缺少发送者的 **Sender Key**。即使启用了 E2EE，如果发送者没有将其 Sender Key 分发给您（例如您是在他们发送消息后才加入房间且错过了 Push），您将无法解密。
 
 **解决方案**:
-1.  **自动修复 (v0.4.0+)**: 系统具备自动 Sender Key 分发机制。请等待几秒钟，或尝试退出并重新进入房间。
-2.  **手动操作**: 重启客户端 (`ming-drlms tui`)。
-3.  **日志检查**: 查看 `.drlms/logs/drlms.log` 是否包含 `PermissionError` 或 `AttributeError`。
+1.  **自动修复 (v0.4.0+)**:
+    - **Push**: 现有成员自动向新成员推送 Sender Key
+    - **Pull (Phase 25)**: 新成员主动向缺失密钥的成员发送请求
+    - 请等待几秒钟让密钥交换完成
+2.  **手动操作**: 退出并重新进入房间，或重启客户端。
+3.  **日志检查**: 查看日志中是否有 `Sent sender_key_request` 或 `handle_sender_key_request` 记录。
 
 ---
 

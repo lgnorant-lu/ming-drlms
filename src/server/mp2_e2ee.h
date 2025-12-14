@@ -12,6 +12,8 @@ int mp2_e2ee_handle_prekey_bundle(platform_socket_t fd, const uint8_t *payload,
                                   size_t len);
 int mp2_e2ee_handle_sender_key_push(platform_socket_t fd,
                                     const uint8_t *payload, size_t len);
+int mp2_e2ee_handle_sender_key_request(platform_socket_t fd,
+                                       const uint8_t *payload, size_t len);
 int mp2_e2ee_flush_pending_sender_keys(const char *room_name,
                                        const char *user_name);
 

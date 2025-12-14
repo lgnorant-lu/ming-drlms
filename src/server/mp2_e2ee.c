@@ -708,3 +708,112 @@ int mp2_e2ee_handle_sender_key_push(platform_socket_t fd,
     mingdrlms__v2__e2_eesender_key_push_request__free_unpacked(req, NULL);
     return 0;
 }
+
+static void send_sender_key_request_response(platform_socket_t fd, int code,
+                                             const char *message) {
+    Mingdrlms__V2__E2EESenderKeyPushResponse resp =
+        MINGDRLMS__V2__E2_EESENDER_KEY_PUSH_RESPONSE__INIT;
+    resp.code = code;
+    resp.message = (char *)(message ? message : "");
+    size_t packed =
+        mingdrlms__v2__e2_eesender_key_push_response__get_packed_size(&resp);
+    unsigned char *buf = (unsigned char *)malloc(packed);
+    if (!buf) {
+        return;
+    }
+    mingdrlms__v2__e2_eesender_key_push_response__pack(&resp, buf);
+    (void)mp2_protocol_send_frame(fd, 505, buf, (uint32_t)packed);
+    free(buf);
+}
+
+static int deliver_sender_key_request(
+    const Mingdrlms__V2__SignalSenderKeyDistribution *distribution,
+    const char *target_user) {
+    if (!distribution || !distribution->room_name ||
+        !*distribution->room_name || !target_user || !*target_user) {
+        return -1;
+    }
+    size_t packed =
+        mingdrlms__v2__signal_sender_key_distribution__get_packed_size(
+            distribution);
+    unsigned char *buf = (unsigned char *)malloc(packed);
+    if (!buf) {
+        return -1;
+    }
+    mingdrlms__v2__signal_sender_key_distribution__pack(distribution, buf);
+
+    Room *room = rooms_get_or_create(distribution->room_name, NULL);
+    if (!room) {
+        free(buf);
+        return -1;
+    }
+
+    int delivered = 0;
+    platform_mutex_lock(&room->mu);
+    for (RoomInstance *inst = room->instances; inst; inst = inst->next) {
+        platform_mutex_lock(&inst->mu);
+        for (size_t i = 0; i < inst->subs_len; ++i) {
+            Subscriber *sub = &inst->subs[i];
+            if (sub->fd == PLATFORM_INVALID_SOCKET || sub->user[0] == '\0') {
+                continue;
+            }
+            if (!mp2_protocol_is_fd_mp2(sub->fd)) {
+                continue;
+            }
+            if (strcmp(sub->user, target_user) != 0) {
+                continue;
+            }
+            (void)mp2_protocol_send_frame(sub->fd, 505, buf, (uint32_t)packed);
+            delivered = 1;
+        }
+        platform_mutex_unlock(&inst->mu);
+    }
+    platform_mutex_unlock(&room->mu);
+    free(buf);
+    return delivered ? 0 : -1;
+}
+
+int mp2_e2ee_handle_sender_key_request(platform_socket_t fd,
+                                       const uint8_t *payload, size_t len) {
+    Mingdrlms__V2__E2EESenderKeyPushRequest *req =
+        mingdrlms__v2__e2_eesender_key_push_request__unpack(NULL, len, payload);
+    if (!req || !req->access_token || !req->target_user || !*req->target_user ||
+        !req->distribution) {
+        if (req) {
+            mingdrlms__v2__e2_eesender_key_push_request__free_unpacked(req,
+                                                                       NULL);
+        }
+        send_sender_key_request_response(fd, 400, "malformed request");
+        return -1;
+    }
+
+    char sender_user[64] = {0};
+    unsigned long long exp = 0;
+    const char *secret = mp2_auth_get_secret_or_default();
+    int verify_rc = mp2_auth_verify_access_token(
+        req->access_token, secret, sender_user, sizeof(sender_user), &exp);
+    if (verify_rc != 0) {
+        send_sender_key_request_response(fd, (verify_rc == -2) ? 401 : 400,
+                                         (verify_rc == -2) ? "token expired"
+                                                           : "invalid token");
+        mingdrlms__v2__e2_eesender_key_push_request__free_unpacked(req, NULL);
+        return -1;
+    }
+
+    if (req->distribution->sender && *req->distribution->sender) {
+        if (strcmp(sender_user, req->distribution->sender) != 0) {
+            send_sender_key_request_response(fd, 403, "sender mismatch");
+            mingdrlms__v2__e2_eesender_key_push_request__free_unpacked(req,
+                                                                       NULL);
+            return -1;
+        }
+    }
+
+    int deliver_rc =
+        deliver_sender_key_request(req->distribution, req->target_user);
+    send_sender_key_request_response(
+        fd, 0, (deliver_rc == 0) ? "delivered" : "queued");
+
+    mingdrlms__v2__e2_eesender_key_push_request__free_unpacked(req, NULL);
+    return 0;
+}

@@ -246,6 +246,9 @@ int mp2_dispatcher_handle_frame(platform_socket_t fd, const mp2_frame_t *frame,
     case MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_E2EE_SENDER_KEY_PUSH:
         msg_type_name = "MSG_TYPE_E2EE_SENDER_KEY_PUSH";
         break;
+    case 505: /* MSG_TYPE_E2EE_SENDER_KEY_REQUEST */
+        msg_type_name = "MSG_TYPE_E2EE_SENDER_KEY_REQUEST";
+        break;
     case MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_ROOM_LIST_REQUEST:
         msg_type_name = "MSG_TYPE_ROOM_LIST_REQUEST";
         break;
@@ -327,6 +330,9 @@ int mp2_dispatcher_handle_frame(platform_socket_t fd, const mp2_frame_t *frame,
     case MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_E2EE_SENDER_KEY_PUSH:
         return mp2_e2ee_handle_sender_key_push(fd, frame->payload,
                                                frame->payload_len);
+    case 505: /* MSG_TYPE_E2EE_SENDER_KEY_REQUEST */
+        return mp2_e2ee_handle_sender_key_request(fd, frame->payload,
+                                                  frame->payload_len);
     case MINGDRLMS__V2__MESSAGE_TYPE__MSG_TYPE_PING:
         return mp2_dispatcher_handle_ping(fd, frame->payload,
                                           frame->payload_len);

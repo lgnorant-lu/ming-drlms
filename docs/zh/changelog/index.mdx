@@ -29,6 +29,14 @@ description: "DRLMS 版本历史与更新记录"
 - **API 参考**: Relay 服务器 OpenAPI 规范
 - **架构文档**: 系统设计详解
 
+### Phase 24-25: Sender Key 分发机制
+
+- **Push 机制 (Phase 24)**: 成员加入时自动推送 Sender Key
+- **Pull 机制 (Phase 25)**: 新成员主动请求缺失的 Sender Key
+- **协议扩展**: 新增 `MSG_TYPE_E2EE_SENDER_KEY_REQUEST` (505)
+- **双向保障**: Push + Pull 确保密钥分发的可靠性
+- **测试覆盖**: 29+ 单元测试验证核心逻辑
+
 ### Phase 18-19: Relay 去中心化核心
 
 - **本地身份自举**: 完全去中心化身份管理

@@ -742,13 +742,36 @@ class E2EEngine:
         if missing_members:
             try:
                 logger.warning(
-                    "E2EE room=%s missing sender_keys from %d members: %s",
+                    "E2EE room=%s missing sender_keys from %d members: %s - sending requests",
                     room_name,
                     len(missing_members),
                     missing_members[:5],
                 )
             except Exception:
                 pass
+
+            for username, device_id in missing_members:
+                dist = SignalSenderKeyDistribution(
+                    room_name=room_name,
+                    group_id=group_id,
+                    sender=self._username,
+                    sender_device_id=1,  # TODO: get actual device_id
+                    sender_registration_id=0,
+                    distribution_message=b"",
+                    sender_key_id=0,
+                    sender_key_iteration=0,
+                )
+                try:
+                    self._client.e2ee_sender_key_request(
+                        self._username,
+                        username,
+                        dist,
+                    )
+                    logger.debug("Sent sender_key_request to %s", username)
+                except Exception as e:
+                    logger.error(
+                        "Failed to request sender key from %s: %s", username, e
+                    )
 
     def handle_sender_key_request(
         self,
