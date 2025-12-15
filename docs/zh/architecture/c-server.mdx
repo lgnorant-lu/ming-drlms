@@ -16,21 +16,26 @@ description: "log_collector_server 内部架构详解"
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                    Main Thread                          │
-│                  (server_core.c)                        │
-│                    Accept Loop                          │
+│               (server_core_reactor.c)                   │
+│     ┌─────────────────────────────────────────────┐     │
+│     │            aeEventLoop                      │     │
+│     │  ┌───────────────────────────────────────┐  │     │
+│     │  │ Linux:  net_epoll.c  (epoll_wait)     │  │     │
+│     │  │ Windows: net_select.c (select)        │  │     │
+│     │  └───────────────────────────────────────┘  │     │
+│     └─────────────────────────────────────────────┘     │
+│                    Accept Callback                      │
 └───────────────────────────┬─────────────────────────────┘
-                            │
+                            │ spawn thread
             ┌───────────────┼───────────────┐
-            │               │               │
             ▼               ▼               ▼
     ┌───────────┐   ┌───────────┐   ┌───────────┐
     │ Worker 1  │   │ Worker 2  │   │ Worker N  │
     │ (Thread)  │   │ (Thread)  │   │ (Thread)  │
-    │ MP2/Legacy│   │ MP2/Legacy│   │ MP2/Legacy│
+    │ MP2 Only  │   │ MP2 Only  │   │ MP2 Only  │
     └───────────┘   └───────────┘   └───────────┘
             │               │               │
             └───────────────┼───────────────┘
-                            │
                             ▼
               ┌─────────────────────────────────┐
               │       Shared Resources          │
@@ -41,14 +46,19 @@ description: "log_collector_server 内部架构详解"
               └─────────────────────────────────┘
 ```
 
-### 线程模型
+### 线程模型 (Phase 26 Reactor)
 
-采用 thread-per-connection 模型：
+采用 **Asymmetric Reactor + Thread-per-Connection** 混合模型：
 
-- **主线程**：Accept 新连接，通过 `server_core_accept_loop()` 实现
-- **工作线程**：`handle_client()` 处理单个连接的全部生命周期
-- **协议检测**：首次连接时通过 `detect_mp2_protocol_on_socket()` 检测 MP2 或 Legacy 协议
+- **主线程**：通过 `aeEventLoop` 监听 Accept 事件
+  - Linux: `epoll` 后端 (O(1) 高并发)
+  - Windows: `select` 后端 (兼容性)
+- **Accept 回调**：`onAcceptReady()` 接受连接后 spawn 工作线程
+- **工作线程**：`handle_client()` 处理单个连接全生命周期
+- **协议检测**：`detect_mp2_protocol_on_socket()` 检测 MP2 协议
 - 最大连接数：可配置（默认 128）
+
+> **Phase 26**: 事件循环采用 Redis ae.c 风格实现，源码位于 `net_reactor.h/c`。
 
 ---
 
@@ -400,25 +410,32 @@ CREATE TABLE client_identities (
 
 ## 性能优化
 
-<Note>
-以下优化措施为计划中功能，当前版本尚未实现。
-</Note>
+### 已实现 (Phase 26)
 
-### 连接池（计划中）
+| 特性 | 平台 | 实现 |
+|-----|------|------|
+| 事件循环 | Linux | `epoll` (O(1), Level-Triggered) |
+| 事件循环 | Windows | `select` (FD_SETSIZE=1024) |
+| 架构模式 | 全平台 | Redis ae.c 风格 Reactor |
 
-预分配连接结构，减少动态分配。
+相关源文件：
+- `net_reactor.h/c` - 核心事件循环 API
+- `net_epoll.c` - Linux epoll 后端
+- `net_select.c` - Windows select 后端
+- `server_core_reactor.c` - Reactor 版 Accept 循环
+- `connection.h/c` - 非阻塞 I/O 缓冲区管理
 
-### 零拷贝发送（计划中）
+### 计划中
 
-使用 `sendfile()` 发送大文件。
+| 特性 | 说明 |
+|-----|------|
+| 连接池 | 预分配连接结构 |
+| 零拷贝 | `sendfile()` 大文件传输 |
+| 批量广播 | 合并同房间消息 |
 
-### 批量广播（计划中）
+### 当前模型
 
-合并同房间多条消息。
-
-### 当前实现
-
-当前版本采用 thread-per-connection 模型，每个连接由独立线程处理。速率限制通过环境变量 `DRLMS_RATE_UP_BPS` 和 `DRLMS_RATE_DOWN_BPS` 配置。
+采用 **Reactor + Thread-per-Connection** 混合模型。主线程通过事件循环高效监听，工作线程独立处理连接。速率限制通过 `DRLMS_RATE_UP_BPS` 和 `DRLMS_RATE_DOWN_BPS` 配置。
 
 ---
 

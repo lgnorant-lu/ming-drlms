@@ -287,6 +287,8 @@ int main(void) {
     opt.keepintvl = getenv_int("DRLMS_TCP_KEEPINTVL", 10);
     opt.keepcnt = getenv_int("DRLMS_TCP_KEEPCNT", 3);
 
+    // [Phase 26] Reactor-based accept loop (epoll on Linux, select on Windows)
+    LOG_INFO("Starting reactor-based accept loop");
     int rc = server_core_accept_loop(sfd, &g_stop, &opt, handle_client);
 
     platform_socket_close(sfd);

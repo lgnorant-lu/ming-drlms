@@ -36,7 +36,29 @@ set(SERVER_SOURCES
     mp2_e2ee.c
     e2ee_signal.c
     sqlite_e2ee.c
+    # Phase 26: Redis ae.c-style event loop (Asymmetric Reactor)
+    net_reactor.c
+    server_core_reactor.c
+    # Phase 26 Task D: Buffer management and non-blocking I/O
+    connection.c
 )
+
+# Phase 26: Platform-specific event loop backends
+if(UNIX AND NOT APPLE)
+    # Linux: use epoll
+    list(APPEND SERVER_SOURCES net_epoll.c)
+    message(STATUS "Using epoll backend for event loop")
+elseif(WIN32)
+    # Windows: use select (IOCP would require Proactor pattern change)
+    list(APPEND SERVER_SOURCES net_select.c)
+    message(STATUS "Using select backend for event loop")
+else()
+    # macOS/other: use select as fallback (could add kqueue later)
+    list(APPEND SERVER_SOURCES net_select.c)
+    message(STATUS "Using select backend for event loop (fallback)")
+endif()
+
+
 
 # --- Enhanced Protobuf-C detection and fallback ---
 # Include the new ProtobufFetch module

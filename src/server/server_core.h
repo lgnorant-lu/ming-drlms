@@ -53,9 +53,10 @@ typedef struct ServerCoreOptions {
     int keepcnt;
 } ServerCoreOptions;
 
-// Runs the accept loop and dispatches a thread per connection using client_fn.
-// Stops when stop_flag is non-zero or a fatal error occurs. Returns 0 on clean
-// stop.
+// [Phase 26] Reactor-based accept loop using aeEventLoop (epoll/select backend)
+// This is the ONLY implementation - legacy select loop has been removed.
+// Uses epoll on Linux for O(1) scalability, select on Windows for
+// compatibility.
 int server_core_accept_loop(platform_socket_t listen_fd,
                             volatile int *stop_flag,
                             const ServerCoreOptions *opt,
