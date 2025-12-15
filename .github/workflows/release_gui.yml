@@ -39,12 +39,12 @@ jobs:
       - name: Run coverage (C+Python)
         run: make coverage
       - name: Upload dist artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ming-drlms-dist
           path: dist/*
       - name: Upload coverage html
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: coverage-html
           path: coverage/html
@@ -58,7 +58,7 @@ jobs:
             --add-data "gui_poc/i18n=i18n" \
             --add-binary "gui_poc/assets/bin/linux/x86_64/*:assets/bin/linux/x86_64"
       - name: Upload GUI pack artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: gui-poc-bundle
           path: dist/*
