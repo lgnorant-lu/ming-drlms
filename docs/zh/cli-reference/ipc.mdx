@@ -54,6 +54,8 @@ ming-drlms ipc --help
 |------|------|
 | `send` | 发送消息到共享内存 |
 | `listen` | 监听共享内存消息 |
+| `file-send` | 发送文件（含元信息） |
+| `file-receive` | 接收文件（含元信息） |
 
 ---
 
@@ -167,6 +169,107 @@ ming-drlms ipc send --key 0x1234 --file test.txt
 ```
 Line 1
 Line 2
+```
+
+---
+
+## ipc file-send
+
+发送文件（含完整元信息）到共享内存。**适用于实验五**。
+
+### 语法
+
+```bash
+ming-drlms ipc file-send <FILE> [选项]
+```
+
+### 参数
+
+| 参数 | 说明 |
+|------|------|
+| `FILE` | 要发送的文件路径 |
+
+### 选项
+
+| 选项 | 简写 | 说明 |
+|------|------|------|
+| `--key` | `-k` | 共享内存密钥（十六进制） |
+
+### 元信息包含
+
+- 文件名 (filename)
+- 文件大小 (filesize)
+- 修改时间 (modified_time)
+- 发送者 (sender PID)
+- 序列号 (sequence)
+- 魔数验证 (0x4D455441)
+
+### 示例
+
+**发送文本文件**：
+```bash
+ming-drlms ipc file-send test.txt
+```
+
+**发送大文件**：
+```bash
+ming-drlms ipc file-send large_data.bin --key 0x5678
+```
+
+**预期输出**：
+```
+[META] 发送文件元信息:
+  文件名: test.txt
+  大小: 2048 字节
+  发送者: pid_12345
+[DATA] 发送文件内容...
+  进度: 2048 / 2048 字节 (100.0%)
+[DONE] 文件传输完成: 2048 字节
+```
+
+---
+
+## ipc file-receive
+
+接收文件（自动解析元信息）从共享内存。**适用于实验五**。
+
+### 语法
+
+```bash
+ming-drlms ipc file-receive [选项]
+```
+
+### 选项
+
+| 选项 | 简写 | 说明 |
+|------|------|------|
+| `--output` | `-o` | 输出目录（默认: ./received/） |
+| `--key` | `-k` | 共享内存密钥（十六进制） |
+
+### 示例
+
+**接收到默认目录**：
+```bash
+ming-drlms ipc file-receive
+```
+
+**指定输出目录**：
+```bash
+ming-drlms ipc file-receive --output ./downloads/
+```
+
+**预期输出**：
+```
+=== 文件元信息 ===
+  文件名: test.txt
+  大小: 2048 字节 (2.00 KB)
+  发送者: pid_12345
+  修改时间: 2025-12-15 10:30:00
+==================
+
+[接收] 正在接收文件内容...
+  进度: 2048 / 2048 字节 (100.0%)
+[SUCCESS] 文件接收完成: ./received/test.txt (2048 字节)
 ```
 
 ---

@@ -149,6 +149,10 @@ zh_texts: Dict[str, str] = {
     "HELP.IPC.OPT.KEY": "共享内存键值 (十六进制)",
     "HELP.IPC.OPT.CHUNK": "块大小 (0=自动)",
     "HELP.IPC.LISTEN": "监听共享内存消息（包装 log_consumer）",
+    "HELP.IPC.FILE_SEND": "发送文件（含元信息）到共享内存（实验五）",
+    "HELP.IPC.FILE_SEND.ARG": "要发送的文件路径",
+    "HELP.IPC.FILE_RECEIVE": "接收文件（含元信息）从共享内存（实验五）",
+    "HELP.IPC.OPT.OUTPUT_DIR": "输出目录",
     # Demo
     "HELP.DEMO.DESC": "演示脚本",
     "HELP.DEMO.QUICKSTART": "运行快速演示: 启动服务器、基本客户端操作、测试、关闭",

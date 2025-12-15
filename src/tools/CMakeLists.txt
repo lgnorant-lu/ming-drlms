@@ -51,6 +51,29 @@ endif()
 
 target_link_libraries(ipc_sender PRIVATE ${IPC_SENDER_LIBS})
 
+# File receiver for Lab 5 (IPC file transfer with metadata)
+add_executable(file_receiver file_receiver.c)
+
+target_include_directories(file_receiver PRIVATE
+    ${PROJECT_SOURCE_DIR}/src/libipc
+    ${PROJECT_SOURCE_DIR}/src/platform/include)
+
+set(FILE_RECEIVER_LIBS
+    ipc_static
+    Threads::Threads
+    platform
+)
+
+if(UNIX AND NOT APPLE)
+    list(APPEND FILE_RECEIVER_LIBS rt)
+endif()
+
+if(ENABLE_COVERAGE AND COVERAGE_LIBS)
+    list(APPEND FILE_RECEIVER_LIBS ${COVERAGE_LIBS})
+endif()
+
+target_link_libraries(file_receiver PRIVATE ${FILE_RECEIVER_LIBS})
+
 # ------------------------------------------------------------
 # E2EE Spike (libsignal-protocol-c) - isolated PoC target
 # ------------------------------------------------------------
