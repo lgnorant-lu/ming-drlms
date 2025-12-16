@@ -267,10 +267,16 @@ int mp2_protocol_read_frame(platform_socket_t fd, mp2_frame_t *out_frame) {
     uint32_t payload_len = ntohl(payload_len_net);
 
     if (magic != MP2_PROTOCOL_MAGIC || version != MP2_PROTOCOL_VERSION) {
+        LOG_INFO("DEBUG: Invalid Frame magic=0x%08x version=0x%04x (expected "
+                 "0x%08x 0x%04x)",
+                 magic, version, MP2_PROTOCOL_MAGIC, MP2_PROTOCOL_VERSION);
         mp2_protocol_dbgf("invalid frame header magic=0x%08x version=0x%04x",
                           magic, version);
         return -1;
     }
+
+    LOG_INFO("DEBUG: Read Frame msg_type=%u payload_len=%u", (unsigned)msg_type,
+             (unsigned)payload_len);
     if (payload_len > (32u * 1024u * 1024u)) {
         mp2_protocol_dbgf("payload too large (%u bytes)",
                           (unsigned)payload_len);

@@ -37,9 +37,9 @@ pip install -e ".[dev]"
 # Windows (Visual Studio 2026 Developer Command Prompt + Ninja)
 # 在“x64 Native Tools Command Prompt for VS 2026”中：
 cd path\to\DRLMS
-rmdir /S /Q build_win_ninja_x64 2>nul
-mkdir build_win_ninja_x64
-cd build_win_ninja_x64
+rmdir /S /Q build_win 2>nul
+mkdir build_win
+cd build_win
 
 cmake -G "Ninja" ^
   -DCMAKE_BUILD_TYPE=RelWithDebInfo ^
@@ -62,7 +62,7 @@ pip list | grep ming-drlms
 
 # 检查 C 端产物
 # Windows:
-ls build_win_ninja_x64/log_collector_server.exe
+ls build_win/log_collector_server.exe
 # WSL:
 ls build_wsl/log_collector_server
 ```
@@ -141,7 +141,7 @@ export MING_DRLMS_CONFIG_DIR=$(pwd)/.drlms
 ### 3.1 MP2 服务器（C 端）
 
 ```bash
-# Windows (Ninja / build_win_ninja_x64)
+# Windows (Ninja / build_win)
 .\build_win_ninja_x64\log_collector_server.exe
 
 # WSL
@@ -455,7 +455,7 @@ rm -rf coverage/
 rm -f drlms.db
 
 # 清理构建产物
-rm -rf build/ build_wsl/ build_win_ninja_x64/
+rm -rf build/ build_wsl/ build_win/
 
 # 清理 Python 缓存
 find . -type d -name __pycache__ -exec rm -rf {} +

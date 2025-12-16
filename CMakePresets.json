@@ -7,41 +7,85 @@
   },
   "configurePresets": [
     {
-      "name": "windows-vcpkg",
-      "displayName": "Windows MSVC + vcpkg",
-      "description": "Configure the project with Visual Studio 2022 and the shared vcpkg toolchain.",
-      "generator": "Visual Studio 17 2022",
-      "architecture": "x64",
-      "binaryDir": "${sourceDir}/build",
-      "toolchainFile": "D:/Coding/vcpkg/scripts/buildsystems/vcpkg.cmake",
+      "name": "windows-base",
+      "hidden": true,
+      "description": "Base configuration for Windows with vcpkg",
+      "binaryDir": "${sourceDir}/build_win",
+      "installDir": "${sourceDir}/dist_win",
       "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
         "VCPKG_TARGET_TRIPLET": "x64-windows",
-        "CMAKE_INSTALL_PREFIX": "${sourceDir}/dist"
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/dist_win",
+        "CMAKE_PREFIX_PATH": "${sourceDir}/vcpkg_installed/x64-windows"
       }
+    },
+    {
+      "name": "windows-ninja",
+      "displayName": "Windows (Ninja Release) - Recommended",
+      "description": "Fastest build using Ninja generator (Detects VS2022/2026 automatically)",
+      "inherits": "windows-base",
+      "generator": "Ninja",
+      "architecture": {
+        "value": "x64",
+        "strategy": "external"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_C_COMPILER": "cl",
+        "CMAKE_CXX_COMPILER": "cl",
+        "CMAKE_LINKER": "link",
+        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+        "VCPKG_TARGET_TRIPLET": "x64-windows",
+        "PROTOBUF_C_COMPILER": "C:\\msys64\\mingw64\\bin\\protoc-gen-c.exe",
+        "PROTOC_C_EXECUTABLE": "C:\\msys64\\mingw64\\bin\\protoc-gen-c.exe",
+        "PROTOBUF_C_USE_PREGENSETS": "OFF"
+      }
+    },
+    {
+      "name": "windows-ninja-debug",
+      "displayName": "Windows (Ninja Debug)",
+      "description": "Debug build using Ninja generator",
+      "inherits": "windows-ninja",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "windows-vs",
+      "displayName": "Windows (Visual Studio Solution)",
+      "description": "Generates .sln file. Note: May conflict if multiple VS versions installed.",
+      "inherits": "windows-base",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "x64"
     }
   ],
   "buildPresets": [
     {
-      "name": "windows-vcpkg-debug",
-      "displayName": "Build Debug (MSVC + vcpkg)",
-      "configurePreset": "windows-vcpkg",
+      "name": "ninja-debug",
+      "displayName": "Ninja Debug",
+      "configurePreset": "windows-ninja-debug",
       "configuration": "Debug"
     },
     {
-      "name": "windows-vcpkg-release",
-      "displayName": "Build Release (MSVC + vcpkg)",
-      "configurePreset": "windows-vcpkg",
+      "name": "ninja-release",
+      "displayName": "Ninja Release",
+      "configurePreset": "windows-ninja",
+      "configuration": "Release"
+    },
+    {
+      "name": "vs-release",
+      "displayName": "VS Release",
+      "configurePreset": "windows-vs",
       "configuration": "Release"
     }
   ],
   "testPresets": [
     {
-      "name": "windows-vcpkg-test",
-      "configurePreset": "windows-vcpkg",
+      "name": "test-release",
+      "configurePreset": "windows-ninja",
       "configuration": "Release",
-      "description": "Run ctest after building with vcpkg toolchain.",
       "output": {
-        "shortProgress": true
+        "outputOnFailure": true
       }
     }
   ]

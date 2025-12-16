@@ -44,6 +44,12 @@ int sqlite_storage_init(SQLiteStorage *storage, const char *db_path) {
     free(dir);
 
     // Open DB
+    char cwd[1024];
+    if (getcwd(cwd, sizeof(cwd)) != NULL) {
+        LOG_INFO("Process CWD: %s", cwd);
+    }
+    LOG_INFO("Opening SQLite DB at: %s", db_path);
+
     int rc = sqlite3_open(db_path, &storage->db);
     if (rc != SQLITE_OK) {
         LOG_ERROR("Cannot open database: %s", sqlite3_errmsg(storage->db));
@@ -129,7 +135,23 @@ int sqlite_storage_init(SQLiteStorage *storage, const char *db_path) {
         "  last_event_id INTEGER DEFAULT 0,"
         "  joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
         "  UNIQUE(user_name, room_name, instance_id)"
-        ");"
+        ");";
+
+    char *err_msg = NULL;
+    rc = sqlite3_exec(storage->db, sql, NULL, NULL, &err_msg);
+    if (rc != SQLITE_OK) {
+        LOG_ERROR("SQL error (core): %s", err_msg ? err_msg : "(null)");
+        if (err_msg)
+            sqlite3_free(err_msg);
+        sqlite_storage_cleanup(storage);
+        return -1;
+    }
+    if (err_msg) {
+        sqlite3_free(err_msg);
+        err_msg = NULL;
+    }
+    // Friendships & Notes
+    const char *friend_sql =
         "CREATE TABLE IF NOT EXISTS friendships ("
         "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
         "  user_a TEXT NOT NULL,"
@@ -152,7 +174,19 @@ int sqlite_storage_init(SQLiteStorage *storage, const char *db_path) {
         "  PRIMARY KEY (friendship_id, owner),"
         "  FOREIGN KEY (friendship_id) REFERENCES friendships(id) ON DELETE "
         "CASCADE"
-        ");"
+        ");";
+
+    rc = sqlite3_exec(storage->db, friend_sql, NULL, NULL, &err_msg);
+    if (rc != SQLITE_OK) {
+        LOG_ERROR("SQL error (friendships): %s", err_msg ? err_msg : "(null)");
+        if (err_msg)
+            sqlite3_free(err_msg);
+        sqlite_storage_cleanup(storage);
+        return -1;
+    }
+
+    // e2ee_identity_keys
+    const char *identity_sql =
         "CREATE TABLE IF NOT EXISTS e2ee_identity_keys ("
         "  user_name TEXT NOT NULL,"
         "  device_id INTEGER NOT NULL DEFAULT 1,"
@@ -162,73 +196,30 @@ int sqlite_storage_init(SQLiteStorage *storage, const char *db_path) {
         "  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
         "  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
         "  PRIMARY KEY (user_name, device_id)"
-        ");"
-        "CREATE TABLE IF NOT EXISTS e2ee_signed_pre_keys ("
-        "  user_name TEXT NOT NULL,"
-        "  device_id INTEGER NOT NULL DEFAULT 1,"
-        "  signed_pre_key_id INTEGER NOT NULL,"
-        "  public_key BLOB NOT NULL,"
-        "  private_key BLOB NOT NULL,"
-        "  signature BLOB NOT NULL,"
-        "  timestamp INTEGER NOT NULL,"
-        "  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
-        "  PRIMARY KEY (user_name, device_id),"
-        "  UNIQUE(user_name, device_id, signed_pre_key_id)"
-        ");"
-        "CREATE TABLE IF NOT EXISTS e2ee_pre_keys ("
-        "  user_name TEXT NOT NULL,"
-        "  device_id INTEGER NOT NULL DEFAULT 1,"
-        "  pre_key_id INTEGER NOT NULL,"
-        "  public_key BLOB NOT NULL,"
-        "  private_key BLOB NOT NULL,"
-        "  is_active INTEGER NOT NULL DEFAULT 1,"
-        "  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
-        "  PRIMARY KEY (user_name, device_id, pre_key_id)"
-        ");"
-        "CREATE TABLE IF NOT EXISTS e2ee_room_members ("
-        "  room_name TEXT NOT NULL,"
-        "  user_name TEXT NOT NULL,"
-        "  group_id TEXT NOT NULL,"
-        "  joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
-        "  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
-        "  PRIMARY KEY (room_name, user_name, group_id)"
-        ");"
-        "CREATE TABLE IF NOT EXISTS e2ee_sender_keys ("
-        "  room_name TEXT NOT NULL,"
-        "  group_id TEXT NOT NULL,"
-        "  sender_user TEXT NOT NULL,"
-        "  target_user TEXT NOT NULL,"
-        "  sender_device_id INTEGER NOT NULL,"
-        "  sender_registration_id INTEGER NOT NULL,"
-        "  sender_key_id INTEGER NOT NULL,"
-        "  sender_key_iteration INTEGER NOT NULL,"
-        "  distribution BLOB NOT NULL,"
-        "  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
-        "  PRIMARY KEY (room_name, group_id, sender_user, target_user)"
-        ");"
-        "CREATE INDEX IF NOT EXISTS idx_events_room_time ON events(room_name, "
-        "timestamp);"
-        "CREATE INDEX IF NOT EXISTS idx_events_room_id ON events(room_name, "
-        "id);"
-        "CREATE INDEX IF NOT EXISTS idx_events_instance_id ON "
-        "events(instance_id);"
-        "CREATE INDEX IF NOT EXISTS idx_user_sessions_user_room_instance ON "
-        "user_sessions(user_name, room_name, instance_id);"
-        "CREATE INDEX IF NOT EXISTS idx_room_instances_name ON "
-        "room_instances(room_name);"
-        "CREATE INDEX IF NOT EXISTS idx_room_instances_state ON "
-        "room_instances(state);"
-        "CREATE INDEX IF NOT EXISTS idx_e2ee_pre_keys_active ON "
-        "e2ee_pre_keys(user_name, device_id, is_active, pre_key_id);"
-        "CREATE INDEX IF NOT EXISTS idx_e2ee_sender_keys_target ON "
-        "e2ee_sender_keys(target_user, room_name);"
-        "CREATE INDEX IF NOT EXISTS idx_room_members_power ON "
-        "room_members(room_name, power_level DESC);"
-        "CREATE INDEX IF NOT EXISTS idx_room_members_last_seen ON "
-        "room_members(room_name, last_seen_at DESC);";
+        ");";
 
-    char *err_msg = NULL;
-    rc = sqlite3_exec(storage->db, sql, NULL, NULL, &err_msg);
+    rc = sqlite3_exec(storage->db, identity_sql, NULL, NULL, &err_msg);
+    if (rc != SQLITE_OK) {
+        LOG_ERROR("SQL error (identity): %s", err_msg ? err_msg : "(null)");
+        if (err_msg)
+            sqlite3_free(err_msg);
+        sqlite_storage_cleanup(storage);
+        return -1;
+    }
+    // e2ee_signed_pre_keys
+    const char *signed_sql = "CREATE TABLE IF NOT EXISTS e2ee_signed_pre_keys ("
+                             "  user_name TEXT NOT NULL,"
+                             "  device_id INTEGER NOT NULL DEFAULT 1,"
+                             "  signed_pre_key_id INTEGER NOT NULL,"
+                             "  public_key BLOB NOT NULL,"
+                             "  private_key BLOB NOT NULL,"
+                             "  signature BLOB NOT NULL,"
+                             "  timestamp INTEGER NOT NULL,"
+                             "  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
+                             "  PRIMARY KEY (user_name, device_id),"
+                             "  UNIQUE(user_name, device_id, signed_pre_key_id)"
+                             ");";
+    rc = sqlite3_exec(storage->db, signed_sql, NULL, NULL, &err_msg);
     if (rc != SQLITE_OK) {
         LOG_ERROR("SQL error: %s", err_msg ? err_msg : "(null)");
         if (err_msg)
@@ -237,49 +228,70 @@ int sqlite_storage_init(SQLiteStorage *storage, const char *db_path) {
         return -1;
     }
 
-    // auth_refresh_tokens
-    LOG_DEBUG("[sqlite_schema] Creating auth_refresh_tokens table...");
-    const char *auth_sql = "CREATE TABLE IF NOT EXISTS auth_refresh_tokens ("
-                           "  token TEXT PRIMARY KEY,"
-                           "  user_name TEXT NOT NULL,"
-                           "  expires_at INTEGER NOT NULL,"
-                           "  issued_at INTEGER DEFAULT (strftime('%s','now'))"
-                           ");"
-                           "CREATE INDEX IF NOT EXISTS idx_auth_rft_user ON "
-                           "auth_refresh_tokens(user_name);";
-    rc = sqlite3_exec(storage->db, auth_sql, NULL, NULL, &err_msg);
+    // e2ee_pre_keys (Missing in previous version!)
+    const char *prekey_sql = "CREATE TABLE IF NOT EXISTS e2ee_pre_keys ("
+                             "  user_name TEXT NOT NULL,"
+                             "  device_id INTEGER NOT NULL DEFAULT 1,"
+                             "  pre_key_id INTEGER NOT NULL,"
+                             "  public_key BLOB NOT NULL,"
+                             "  private_key BLOB NOT NULL,"
+                             "  is_active INTEGER DEFAULT 1,"
+                             "  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
+                             "  PRIMARY KEY (user_name, device_id, pre_key_id)"
+                             ");";
+    rc = sqlite3_exec(storage->db, prekey_sql, NULL, NULL, &err_msg);
     if (rc != SQLITE_OK) {
-        LOG_ERROR("[sqlite_schema] auth_refresh_tokens SQL error: %s",
-                  err_msg ? err_msg : "(null)");
+        LOG_ERROR("SQL error (prekeys): %s", err_msg ? err_msg : "(null)");
         if (err_msg)
             sqlite3_free(err_msg);
         sqlite_storage_cleanup(storage);
         return -1;
     }
-    LOG_DEBUG("[sqlite_schema] auth_refresh_tokens table created successfully");
 
-    // client_identities (14C)
-    const char *ident_sql =
-        "CREATE TABLE IF NOT EXISTS client_identities ("
-        "  user_name TEXT NOT NULL,"
-        "  device_id INTEGER NOT NULL,"
-        "  pubkey BLOB NOT NULL,"
-        "  registration_id INTEGER,"
-        "  device_guid TEXT,"
-        "  platform TEXT,"
-        "  app_version TEXT,"
-        "  updated_at INTEGER NOT NULL,"
-        "  PRIMARY KEY (user_name, device_id)"
-        ");"
-        "CREATE INDEX IF NOT EXISTS idx_client_identities_user ON "
-        "client_identities(user_name);";
-    rc = sqlite3_exec(storage->db, ident_sql, NULL, NULL, &err_msg);
-    if (rc != SQLITE_OK) {
-        LOG_ERROR("SQL error: %s", err_msg ? err_msg : "(null)");
-        if (err_msg)
-            sqlite3_free(err_msg);
-        sqlite_storage_cleanup(storage);
-        return -1;
+    // Phase 27.5: Schema Migration - Add pqc_public_key to e2ee_identity_keys
+    {
+        const char *table_name = "e2ee_identity_keys";
+        const char *column_name = "pqc_public_key";
+        int column_exists = 0;
+
+        // Use PRAGMA table_info to check if column exists
+        char query[256];
+        snprintf(query, sizeof(query), "PRAGMA table_info(%s);", table_name);
+
+        sqlite3_stmt *stmt = NULL;
+        if (sqlite3_prepare_v2(storage->db, query, -1, &stmt, NULL) ==
+            SQLITE_OK) {
+            while (sqlite3_step(stmt) == SQLITE_ROW) {
+                const char *col_name =
+                    (const char *)sqlite3_column_text(stmt, 1);
+                if (col_name && strcmp(col_name, column_name) == 0) {
+                    column_exists = 1;
+                    break;
+                }
+            }
+        }
+        sqlite3_finalize(stmt);
+
+        if (!column_exists) {
+            LOG_INFO("Migrating schema: Adding %s to %s", column_name,
+                     table_name);
+            char alter_sql[256];
+            snprintf(alter_sql, sizeof(alter_sql),
+                     "ALTER TABLE %s ADD COLUMN %s BLOB;", table_name,
+                     column_name);
+
+            char *alter_err = NULL;
+            if (sqlite3_exec(storage->db, alter_sql, NULL, NULL, &alter_err) !=
+                SQLITE_OK) {
+                LOG_ERROR("Schema migration failed: %s",
+                          alter_err ? alter_err : "unknown");
+                if (alter_err)
+                    sqlite3_free(alter_err);
+                // Non-fatal, but PQC features will fail
+            } else {
+                LOG_INFO("Schema migration successful: %s added", column_name);
+            }
+        }
     }
 
     return 0;

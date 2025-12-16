@@ -398,6 +398,71 @@ if manager.has_identity():
 
 ---
 
+## 后量子混合加密 (PQC)
+
+DRLMS 支持后量子混合加密，在 Signal 加密之上增加 ML-KEM-768 层：
+
+### 混合加密流程
+
+```
+plaintext
+    ↓
+Signal Encrypt (X3DH + Double Ratchet)
+    ↓
+signal_ciphertext
+    ↓
+hybrid_encrypt()
+├── X25519 临时 DH → x25519_shared
+└── ML-KEM-768 Encap → pqc_shared
+        ↓
+    HKDF(x25519_shared || pqc_shared)
+        ↓
+    AES-256-GCM(signal_ciphertext)
+        ↓
+SignalEncryptedPayload {
+    pqc_ciphertext: 1088 bytes,
+    pqc_ephemeral: 32 bytes,
+    pqc_wrapped: AES-GCM(signal_ciphertext)
+}
+```
+
+### 使用方式
+
+```python
+from ming_drlms.core.hybrid_crypto import hybrid_encrypt, is_hybrid_available
+
+if is_hybrid_available():
+    result = hybrid_encrypt(
+        plaintext=signal_ciphertext,
+        peer_x25519_pub=peer_x25519_key,
+        peer_pqc_pub=peer_mlkem_key,  # 1184 bytes
+    )
+    # result.wrapped_ciphertext: AES-GCM 加密结果
+    # result.pqc_ciphertext: ML-KEM ciphertext (1088 bytes)
+    # result.ephemeral_pub: X25519 临时公钥 (32 bytes)
+```
+
+### PQC 公钥分发 (Kind 10050)
+
+ML-KEM-768 公钥通过 Nostr 风格事件分发：
+
+```python
+from ming_drlms.core.pqc_events import create_pqc_key_event
+
+event = create_pqc_key_event(
+    pubkey_hex=my_x25519_pubkey_hex,
+    pqc_public_key=my_mlkem_pubkey,  # 1184 bytes
+    sign_fn=my_sign_function,
+)
+# event.to_dict() → JSON 事件
+```
+
+### 前向兼容
+
+如果对端没有 PQC 公钥，系统自动回退到纯 Signal 加密。
+
+---
+
 ## 相关文档
 
 - [E2EE 设置](/zh/guides/e2ee-setup) - 使用指南

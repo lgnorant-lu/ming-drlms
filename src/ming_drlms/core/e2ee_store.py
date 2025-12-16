@@ -161,6 +161,9 @@ class LocalKeyState:
     pre_keys: Dict[int, SignalKeyPair]
     remote_identities: Dict[Tuple[str, int], bytes]
     sender_keys: Dict[str, SenderKeyRecord]
+    # Phase 27: Post-Quantum key
+    pqc_public_key: bytes | None = None
+    pqc_private_key: bytes | None = None
 
 
 class LocalKeyStore:
@@ -253,6 +256,21 @@ class LocalKeyStore:
                 if entry is not None:
                     sender_keys[key] = entry
 
+        # Phase 27: Load PQC keys
+        pqc_public_key_hex = payload.get("pqc_public_key")
+        pqc_public_key = (
+            _decode_bytes(pqc_public_key_hex)
+            if isinstance(pqc_public_key_hex, str)
+            else None
+        )
+
+        pqc_private_key_hex = payload.get("pqc_private_key")
+        pqc_private_key = (
+            _decode_bytes(pqc_private_key_hex)
+            if isinstance(pqc_private_key_hex, str)
+            else None
+        )
+
         return LocalKeyState(
             registration_id=registration_id,
             device_id=device_id,
@@ -261,6 +279,8 @@ class LocalKeyStore:
             pre_keys=pre_keys,
             remote_identities=remote_identities,
             sender_keys=sender_keys,
+            pqc_public_key=pqc_public_key,
+            pqc_private_key=pqc_private_key,
         )
 
     # ------------------------------------------------------------------
@@ -301,6 +321,57 @@ class LocalKeyStore:
             }
         else:
             payload.pop("signed_pre_key", None)
+
+        self._store_user_payload(username, payload)
+        state = self.load_state(username)
+        if state is None:
+            raise RuntimeError("failed to reload key state after persist")
+        return state
+
+    def store_identity_only(
+        self,
+        username: str,
+        *,
+        identity_key: SignalKeyPair,
+        pqc_public_key: bytes | None = None,
+        pqc_private_key: bytes | None = None,
+        registration_id: int = 0,
+        device_id: int = 1,
+    ) -> LocalKeyState:
+        """Phase 27: Store identity without pre-keys (for mnemonic-based creation).
+
+        This is used when creating identity from mnemonic where pre-keys
+        will be generated separately.
+
+        Args:
+            username: User identifier
+            identity_key: X25519 identity key pair
+            pqc_public_key: ML-KEM-768 public key (optional)
+            registration_id: Signal registration ID (0 = auto-generate)
+            device_id: Device ID (default: 1)
+
+        Returns:
+            LocalKeyState with the stored identity
+        """
+        import random
+
+        if registration_id == 0:
+            registration_id = random.randint(1, 0x3FFF)  # 14-bit random
+
+        payload = self._load_user_payload(username) or {}
+        payload.update(
+            {
+                "registration_id": int(registration_id),
+                "device_id": int(device_id),
+                "identity": _encode_key_pair(identity_key),
+                "pre_keys": payload.get("pre_keys", {}),  # Preserve existing
+            }
+        )
+        # Phase 27: Store PQC keys
+        if pqc_public_key:
+            payload["pqc_public_key"] = pqc_public_key.hex()
+        if pqc_private_key:
+            payload["pqc_private_key"] = pqc_private_key.hex()
 
         self._store_user_payload(username, payload)
         state = self.load_state(username)

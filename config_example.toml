@@ -82,6 +82,32 @@ device_id = 1
 # 注册 ID（未设置则自动生成）
 # registration_id = 0
 
+# --- BIP39 助记词身份 (Phase 27) ---
+# 从 BIP39 助记词派生身份，确保跨设备一致性
+# 留空则使用随机生成的密钥
+# mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+# passphrase = ""
+
+# =============================================================================
+# PQC 后量子加密 (Phase 27)
+# =============================================================================
+[pqc]
+# 启用后量子加密（需要 liboqs 库）
+# true = 使用混合加密 (X25519 + ML-KEM-768)
+# false = 仅使用经典加密 (X25519)
+enabled = true
+
+# PQC 算法选择
+# "ML-KEM-768" (推荐, NIST Level 3)
+# "ML-KEM-1024" (最高安全, NIST Level 5)
+algorithm = "ML-KEM-768"
+
+# liboqs 库路径（可选）
+# 留空则自动检测 (从 PATH 或 LIBOQS_DIR 环境变量)
+# Windows 示例: "C:\\liboqs\\bin\\oqs.dll"
+# Linux 示例: "/usr/local/lib/liboqs.so"
+# liboqs_path = ""
+
 # =============================================================================
 # 信任策略
 # =============================================================================

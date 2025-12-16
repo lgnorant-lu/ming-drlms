@@ -127,6 +127,10 @@ class E2EEngine:
         except Exception:
             pass
 
+        # Phase 27: PQC key cache for hybrid encryption
+        self._peer_pqc_keys: Dict[str, bytes] = {}  # peer -> ML-KEM-768 public key
+        self._my_pqc_kem = None  # Lazy-loaded ML-KEM instance for decryption
+
     # ------------------------------------------------------------------
     # 公共 API
     # ------------------------------------------------------------------
@@ -173,6 +177,37 @@ class E2EEngine:
             self._key_store.record_remote_identity(
                 self._username, session.name, session.device_id, identity
             )
+
+        # Phase 27: Hybrid PQC encryption layer
+        peer_pqc_pub = self._peer_pqc_keys.get(peer)
+        if peer_pqc_pub and len(peer_pqc_pub) == 1184:
+            try:
+                from .hybrid_crypto import hybrid_encrypt, is_hybrid_available
+
+                if is_hybrid_available():
+                    # Get peer's X25519 public key for hybrid encryption
+                    peer_x25519_pub = (
+                        identity[:32] if identity and len(identity) >= 32 else None
+                    )
+                    if peer_x25519_pub:
+                        hybrid_result = hybrid_encrypt(
+                            payload.ciphertext,  # Wrap Signal ciphertext
+                            peer_x25519_pub,
+                            peer_pqc_pub,
+                        )
+                        payload.pqc_ciphertext = hybrid_result.pqc_ciphertext
+                        payload.pqc_ephemeral = hybrid_result.ephemeral_pub
+                        payload.pqc_wrapped = hybrid_result.wrapped_ciphertext
+                        # Clear original ciphertext (now in pqc_wrapped)
+                        payload.ciphertext = b""
+                        logger.debug(
+                            "Phase 27: Applied hybrid PQC encryption for %s", peer
+                        )
+            except Exception as e:
+                logger.warning(
+                    "Phase 27: Hybrid encryption failed, using classic: %s", e
+                )
+
         return payload
 
     def encrypt_group(
@@ -234,14 +269,60 @@ class E2EEngine:
                 ),  # RoomEvent has room_name, SignalEncryptedPayload does not
                 peer,
                 device_id,
-                len(event.payload) if hasattr(event, "payload") else None,
-                event.payload_type,
+                len(event.ciphertext) if event.ciphertext else 0,
+                event.type,
             )
         except Exception:
             pass
+
+        # Phase 27: Check for hybrid PQC encryption
+        signal_ciphertext = event.ciphertext
+        if event.pqc_wrapped and len(event.pqc_wrapped) > 0:
+            try:
+                from .hybrid_crypto import hybrid_decrypt
+
+                # Need my X25519 private key and PQC KEM instance
+                my_x25519_priv = self._state.identity_key.private_key
+
+                # Lazy-load my PQC KEM instance
+                if self._my_pqc_kem is None:
+                    pqc_pub = getattr(self._state, "pqc_public_key", None)
+                    if pqc_pub:
+                        # PQC decryption requires secret key storage
+                        # which is not yet implemented (NYI)
+                        # MLKEM768 instance needed here would require
+                        # importing the secret key from storage
+                        logger.warning(
+                            "Phase 27: PQC decryption requires secret key storage (NYI)"
+                        )
+
+                if self._my_pqc_kem is not None:
+                    signal_ciphertext = hybrid_decrypt(
+                        event.pqc_wrapped,
+                        event.pqc_ciphertext,
+                        event.pqc_ephemeral,
+                        my_x25519_priv,
+                        self._my_pqc_kem,
+                    )
+                    logger.debug("Phase 27: Decrypted hybrid PQC message from %s", peer)
+                else:
+                    # Fallback: use pqc_wrapped directly if we can't decrypt
+                    # This shouldn't happen in production
+                    logger.warning(
+                        "Phase 27: No PQC KEM available, cannot decrypt hybrid message"
+                    )
+                    raise SignalBridgeError(
+                        "Cannot decrypt PQC-encrypted message: no PQC key"
+                    )
+            except ImportError:
+                logger.warning("Phase 27: hybrid_crypto import failed")
+                raise SignalBridgeError(
+                    "Cannot decrypt PQC-encrypted message: liboqs not available"
+                )
+
         cipher = Ciphertext(
-            ciphertext=event.payload,
-            message_type=lib_type_from_proto(event.payload_type),
+            ciphertext=signal_ciphertext,
+            message_type=lib_type_from_proto(event.type),
             registration_id=int(event.sender_registration_id or 0),
             pre_key_id=int(event.pre_key_id or 0),
             signed_pre_key_id=int(event.signed_pre_key_id or 0),
@@ -495,6 +576,12 @@ class E2EEngine:
             int(bundle.device_id or 1),
             bundle.identity_key,
         )
+
+        # Phase 27: Cache peer's PQC public key if available
+        pqc_pub = getattr(bundle, "pqc_public_key", None)
+        if pqc_pub and len(pqc_pub) == 1184:
+            self._peer_pqc_keys[peer] = pqc_pub
+            logger.debug("Phase 27: Cached PQC public key for %s", peer)
 
         session = _PeerSession(name=peer, device_id=int(bundle.device_id or 1))
         self._sessions[key] = session

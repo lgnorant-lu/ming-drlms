@@ -5,10 +5,13 @@
   "dependencies": [
     {
       "name": "openssl",
-      "features": ["tools"]
+      "features": [
+        "tools"
+      ]
     },
     "sqlite3",
     "argon2",
-    "protobuf-c"
+    "protobuf-c",
+    "liboqs"
   ]
 }

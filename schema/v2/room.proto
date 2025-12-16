@@ -42,6 +42,11 @@ message SignalEncryptedPayload {
   
   // Phase 23: Compression
   int32 compression_type = 15; // 0=NONE, 1=ZLIB, 2=ZSTD
+  
+  // Phase 27: Post-Quantum Hybrid Encryption
+  bytes pqc_ciphertext = 20;   // ML-KEM-768 ciphertext (1088 bytes)
+  bytes pqc_ephemeral = 21;    // X25519 ephemeral public key (32 bytes)
+  bytes pqc_wrapped = 22;      // AES-GCM wrapped Signal ciphertext (nonce||ct||tag)
 }
 
 // Shared structs ----------------------------------------------------------

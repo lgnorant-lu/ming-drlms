@@ -41,6 +41,35 @@ description: "DRLMS 本地身份创建、备份与恢复指南"
 ming-drlms identity create --name "你的名字"
 ```
 
+### 从助记词创建 (Phase 27)
+
+使用 BIP39 助记词确保跨设备身份一致性：
+
+```bash
+ming-drlms identity from-mnemonic \
+  --mnemonic "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about" \
+  --name "myuser"
+```
+
+<Note>
+助记词派生遵循 NIP-06 标准 (m/44'/1237'/0'/0/0)，与 Nostr 协议兼容。
+</Note>
+
+| 选项 | 说明 |
+|------|------|
+| `--mnemonic` | 12/24 词 BIP39 助记词 |
+| `--passphrase` | 可选 BIP39 密码 |
+| `--name` | 显示名称 |
+| `--regenerate-pqc` | 强制重新生成 PQC 密钥 |
+
+从助记词派生的密钥：
+
+| 密钥类型 | 派生方法 |
+|----------|----------|
+| Nostr (Secp256k1) | NIP-06: m/44'/1237'/0'/0/0 |
+| Signal (X25519) | HKDF(seed, info="ming-drlms-signal-x25519-v1") |
+| PQC (ML-KEM-768) | HKDF(seed, info="ming-drlms-mlkem768-v1") |
+
 ### 完整选项
 
 ```bash

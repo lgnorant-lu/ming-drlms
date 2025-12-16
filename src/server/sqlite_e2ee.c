@@ -5,6 +5,8 @@
 #include <string.h>
 #include <stdio.h>
 
+#include "logger.h"
+
 #ifndef SQLITE_NOMEM
 #define SQLITE_NOMEM 7
 #endif
@@ -21,34 +23,41 @@ static unsigned char *dup_blob(const void *data, size_t len) {
     return copy;
 }
 
-int sqlite_e2ee_replace_identity(SQLiteStorage *storage, const char *user_name,
-                                 uint32_t device_id,
-                                 const unsigned char *identity_public,
-                                 size_t identity_public_len,
-                                 const unsigned char *identity_private,
-                                 size_t identity_private_len,
-                                 uint32_t registration_id) {
+int sqlite_e2ee_replace_identity(
+    SQLiteStorage *storage, const char *user_name, uint32_t device_id,
+    const unsigned char *identity_public, size_t identity_public_len,
+    const unsigned char *identity_private, size_t identity_private_len,
+    uint32_t registration_id, const unsigned char *pqc_public_key,
+    size_t pqc_public_key_len) {
     if (!storage || !user_name || !*user_name || !identity_public ||
         identity_public_len == 0 || !identity_private ||
         identity_private_len == 0) {
         return -1;
     }
 
+    // Phase 27.5: Added pqc_public_key param and column
     const char *sql =
         "INSERT INTO e2ee_identity_keys (user_name, device_id, "
         "identity_public, "
-        "identity_private, registration_id, created_at, updated_at) "
-        "VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) "
+        "identity_private, registration_id, pqc_public_key, created_at, "
+        "updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) "
         "ON CONFLICT(user_name, device_id) DO UPDATE SET "
         "identity_public=excluded.identity_public, "
         "identity_private=excluded.identity_private, "
         "registration_id=excluded.registration_id, "
+        "pqc_public_key=excluded.pqc_public_key, "
         "updated_at=CURRENT_TIMESTAMP";
 
     platform_mutex_lock(&storage->mu);
+
+    // Force explicit transaction to ensure persistence
+    sqlite3_exec(storage->db, "BEGIN IMMEDIATE TRANSACTION", NULL, NULL, NULL);
+
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(storage->db, sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK) {
+        sqlite3_exec(storage->db, "ROLLBACK", NULL, NULL, NULL);
         platform_mutex_unlock(&storage->mu);
         return -1;
     }
@@ -59,8 +68,25 @@ int sqlite_e2ee_replace_identity(SQLiteStorage *storage, const char *user_name,
     sqlite3_bind_blob(stmt, 4, identity_private, (int)identity_private_len,
                       SQLITE_TRANSIENT);
     sqlite3_bind_int(stmt, 5, (int)registration_id);
+
+    if (pqc_public_key && pqc_public_key_len > 0) {
+        sqlite3_bind_blob(stmt, 6, pqc_public_key, (int)pqc_public_key_len,
+                          SQLITE_TRANSIENT);
+    } else {
+        sqlite3_bind_null(stmt, 6);
+    }
+
     rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
+
+    if (rc == SQLITE_DONE) {
+        sqlite3_exec(storage->db, "COMMIT", NULL, NULL, NULL);
+    } else {
+        LOG_ERROR("Insert identity failed rc=%d msg=%s", rc,
+                  sqlite3_errmsg(storage->db));
+        sqlite3_exec(storage->db, "ROLLBACK", NULL, NULL, NULL);
+    }
+
     platform_mutex_unlock(&storage->mu);
     return (rc == SQLITE_DONE) ? 0 : -1;
 }
@@ -186,9 +212,10 @@ int sqlite_e2ee_get_prekey_bundle(SQLiteStorage *storage, const char *user_name,
     memset(out_bundle, 0, sizeof(*out_bundle));
     out_bundle->device_id = device_id;
 
-    const char *identity_sql =
-        "SELECT identity_public, registration_id FROM e2ee_identity_keys "
-        "WHERE user_name = ? AND device_id = ?";
+    // Phase 27.5: Fetch pqc_public_key
+    const char *identity_sql = "SELECT identity_public, registration_id, "
+                               "pqc_public_key FROM e2ee_identity_keys "
+                               "WHERE user_name = ? AND device_id = ?";
     const char *signed_sql =
         "SELECT signed_pre_key_id, public_key, signature, timestamp FROM "
         "e2ee_signed_pre_keys WHERE user_name = ? AND device_id = ?";
@@ -206,17 +233,56 @@ int sqlite_e2ee_get_prekey_bundle(SQLiteStorage *storage, const char *user_name,
     }
     sqlite3_bind_text(stmt, 1, user_name, -1, SQLITE_TRANSIENT);
     sqlite3_bind_int(stmt, 2, (int)device_id);
+
+    LOG_INFO("DEBUG: Fetching bundle for user='%s' device=%u", user_name,
+             device_id);
     rc = sqlite3_step(stmt);
+    LOG_INFO("DEBUG: Fetch step rc=%d", rc);
+
     if (rc != SQLITE_ROW) {
+        LOG_WARN(
+            "DEBUG: Fetch failed (rc=%d). DUMPING TABLE e2ee_identity_keys:",
+            rc);
+
+        const char *dump_sql =
+            "SELECT user_name, device_id FROM e2ee_identity_keys";
+        sqlite3_stmt *dump_stmt;
+        if (sqlite3_prepare_v2(storage->db, dump_sql, -1, &dump_stmt, NULL) ==
+            SQLITE_OK) {
+            int row_count = 0;
+            while (sqlite3_step(dump_stmt) == SQLITE_ROW) {
+                const char *u = (const char *)sqlite3_column_text(dump_stmt, 0);
+                int d = sqlite3_column_int(dump_stmt, 1);
+                LOG_WARN("  Row %d: user='%s', dev=%d", ++row_count, u, d);
+            }
+            if (row_count == 0)
+                LOG_WARN("  Table is EMPTY");
+            sqlite3_finalize(dump_stmt);
+        } else {
+            LOG_ERROR("  Failed to prepare dump query: %s",
+                      sqlite3_errmsg(storage->db));
+        }
+
         sqlite3_finalize(stmt);
         platform_mutex_unlock(&storage->mu);
         return -1;
     }
+
+    // Identity Key
     const void *identity_blob = sqlite3_column_blob(stmt, 0);
     int identity_len = sqlite3_column_bytes(stmt, 0);
     out_bundle->registration_id = (uint32_t)sqlite3_column_int(stmt, 1);
     out_bundle->identity_key = dup_blob(identity_blob, (size_t)identity_len);
     out_bundle->identity_key_len = (size_t)identity_len;
+
+    // PQC Key
+    const void *pqc_blob = sqlite3_column_blob(stmt, 2);
+    int pqc_len = sqlite3_column_bytes(stmt, 2);
+    if (pqc_blob && pqc_len > 0) {
+        out_bundle->pqc_public_key = dup_blob(pqc_blob, (size_t)pqc_len);
+        out_bundle->pqc_public_key_len = (size_t)pqc_len;
+    }
+
     sqlite3_finalize(stmt);
     if (!out_bundle->identity_key) {
         platform_mutex_unlock(&storage->mu);
@@ -224,6 +290,7 @@ int sqlite_e2ee_get_prekey_bundle(SQLiteStorage *storage, const char *user_name,
         return -1;
     }
 
+    // 2. Fetch Signed PreKey
     rc = sqlite3_prepare_v2(storage->db, signed_sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK) {
         platform_mutex_unlock(&storage->mu);
@@ -232,6 +299,7 @@ int sqlite_e2ee_get_prekey_bundle(SQLiteStorage *storage, const char *user_name,
     }
     sqlite3_bind_text(stmt, 1, user_name, -1, SQLITE_TRANSIENT);
     sqlite3_bind_int(stmt, 2, (int)device_id);
+
     rc = sqlite3_step(stmt);
     if (rc != SQLITE_ROW) {
         sqlite3_finalize(stmt);
@@ -239,6 +307,7 @@ int sqlite_e2ee_get_prekey_bundle(SQLiteStorage *storage, const char *user_name,
         sqlite_e2ee_free_prekey_bundle(out_bundle);
         return -1;
     }
+
     out_bundle->signed_pre_key.signed_pre_key_id =
         (uint32_t)sqlite3_column_int(stmt, 0);
     const void *signed_pub = sqlite3_column_blob(stmt, 1);
@@ -261,6 +330,7 @@ int sqlite_e2ee_get_prekey_bundle(SQLiteStorage *storage, const char *user_name,
         return -1;
     }
 
+    // 3. Fetch One-Time PreKey
     rc = sqlite3_prepare_v2(storage->db, prekey_sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK) {
         platform_mutex_unlock(&storage->mu);
@@ -276,6 +346,7 @@ int sqlite_e2ee_get_prekey_bundle(SQLiteStorage *storage, const char *user_name,
         sqlite_e2ee_free_prekey_bundle(out_bundle);
         return -1;
     }
+
     out_bundle->pre_key.pre_key_id = (uint32_t)sqlite3_column_int(stmt, 0);
     const void *pre_pub = sqlite3_column_blob(stmt, 1);
     int pre_pub_len = sqlite3_column_bytes(stmt, 1);
@@ -315,6 +386,11 @@ void sqlite_e2ee_free_prekey_bundle(SQLiteE2EEPreKeyBundle *bundle) {
     free(bundle->signed_pre_key.signature);
     bundle->signed_pre_key.signature = NULL;
     bundle->signed_pre_key.signature_len = 0;
+
+    // Phase 27.5
+    free(bundle->pqc_public_key);
+    bundle->pqc_public_key = NULL;
+    bundle->pqc_public_key_len = 0;
 }
 
 int sqlite_e2ee_track_room_member(SQLiteStorage *storage, const char *room_name,

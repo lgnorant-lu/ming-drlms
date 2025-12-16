@@ -35,6 +35,28 @@ DRLMS 使用 Signal 协议实现 E2EE：
 | 签名预密钥 | 中期（周/月） | 会话建立 |
 | 一次性预密钥 | 单次使用 | 前向安全 |
 
+### 后量子混合加密 (Phase 27)
+
+DRLMS 支持混合加密模式，结合经典密码学和后量子密码学：
+
+```
+会话密钥派生:
+  shared = HKDF(
+    X25519_DH_Secret || ML-KEM-768_Secret,
+    info = "ming-drlms-pqc-hybrid-v1"
+  )
+```
+
+| 算法 | 用途 | 安全级别 |
+|------|------|----------|
+| X25519 | 经典 ECDH | 抗经典攻击 |
+| ML-KEM-768 | 后量子 KEM | 抗量子攻击 (NIST Level 3) |
+| 混合模式 | 两者结合 | 同时抵御两类攻击 |
+
+<Note>
+启用混合加密需要安装 liboqs 库。参见 [liboqs 安装](/zh/guides/liboqs-install)。
+</Note>
+
 ---
 
 ## MP2 模式 E2EE

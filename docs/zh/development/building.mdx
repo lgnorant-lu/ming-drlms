@@ -16,6 +16,17 @@ DRLMS 包含 Python 客户端和 C 服务器两个主要组件。本指南介绍
 - Python 3.9+
 - pip 或 uv
 
+### 前置条件 (Windows)
+
+DRLMS 的 Windows Server 构建依赖 **MSYS2** 提供的 `protoc-gen-c` 工具。Windows 原生生态缺乏此工具的官方二进制，因此我们使用 MSYS2 进行桥接。
+
+1.  **安装 MSYS2**: 从 [mysys2.org](https://www.msys2.org/) 下载并安装。
+2.  **安装编译器插件**: 打开 **MSYS2 MINGW64** 终端，运行：
+    ```bash
+    pacman -S mingw-w64-x86_64-protobuf-c
+    ```
+3.  **确认路径**: 默认安装路径通常为 `C:\msys64\mingw64\bin\protoc-gen-c.exe`。构建系统已预配置此路径。
+
 ### 平台隔离原则
 
 <Warning>
@@ -199,20 +210,14 @@ Python CFFI 构建 Signal Bridge 时需要 OpenSSL 头文件：
 
     ```cmd
     cd path\to\DRLMS
-    rmdir /S /Q build_win_ninja_x64 2>nul
-    mkdir build_win_ninja_x64
-    cd build_win_ninja_x64
-
-    cmake -G "Ninja" ^
-      -DCMAKE_BUILD_TYPE=RelWithDebInfo ^
-      -DOPENSSL_ROOT_DIR=%CD%\..\vcpkg_installed\x64-windows ^
-      -DPROTOBUF_C_USE_PREGENSETS=OFF ^
-      ..
-    cmake --build . --target log_collector_server drlms_signal_bridge
+    rmdir /S /Q build_win 2>nul
+    
+    cmake --preset windows-ninja
+    cmake --build build_win
     ```
 
     <Note>
-    VS 2026 需使用 Ninja 生成器，直接使用 VS 生成器可能无法正确识别。
+    VS 2026 建议使用 Ninja 生成器 (`windows-ninja` 预设)，构建产物将位于 `build_win/`。
     </Note>
   </Tab>
 </Tabs>
@@ -222,7 +227,7 @@ Python CFFI 构建 Signal Bridge 时需要 OpenSSL 头文件：
 <Tabs>
   <Tab title="Linux/macOS">
     ```
-    build/
+    build_linux/                     # Linux 构建目录
     ├── log_collector_server         # 主服务器
     ├── libipc.so / libipc.a         # IPC 共享/静态库
     └── libdrlms_signal_bridge.so    # Signal Protocol + XEdDSA 桥接库
@@ -230,8 +235,7 @@ Python CFFI 构建 Signal Bridge 时需要 OpenSSL 头文件：
   </Tab>
   <Tab title="Windows">
     ```
-    build/                           # VS 2022 输出
-    build_win_ninja_x64/             # VS 2026 + Ninja 输出
+    build_win/                       # Windows 构建目录
     ├── log_collector_server.exe     # 主服务器
     ├── ipc.dll / ipc.lib            # IPC 动态/静态库
     └── drlms_signal_bridge.dll      # Signal Protocol + XEdDSA 桥接库

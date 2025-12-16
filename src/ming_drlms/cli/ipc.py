@@ -78,9 +78,7 @@ def ipc_send(
         raise typer.Exit(code=e.returncode)
     except FileNotFoundError:
         print(f"[red]错误: 找不到 ipc_sender 工具于 {tool}[/red]")
-        print(
-            "[yellow]请确保 C 工具已编译 (如 build_win_ninja_x64/src/tools/)[/yellow]"
-        )
+        print("[yellow]请确保 C 工具已编译 (如 build_win/src/tools/)[/yellow]")
         raise typer.Exit(code=1)
 
 
@@ -106,9 +104,7 @@ def ipc_listen(
         raise typer.Exit(code=e.returncode)
     except FileNotFoundError:
         print(f"[red]错误: 找不到 log_consumer 工具于 {tool}[/red]")
-        print(
-            "[yellow]请确保 C 工具已编译 (如 build_win_ninja_x64/src/tools/)[/yellow]"
-        )
+        print("[yellow]请确保 C 工具已编译 (如 build_win/src/tools/)[/yellow]")
         raise typer.Exit(code=1)
 
 

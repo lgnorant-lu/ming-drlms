@@ -98,8 +98,8 @@ src/schema/v2/
 
 ```bash
 # Windows
-cmake -B build_win_ninja_x64 -G Ninja
-cmake --build build_win_ninja_x64 --config Release
+cmake -B build_win -G Ninja
+cmake --build build_win --config Release
 
 # Linux/WSL
 cmake -B build_wsl -G Ninja
@@ -176,7 +176,7 @@ from ming_drlms.core.generated.schema.v2 import room_pb2  # 不存在
 1. **重新编译所有端**
    ```bash
    # C 端
-   cmake --build build_win_ninja_x64 --target proto_gen
+   cmake --build build_win --target proto_gen
    
    # Python 端（如未通过 CMake）
    python -m grpc_tools.protoc ...
@@ -246,7 +246,7 @@ os.environ.setdefault("PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION", "python")
 python -c "from ming_drlms.proto.schema.v2 import room_pb2; print('OK')"
 
 # 检查 C 端编译
-cmake --build build_win_ninja_x64 --target proto_gen
+cmake --build build_win --target proto_gen
 ```
 
 ---

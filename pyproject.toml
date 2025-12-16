@@ -34,6 +34,11 @@ dependencies = [
     "tomli>=2.0.0; python_version < '3.11'",
     "tomli-w>=1.0.0",
     "zstandard>=0.25.0",  # New for Phase 23: Compression support
+    
+    # Phase 27: Quantum-Resistant Cryptography
+    "liboqs-python>=0.14.1",
+    "coincurve>=21.0.0",
+    "bip_utils>=2.10.0",
 ]
 
 [project.optional-dependencies]
@@ -84,6 +89,8 @@ version_scheme = "no-guess-dev"
 local_scheme = "no-local-version"
 
 [tool.pytest.ini_options]
+testpaths = ["tests"]
+norecursedirs = ["build*", "_deps", ".venv*", "node_modules", "*.egg-info"]
 markers = [
     "integration: marks tests that exercise the external server binary",
 ]

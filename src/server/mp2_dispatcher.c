@@ -262,7 +262,8 @@ int mp2_dispatcher_handle_frame(platform_socket_t fd, const mp2_frame_t *frame,
         // Keep as UNKNOWN for unrecognized message types
         break;
     }
-    LOG_DEBUG("Received %s", msg_type_name);
+    LOG_INFO("DEBUG: Dispatcher Received %s (type=%u)", msg_type_name,
+             frame->msg_type);
 
     mp2_auth_config_t auth_cfg = {
         .users = users,

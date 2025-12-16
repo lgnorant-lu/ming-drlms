@@ -247,7 +247,7 @@ ming-drlms ipc file-send file2.txt --key 0x2222
 **解决**:
 ```bash
 # 重新编译
-cmake --build build_win_ninja_x64 --target ipc_sender file_receiver
+cmake --build build_win --target ipc_sender file_receiver
 ```
 
 ---
@@ -278,11 +278,11 @@ Error: 找不到工具: file_receiver
 **解决**:
 ```bash
 # 1. 检查编译
-ls build_win_ninja_x64/src/tools/file_receiver.exe  # Windows
-ls build/src/tools/file_receiver                     # Linux
+ls build_win/src/tools/file_receiver.exe     # Windows
+ls build_linux/src/tools/file_receiver       # Linux
 
 # 2. 重新编译
-cmake --build build_win_ninja_x64 --target file_receiver
+cmake --build build_win --target file_receiver
 ```
 
 ---
@@ -322,12 +322,12 @@ Python CLI 实际调用 C 编译的工具：
 **直接调用**（不通过 Python）:
 ```bash
 # Windows
-.\build_win_ninja_x64\src\tools\ipc_sender.exe --file test.txt
-.\build_win_ninja_x64\src\tools\file_receiver.exe --output ./received/
+.\build_win\src\tools\ipc_sender.exe --file test.txt
+.\build_win\src\tools\file_receiver.exe --output ./received/
 
 # Linux
-./build/src/tools/ipc_sender --file test.txt
-./build/src/tools/file_receiver --output ./received/
+./build_linux/src/tools/ipc_sender --file test.txt
+./build_linux/src/tools/file_receiver --output ./received/
 ```
 
 ---

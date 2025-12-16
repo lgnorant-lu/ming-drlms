@@ -20,7 +20,7 @@ _sym_db = _symbol_database.Default()
 
 
 DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(
-    b'\n\x1aschema/v2/federation.proto\x12\x0cmingdrlms.v2\x1a\x14schema/v2/room.proto"\xb6\x02\n\x11S2SPublishRequest\x12\x14\n\x0c\x62\x65\x61rer_token\x18\x01 \x01(\t\x12\x11\n\troom_name\x18\x02 \x01(\t\x12\x13\n\x0binstance_id\x18\x03 \x01(\t\x12\x10\n\x08\x65vent_id\x18\x04 \x01(\x03\x12\x11\n\ttimestamp\x18\x05 \x01(\t\x12\x13\n\x0bsender_user\x18\x06 \x01(\t\x12\x15\n\rdisplay_token\x18\x07 \x01(\t\x12\x0f\n\x07payload\x18\x08 \x01(\x0c\x12\x0f\n\x07sha_hex\x18\t \x01(\t\x12/\n\nevent_kind\x18\n \x01(\x0e\x32\x1b.mingdrlms.v2.RoomEventKind\x12,\n\x04\x66ile\x18\x0b \x01(\x0b\x32\x1e.mingdrlms.v2.RoomFileMetadata\x12\x11\n\tephemeral\x18\x0c \x01(\x08"L\n\x12S2SPublishResponse\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12\x0f\n\x07message\x18\x02 \x01(\t\x12\x17\n\x0f\x66orwarded_count\x18\x03 \x01(\x03"\x80\x01\n\x13S2SSubscribeRequest\x12\x14\n\x0c\x62\x65\x61rer_token\x18\x01 \x01(\t\x12\x11\n\troom_name\x18\x02 \x01(\t\x12\x13\n\x0binstance_id\x18\x03 \x01(\t\x12\x18\n\x10remote_server_id\x18\x04 \x01(\t\x12\x11\n\tsubscribe\x18\x05 \x01(\x08"I\n\x14S2SSubscribeResponse\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12\x0f\n\x07message\x18\x02 \x01(\t\x12\x12\n\nregistered\x18\x03 \x01(\x08\x62\x06proto3'
+    b'\n\x1aschema/v2/federation.proto\x12\x0cmingdrlms.v2\x1a\nroom.proto"\xb6\x02\n\x11S2SPublishRequest\x12\x14\n\x0c\x62\x65\x61rer_token\x18\x01 \x01(\t\x12\x11\n\troom_name\x18\x02 \x01(\t\x12\x13\n\x0binstance_id\x18\x03 \x01(\t\x12\x10\n\x08\x65vent_id\x18\x04 \x01(\x03\x12\x11\n\ttimestamp\x18\x05 \x01(\t\x12\x13\n\x0bsender_user\x18\x06 \x01(\t\x12\x15\n\rdisplay_token\x18\x07 \x01(\t\x12\x0f\n\x07payload\x18\x08 \x01(\x0c\x12\x0f\n\x07sha_hex\x18\t \x01(\t\x12/\n\nevent_kind\x18\n \x01(\x0e\x32\x1b.mingdrlms.v2.RoomEventKind\x12,\n\x04\x66ile\x18\x0b \x01(\x0b\x32\x1e.mingdrlms.v2.RoomFileMetadata\x12\x11\n\tephemeral\x18\x0c \x01(\x08"L\n\x12S2SPublishResponse\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12\x0f\n\x07message\x18\x02 \x01(\t\x12\x17\n\x0f\x66orwarded_count\x18\x03 \x01(\x03"\x80\x01\n\x13S2SSubscribeRequest\x12\x14\n\x0c\x62\x65\x61rer_token\x18\x01 \x01(\t\x12\x11\n\troom_name\x18\x02 \x01(\t\x12\x13\n\x0binstance_id\x18\x03 \x01(\t\x12\x18\n\x10remote_server_id\x18\x04 \x01(\t\x12\x11\n\tsubscribe\x18\x05 \x01(\x08"I\n\x14S2SSubscribeResponse\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12\x0f\n\x07message\x18\x02 \x01(\t\x12\x12\n\nregistered\x18\x03 \x01(\x08\x62\x06proto3'
 )
 
 _globals = globals()
@@ -30,12 +30,12 @@ _builder.BuildTopDescriptorsAndMessages(
 )
 if not _descriptor._USE_C_DESCRIPTORS:
     DESCRIPTOR._loaded_options = None
-    _globals["_S2SPUBLISHREQUEST"]._serialized_start = 67
-    _globals["_S2SPUBLISHREQUEST"]._serialized_end = 377
-    _globals["_S2SPUBLISHRESPONSE"]._serialized_start = 379
-    _globals["_S2SPUBLISHRESPONSE"]._serialized_end = 455
-    _globals["_S2SSUBSCRIBEREQUEST"]._serialized_start = 458
-    _globals["_S2SSUBSCRIBEREQUEST"]._serialized_end = 586
-    _globals["_S2SSUBSCRIBERESPONSE"]._serialized_start = 588
-    _globals["_S2SSUBSCRIBERESPONSE"]._serialized_end = 661
+    _globals["_S2SPUBLISHREQUEST"]._serialized_start = 57
+    _globals["_S2SPUBLISHREQUEST"]._serialized_end = 367
+    _globals["_S2SPUBLISHRESPONSE"]._serialized_start = 369
+    _globals["_S2SPUBLISHRESPONSE"]._serialized_end = 445
+    _globals["_S2SSUBSCRIBEREQUEST"]._serialized_start = 448
+    _globals["_S2SSUBSCRIBEREQUEST"]._serialized_end = 576
+    _globals["_S2SSUBSCRIBERESPONSE"]._serialized_start = 578
+    _globals["_S2SSUBSCRIBERESPONSE"]._serialized_end = 651
 # @@protoc_insertion_point(module_scope)

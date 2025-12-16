@@ -61,7 +61,7 @@ SignalBridgeError: Unable to locate libsignal-protocol-c headers or libraries.
 
 ```
 DRLMS/
-├── build_win_ninja_x64/          # Windows 构建目录（示例）
+├── build_win/          # Windows 构建目录（示例）
 │   ├── log_collector_server.exe
 │   └── _deps/
 │       └── signal-install/
@@ -241,9 +241,9 @@ fi
 cd D:\path\to\DRLMS
 
 :: 清理并创建构建目录
-rmdir /S /Q build_win_ninja_x64 2>nul
-mkdir build_win_ninja_x64
-cd build_win_ninja_x64
+rmdir /S /Q build_win 2>nul
+mkdir build_win
+cd build_win
 
 :: CMake 配置
 cmake -G "Ninja" ^

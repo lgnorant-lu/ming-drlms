@@ -101,6 +101,145 @@ class IdentityManager:
         self._signal_store: Optional["SignalStore"] = None
         self._identity: Optional[Identity] = None
         self._state: Optional["LocalKeyState"] = None
+        # Phase 27: PQC key storage
+        self._pqc_public_key: Optional[bytes] = None
+
+    @classmethod
+    def from_mnemonic(
+        cls,
+        mnemonic: str,
+        username: str,
+        *,
+        passphrase: str = "",
+        keystore: Optional["LocalKeyStore"] = None,
+        regenerate_pqc: bool = False,
+    ) -> "IdentityManager":
+        """Phase 27: Create identity from BIP39 mnemonic.
+
+        This derives all cryptographic keys from a single mnemonic:
+        - Nostr key (Secp256k1) via NIP-06 path m/44'/1237'/0'/0/0
+        - Signal/X25519 key via HKDF for E2EE
+        - ML-KEM-768 (PQC) key for hybrid encryption
+
+        Args:
+            mnemonic: BIP39 mnemonic phrase (12/24 words)
+            username: User identifier for key storage
+            passphrase: Optional BIP39 passphrase
+            keystore: Optional LocalKeyStore instance
+            regenerate_pqc: Force regenerate PQC keys even if exists
+
+        Returns:
+            IdentityManager with all keys derived and stored
+
+        Raises:
+            ImportError: If required dependencies not installed
+            ValueError: If mnemonic is invalid
+        """
+        from .nostr_derivation import (
+            derive_nostr_keys,
+            generate_signal_seed,
+            generate_pqc_seed,
+            validate_mnemonic,
+        )
+        from .e2ee_store import LocalKeyStore
+
+        # Validate mnemonic
+        if not validate_mnemonic(mnemonic):
+            raise ValueError("Invalid BIP39 mnemonic")
+
+        # Derive keys
+        _nostr_keys = derive_nostr_keys(mnemonic, passphrase=passphrase)  # noqa: F841
+        signal_seed = generate_signal_seed(mnemonic, passphrase=passphrase)
+
+        # Create X25519 key from signal seed
+        from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
+
+        x25519_private = X25519PrivateKey.from_private_bytes(signal_seed)
+        x25519_public = x25519_private.public_key().public_bytes_raw()
+        x25519_private_bytes = x25519_private.private_bytes_raw()
+
+        # Initialize keystore
+        ks = keystore if keystore is not None else LocalKeyStore()
+
+        # Check if identity already exists
+        existing_state = ks.load_state(username)
+        if existing_state is not None and not regenerate_pqc:
+            # Identity exists, just return manager
+            manager = cls(username, keystore=ks)
+            manager._load_pqc_key()
+            return manager
+
+        # Generate PQC key (ML-KEM-768)
+        pqc_public_key: bytes = b""
+        pqc_private_key: bytes | None = None
+        try:
+            from .pqc_kem import MLKEM768, is_pqc_available
+
+            if is_pqc_available():
+                pqc_seed = generate_pqc_seed(mnemonic, passphrase=passphrase)
+                kem = MLKEM768()
+                pqc_public_key = kem.generate_keypair_from_seed(pqc_seed)
+                # Export secret key for storage
+                pqc_private_key = kem.export_keypair().secret_key
+        except ImportError:
+            pass  # PQC not available, continue without
+
+        # Store keys in LocalKeyStore
+        # Note: This creates the identity with X25519 key for Signal Protocol
+        from .mproto_v2_client import SignalKeyPair
+
+        identity_key = SignalKeyPair(
+            public_key=x25519_public,
+            private_key=x25519_private_bytes,
+        )
+
+        # Store identity (this will generate pre-keys etc. if needed)
+        ks.store_identity_only(
+            username=username,
+            identity_key=identity_key,
+            pqc_public_key=pqc_public_key,
+            pqc_private_key=pqc_private_key,
+        )
+
+        # Create and return manager
+        # Create and return manager
+        manager = cls(username, keystore=ks)
+        manager._pqc_public_key = pqc_public_key
+        manager._pqc_private_key = pqc_private_key
+        manager.invalidate_cache()
+
+        return manager
+
+    def _load_pqc_key(self) -> None:
+        """Load PQC keys from storage if available."""
+        if self._pqc_public_key is not None:
+            return
+        state = self._load_state()
+        if state is not None:
+            self._pqc_public_key = getattr(state, "pqc_public_key", None)
+            self._pqc_private_key = getattr(state, "pqc_private_key", None)
+
+    def get_pqc_public_key(self) -> Optional[bytes]:
+        """Get ML-KEM-768 public key if available.
+
+        Returns:
+            1184-byte PQC public key or None if not available
+        """
+        self._load_pqc_key()
+        return self._pqc_public_key
+
+    def get_pqc_private_key(self) -> Optional[bytes]:
+        """Get ML-KEM-768 private key if available.
+
+        Returns:
+            2400-byte PQC secret key or None if not available
+        """
+        self._load_pqc_key()
+        return getattr(self, "_pqc_private_key", None)
+
+    def has_pqc_key(self) -> bool:
+        """Check if PQC key is available."""
+        return self.get_pqc_public_key() is not None
 
     def _ensure_keystore(self) -> "LocalKeyStore":
         """Lazily initialize and return the keystore."""

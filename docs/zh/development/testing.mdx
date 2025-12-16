@@ -346,7 +346,7 @@ pytest --pdb
     export DRLMS_MP2_PORT=15035
     
     # 2. 启动 MP2 服务器（另一终端）
-    ./build/log_collector_server
+    ./build_linux/log_collector_server
     
     # 3. 运行测试
     pytest tests/python/test_mp2_*.py -v
@@ -360,7 +360,7 @@ pytest --pdb
     $env:DRLMS_MP2_PORT = "15035"
     
     # 2. 启动 MP2 服务器（另一终端）
-    .\build\Release\log_collector_server.exe
+    .\build_win\log_collector_server.exe
     
     # 3. 运行测试
     pytest tests/python/test_mp2_*.py -v

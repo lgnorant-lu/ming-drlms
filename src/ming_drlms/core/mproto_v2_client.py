@@ -115,6 +115,8 @@ class E2EEGenerateKeysResult:
     identity_key: SignalKeyPair | None
     signed_pre_key: SignalSignedPreKey | None
     pre_keys: tuple[SignalPreKey, ...]
+    # Phase 27.5: PQC Support
+    pqc_public_key: bytes | None = None
 
 
 @dataclass(slots=True)
@@ -129,6 +131,8 @@ class E2EEPreKeyBundle:
     signed_pre_key_id: int
     signed_pre_key_public: bytes | None
     signed_pre_key_signature: bytes | None
+    # Phase 27.5: PQC Support
+    pqc_public_key: bytes | None = None
 
 
 @dataclass(slots=True)
@@ -1040,6 +1044,11 @@ class MP2Client:
         target_user: str,
         *,
         force: bool = False,
+        # Phase 27.5: Support key upload
+        identity_key: SignalKeyPair | None = None,
+        signed_pre_key: SignalSignedPreKey | None = None,
+        pre_keys: list[SignalPreKey] | None = None,
+        pqc_public_key: bytes | None = None,
     ) -> E2EEGenerateKeysResult:
         self.ensure_access_token(username)
         self.connect()
@@ -1048,6 +1057,31 @@ class MP2Client:
         req = e2ee_pb2.E2EEGenerateKeysRequest()
         req.user_name = target_user
         req.force_regenerate = bool(force)
+
+        # Phase 27.5: Populate keys if provided (Upload Mode)
+        if identity_key and signed_pre_key and pre_keys:
+            # Identity Key
+            req.identity_key.public_key = identity_key.public_key
+            req.identity_key.private_key = identity_key.private_key
+
+            # Signed Pre Key
+            req.signed_pre_key.id = signed_pre_key.id
+            req.signed_pre_key.key.public_key = signed_pre_key.key.public_key
+            req.signed_pre_key.key.private_key = signed_pre_key.key.private_key
+            req.signed_pre_key.signature = signed_pre_key.signature
+            req.signed_pre_key.timestamp = signed_pre_key.timestamp
+
+            # Pre Keys
+            for pk in pre_keys:
+                p = req.pre_keys.add()
+                p.id = pk.id
+                p.key.public_key = pk.key.public_key
+                p.key.private_key = pk.key.private_key
+
+            # PQC Key
+            if pqc_public_key:
+                req.pqc_public_key = pqc_public_key
+
         write_frame(
             sock,
             msg_types.MSG_TYPE_E2EE_GENERATE_KEYS_REQUEST,
@@ -1058,16 +1092,16 @@ class MP2Client:
         if frame.msg_type == msg_types.MSG_TYPE_E2EE_GENERATE_KEYS_RESPONSE:
             resp = e2ee_pb2.E2EEGenerateKeysResponse()
             resp.ParseFromString(frame.payload)
-            identity: SignalKeyPair | None = None
-            if resp.identity_key is not None:
-                identity = SignalKeyPair(
+            identity_res: SignalKeyPair | None = None
+            if resp.identity_key is not None and resp.identity_key.public_key:
+                identity_res = SignalKeyPair(
                     public_key=bytes(resp.identity_key.public_key),
                     private_key=bytes(resp.identity_key.private_key),
                 )
 
-            signed_pre_key: SignalSignedPreKey | None = None
+            signed_pre_key_res: SignalSignedPreKey | None = None
             if resp.signed_pre_key is not None and resp.signed_pre_key.key:
-                signed_pre_key = SignalSignedPreKey(
+                signed_pre_key_res = SignalSignedPreKey(
                     id=int(resp.signed_pre_key.id),
                     key=SignalKeyPair(
                         public_key=bytes(resp.signed_pre_key.key.public_key),
@@ -1077,11 +1111,11 @@ class MP2Client:
                     timestamp=int(resp.signed_pre_key.timestamp),
                 )
 
-            pre_keys: list[SignalPreKey] = []
+            pre_keys_res: list[SignalPreKey] = []
             for pk in resp.pre_keys:
                 if not pk.key:
                     continue
-                pre_keys.append(
+                pre_keys_res.append(
                     SignalPreKey(
                         id=int(pk.id),
                         key=SignalKeyPair(
@@ -1097,9 +1131,12 @@ class MP2Client:
                 registration_id=int(resp.registration_id),
                 pre_key_count=int(resp.pre_key_count),
                 device_id=int(resp.device_id),
-                identity_key=identity,
-                signed_pre_key=signed_pre_key,
-                pre_keys=tuple(pre_keys),
+                identity_key=identity_res,
+                signed_pre_key=signed_pre_key_res,
+                pre_keys=tuple(pre_keys_res),
+                pqc_public_key=bytes(resp.pqc_public_key)
+                if resp.pqc_public_key
+                else None,
             )
         if frame.msg_type == common_pb2.MSG_TYPE_ERROR_RESPONSE:
             err = common_pb2.ErrorResponse()
@@ -1146,6 +1183,9 @@ class MP2Client:
                 else None,
                 signed_pre_key_signature=bytes(resp.signed_pre_key_signature)
                 if resp.signed_pre_key_signature
+                else None,
+                pqc_public_key=bytes(resp.pqc_public_key)
+                if resp.pqc_public_key
                 else None,
             )
         if frame.msg_type == common_pb2.MSG_TYPE_ERROR_RESPONSE:

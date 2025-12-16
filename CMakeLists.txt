@@ -1,13 +1,39 @@
 cmake_minimum_required(VERSION 3.18)
 set(CMAKE_TOOLCHAIN_FILE "" CACHE FILEPATH "" FORCE)
+
 project(ming_drlms C)
+
+# --- Windows MSVC Toolchain Hardening ---
+# Prevent TDM-GCC/MinGW tools from being picked up when using MSVC.
+# Must check AFTER project() when MSVC variable is available.
+if(WIN32 AND MSVC)
+    # Find MSVC tools in the same directory as cl.exe
+    get_filename_component(_msvc_bin_dir "${CMAKE_C_COMPILER}" DIRECTORY)
+    
+    # Force MSVC archiver (lib.exe) instead of ar.exe
+    if(EXISTS "${_msvc_bin_dir}/lib.exe" AND NOT CMAKE_AR MATCHES "lib\\.exe$")
+        set(CMAKE_AR "${_msvc_bin_dir}/lib.exe" CACHE FILEPATH "MSVC Archiver" FORCE)
+        message(STATUS "Forcing MSVC lib.exe: ${CMAKE_AR}")
+    endif()
+    
+    # Force MSVC linker (link.exe) instead of ld.exe
+    if(EXISTS "${_msvc_bin_dir}/link.exe" AND NOT CMAKE_LINKER MATCHES "link\\.exe$")
+        set(CMAKE_LINKER "${_msvc_bin_dir}/link.exe" CACHE FILEPATH "MSVC Linker" FORCE)
+        message(STATUS "Forcing MSVC link.exe: ${CMAKE_LINKER}")
+    endif()
+    
+    # Force MSVC manifest tool (mt.exe)
+    if(EXISTS "${_msvc_bin_dir}/mt.exe" AND NOT CMAKE_MT MATCHES "mt\\.exe$")
+        set(CMAKE_MT "${_msvc_bin_dir}/mt.exe" CACHE FILEPATH "MSVC Manifest Tool" FORCE)
+    endif()
+endif()
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 if(WIN32)
-    add_compile_definitions(_WIN32_WINNT=0x0601 WIN32_LEAN_AND_MEAN NOMINMAX)
+    add_compile_definitions(_WIN32_WINNT=0x0601 WIN32_LEAN_AND_MEAN NOMINMAX _WINDOWS)
 endif()
 
 include(CTest)
@@ -230,199 +256,9 @@ if(BUILD_SERVER)
         message(STATUS "Found system SQLite3: ${SQLite3_VERSION}")
         set(HAVE_SYSTEM_SQLITE3 1)
     else()
-        find_package(unofficial-sqlite3 CONFIG QUIET)
-        if(NOT unofficial-sqlite3_FOUND)
-            message(STATUS "unofficial-sqlite3 not found - providing dummy SQLite headers for CI compatibility")
-            # Create dummy sqlite3.h for CI builds
-            set(_dummy_sqlite_dir "${CMAKE_BINARY_DIR}/dummy_sqlite")
-            file(MAKE_DIRECTORY "${_dummy_sqlite_dir}")
-            file(WRITE "${_dummy_sqlite_dir}/sqlite3.h" [=[
-#ifndef SQLITE3_H
-#define SQLITE3_H
-
-#include <stdint.h>
-#include <stddef.h>
-
-// Dummy sqlite3.h for CI builds when SQLite is not available
-// This allows compilation to proceed but will disable SQLite functionality
-
-typedef struct sqlite3 sqlite3;
-typedef struct sqlite3_stmt sqlite3_stmt;
-
-typedef int (*sqlite3_callback)(void*,int,char**,char**);
-
-// SQLite type definitions
-typedef long long int sqlite3_int64;
-typedef unsigned long long int sqlite3_uint64;
-
-#define SQLITE_OK           0   /* Successful result */
-#define SQLITE_ERROR        1   /* Generic error */
-#define SQLITE_BUSY         5   /* The database file is locked */
-#define SQLITE_ROW          100 /* sqlite3_step() has another row ready */
-#define SQLITE_DONE         101 /* sqlite3_step() has finished executing */
-#define SQLITE_TRANSIENT    ((void(*)(void*))-1)
-#define SQLITE_STATIC       ((void(*)(void*))0)
-
-// Define the structs for MSVC compatibility
-struct sqlite3 {
-    int dummy;
-};
-
-struct sqlite3_stmt {
-    int dummy;
-};
-
-int sqlite3_open(const char *filename, sqlite3 **ppDb);
-int sqlite3_close(sqlite3 *db);
-int sqlite3_exec(sqlite3*, const char *sql, sqlite3_callback, void*, char**);
-int sqlite3_prepare_v2(sqlite3*, const char*, int, sqlite3_stmt**, const char**);
-int sqlite3_step(sqlite3_stmt* pStmt);
-int sqlite3_finalize(sqlite3_stmt* pStmt);
-int sqlite3_bind_int(sqlite3_stmt*, int, int);
-int sqlite3_bind_text(sqlite3_stmt*, int, const char*, int, void(*)(void*));
-int sqlite3_bind_int64(sqlite3_stmt*, int, sqlite3_int64);
-int sqlite3_bind_blob(sqlite3_stmt*, int, const void*, int, void(*)(void*));
-int sqlite3_bind_null(sqlite3_stmt*, int);
-int sqlite3_reset(sqlite3_stmt* pStmt);
-int sqlite3_clear_bindings(sqlite3_stmt* pStmt);
-const char* sqlite3_errmsg(sqlite3*);
-const unsigned char* sqlite3_column_text(sqlite3_stmt*, int);
-sqlite3_int64 sqlite3_column_int64(sqlite3_stmt*, int);
-int sqlite3_column_int(sqlite3_stmt*, int);
-const void* sqlite3_column_blob(sqlite3_stmt*, int);
-int sqlite3_column_bytes(sqlite3_stmt*, int);
-void sqlite3_free(void*);
-int sqlite3_changes(sqlite3*);
-sqlite3_int64 sqlite3_last_insert_rowid(sqlite3*);
-
-#endif // SQLITE3_H
-]=])
-            # Create dummy sqlite3.c with stub implementations
-            file(WRITE "${_dummy_sqlite_dir}/sqlite3.c" [=[
-#include "sqlite3.h"
-#include <stdlib.h>
-#include <string.h>
-
-// Dummy implementations for CI builds
-int sqlite3_open(const char *filename, sqlite3 **ppDb) {
-    (void)filename;
-    *ppDb = (sqlite3*)malloc(sizeof(sqlite3)); // Dummy allocation
-    return SQLITE_OK;
-}
-
-int sqlite3_close(sqlite3 *db) {
-    if (db) free(db);
-    return SQLITE_OK;
-}
-
-int sqlite3_exec(sqlite3* db, const char *sql, sqlite3_callback callback, void* arg, char** errmsg) {
-    (void)db; (void)sql; (void)callback; (void)arg; (void)errmsg;
-    return SQLITE_OK;
-}
-
-int sqlite3_prepare_v2(sqlite3* db, const char* sql, int nBytes, sqlite3_stmt** ppStmt, const char** pzTail) {
-    (void)db; (void)sql; (void)nBytes; (void)pzTail;
-    *ppStmt = (sqlite3_stmt*)malloc(sizeof(sqlite3_stmt)); // Dummy allocation
-    return SQLITE_OK;
-}
-
-int sqlite3_step(sqlite3_stmt* pStmt) {
-    (void)pStmt;
-    return SQLITE_DONE; // No rows
-}
-
-int sqlite3_finalize(sqlite3_stmt* pStmt) {
-    if (pStmt) free(pStmt);
-    return SQLITE_OK;
-}
-
-int sqlite3_bind_int(sqlite3_stmt* stmt, int idx, int value) {
-    (void)stmt; (void)idx; (void)value;
-    return SQLITE_OK;
-}
-
-int sqlite3_bind_text(sqlite3_stmt* stmt, int idx, const char* text, int n, void(*destructor)(void*)) {
-    (void)stmt; (void)idx; (void)text; (void)n; (void)destructor;
-    return SQLITE_OK;
-}
-
-int sqlite3_bind_int64(sqlite3_stmt* stmt, int idx, sqlite3_int64 value) {
-    (void)stmt; (void)idx; (void)value;
-    return SQLITE_OK;
-}
-
-int sqlite3_bind_blob(sqlite3_stmt* stmt, int idx, const void* blob, int n, void(*destructor)(void*)) {
-    (void)stmt; (void)idx; (void)blob; (void)n; (void)destructor;
-    return SQLITE_OK;
-}
-
-int sqlite3_bind_null(sqlite3_stmt* stmt, int idx) {
-    (void)stmt; (void)idx;
-    return SQLITE_OK;
-}
-
-int sqlite3_reset(sqlite3_stmt* pStmt) {
-    (void)pStmt;
-    return SQLITE_OK;
-}
-
-int sqlite3_clear_bindings(sqlite3_stmt* pStmt) {
-    (void)pStmt;
-    return SQLITE_OK;
-}
-
-const char* sqlite3_errmsg(sqlite3* db) {
-    (void)db;
-    return "Dummy SQLite implementation";
-}
-
-const unsigned char* sqlite3_column_text(sqlite3_stmt* stmt, int iCol) {
-    (void)stmt; (void)iCol;
-    return (const unsigned char*)"";
-}
-
-sqlite3_int64 sqlite3_column_int64(sqlite3_stmt* stmt, int iCol) {
-    (void)stmt; (void)iCol;
-    return 0;
-}
-
-int sqlite3_column_int(sqlite3_stmt* stmt, int iCol) {
-    (void)stmt; (void)iCol;
-    return 0;
-}
-
-const void* sqlite3_column_blob(sqlite3_stmt* stmt, int iCol) {
-    (void)stmt; (void)iCol;
-    return NULL;
-}
-
-int sqlite3_column_bytes(sqlite3_stmt* stmt, int iCol) {
-    (void)stmt; (void)iCol;
-    return 0;
-}
-
-int sqlite3_changes(sqlite3* db) {
-    (void)db;
-    return 0;
-}
-
-sqlite3_int64 sqlite3_last_insert_rowid(sqlite3* db) {
-    (void)db;
-    return 0;
-}
-
-void sqlite3_free(void* ptr) {
-    if (ptr) {
-        free(ptr);
-    }
-}
-]=])
-            # Create dummy library
-            add_library(sqlite3_dummy STATIC "${_dummy_sqlite_dir}/sqlite3.c")
-            target_include_directories(sqlite3_dummy PUBLIC "${_dummy_sqlite_dir}")
-            include_directories("${_dummy_sqlite_dir}")
-            set(HAVE_SYSTEM_SQLITE3 0)
-        endif()
+        find_package(unofficial-sqlite3 CONFIG REQUIRED)
+        message(STATUS "Found unofficial-sqlite3: ${unofficial-sqlite3_VERSION}")
+        set(HAVE_SYSTEM_SQLITE3 0)
     endif()
 endif()
 

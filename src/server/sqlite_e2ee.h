@@ -32,6 +32,9 @@ typedef struct {
     uint32_t device_id;
     SQLiteE2EEPreKey pre_key;
     SQLiteE2EESignedPreKey signed_pre_key;
+    // Phase 27.5: PQC Support
+    unsigned char *pqc_public_key;
+    size_t pqc_public_key_len;
 } SQLiteE2EEPreKeyBundle;
 
 typedef struct {
@@ -47,13 +50,12 @@ typedef struct {
     size_t distribution_len;
 } SQLiteE2EESenderKey;
 
-int sqlite_e2ee_replace_identity(SQLiteStorage *storage, const char *user_name,
-                                 uint32_t device_id,
-                                 const unsigned char *identity_public,
-                                 size_t identity_public_len,
-                                 const unsigned char *identity_private,
-                                 size_t identity_private_len,
-                                 uint32_t registration_id);
+int sqlite_e2ee_replace_identity(
+    SQLiteStorage *storage, const char *user_name, uint32_t device_id,
+    const unsigned char *identity_public, size_t identity_public_len,
+    const unsigned char *identity_private, size_t identity_private_len,
+    uint32_t registration_id, const unsigned char *pqc_public_key,
+    size_t pqc_public_key_len);
 
 int sqlite_e2ee_replace_signed_pre_key(
     SQLiteStorage *storage, const char *user_name, uint32_t device_id,

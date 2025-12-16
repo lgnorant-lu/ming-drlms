@@ -1,3 +1,7 @@
+if(TARGET signal_protocol_ext)
+    return()
+endif()
+
 include(ExternalProject)
 
 set(SIGNAL_INSTALL_PREFIX "${CMAKE_BINARY_DIR}/_deps/signal-install" CACHE PATH "libsignal-protocol-c install prefix")

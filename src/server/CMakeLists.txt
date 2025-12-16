@@ -65,6 +65,11 @@ endif()
 include(${CMAKE_SOURCE_DIR}/cmake/ProtobufFetch.cmake)
 include(${CMAKE_SOURCE_DIR}/cmake/SignalFetch.cmake)
 include(${CMAKE_SOURCE_DIR}/cmake/EnsureProtocVersion.cmake)
+# --- Enhanced Protobuf-C detection and fallback ---
+# Include the new ProtobufFetch module
+include(${CMAKE_SOURCE_DIR}/cmake/ProtobufFetch.cmake)
+include(${CMAKE_SOURCE_DIR}/cmake/SignalFetch.cmake)
+include(${CMAKE_SOURCE_DIR}/cmake/EnsureProtocVersion.cmake)
 
 if(PROTOBUF_C_USE_BUNDLED_RUNTIME AND NOT PROTOBUF_C_USE_PREGENSETS)
     # Force disable bundled runtime to avoid conflict with system protoc-c
@@ -72,7 +77,9 @@ if(PROTOBUF_C_USE_BUNDLED_RUNTIME AND NOT PROTOBUF_C_USE_PREGENSETS)
 endif()
 
 # --- Protobuf-C code generation (Phase 1) ---
-find_program(PROTOC_C_EXECUTABLE protoc-c)
+if(NOT PROTOC_C_EXECUTABLE)
+    find_program(PROTOC_C_EXECUTABLE protoc-c)
+endif()
 drlms_require_protoc(PROTOC_EXECUTABLE)
 if(NOT PROTOC_EXECUTABLE)
     message(FATAL_ERROR "Failed to locate protoc ${DRLMS_PROTOC_VERSION}")
