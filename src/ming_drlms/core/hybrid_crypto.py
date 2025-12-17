@@ -37,6 +37,7 @@ except ImportError:
 
 __all__ = [
     "HybridEncryptResult",
+    "HybridCrypto",  # ← Add class wrapper
     "hybrid_encrypt",
     "hybrid_decrypt",
     "is_hybrid_available",
@@ -62,6 +63,35 @@ class HybridEncryptResult:
     wrapped_ciphertext: bytes
     pqc_ciphertext: bytes
     ephemeral_pub: bytes
+
+
+# Static class wrapper for backward compatibility with tools.py
+class HybridCrypto:
+    """Static class wrapper for hybrid encryption functions."""
+
+    @staticmethod
+    def encrypt(
+        plaintext: bytes, peer_x25519_pub: bytes, peer_pqc_pub: bytes
+    ) -> HybridEncryptResult:
+        """Wrapper for hybrid_encrypt function."""
+        return hybrid_encrypt(plaintext, peer_x25519_pub, peer_pqc_pub)
+
+    @staticmethod
+    def hybrid_decrypt(
+        wrapped_ciphertext: bytes,
+        pqc_ciphertext: bytes,
+        ephemeral_pub: bytes,
+        my_x25519_priv: bytes,
+        my_pqc_kem: "MLKEM768",
+    ) -> bytes:
+        """Wrapper for hybrid_decrypt function."""
+        return hybrid_decrypt(
+            wrapped_ciphertext,
+            pqc_ciphertext,
+            ephemeral_pub,
+            my_x25519_priv,
+            my_pqc_kem,
+        )
 
 
 def is_hybrid_available() -> bool:

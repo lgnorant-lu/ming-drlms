@@ -15,11 +15,42 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
+import os
+import platform
+import logging
+
+# Phase 28.1 Fix: Ensure liboqs DLL is found on Windows
+LIBOQS_DIR = os.environ.get("LIBOQS_DIR")
+if LIBOQS_DIR and platform.system() == "Windows":
+    # Usually DLLs are in 'bin' relative to install root for cmake builds
+    dll_path = os.path.join(LIBOQS_DIR, "bin")
+    search_path = None
+
+    if os.path.isdir(dll_path):
+        search_path = dll_path
+    elif os.path.isdir(LIBOQS_DIR):
+        search_path = LIBOQS_DIR
+
+    if search_path:
+        # 1. Modern Python 3.8+ method
+        try:
+            os.add_dll_directory(search_path)
+            logging.getLogger("ming_drlms.core.pqc_kem").info(
+                f"Added DLL directory: {search_path}"
+            )
+        except Exception:
+            pass
+
+        # 2. Legacy/Ctypes PATH method (Required for oqs-python wrapper)
+        if search_path not in os.environ["PATH"]:
+            os.environ["PATH"] += os.pathsep + search_path
+
 try:
     import oqs
 
     LIBOQS_AVAILABLE = True
-except (ImportError, RuntimeError, OSError, AttributeError):
+except (ImportError, RuntimeError, OSError, AttributeError, SystemExit):
+    # SystemExit is raised by oqs.py if DLL load fails
     LIBOQS_AVAILABLE = False
 
 
@@ -39,8 +70,46 @@ MLKEM768_SHARED_SECRET_SIZE = 32
 
 
 def is_pqc_available() -> bool:
-    """Check if liboqs is available for PQC operations."""
-    return LIBOQS_AVAILABLE
+    """Check if liboqs is available for PQC operations.
+
+    This performs a RUNTIME check by attempting to import oqs,
+    rather than relying on the static LIBOQS_AVAILABLE flag.
+    This ensures correct detection even in subprocesses where
+    DLL paths are injected after module import.
+    """
+    result = False
+    error_msg = None
+
+    try:
+        import oqs  # noqa: F401
+
+        # Additional verification: try to access the KEM mechanism
+        _ = oqs.KeyEncapsulation("ML-KEM-768")
+        result = True
+    except Exception as e:
+        result = False
+        error_msg = f"{type(e).__name__}: {e}"
+        import traceback
+
+        tb = "".join(traceback.format_tb(e.__traceback__))
+
+    # ALWAYS log (both success and failure)
+    try:
+        with open("pqc_debug.log", "a", encoding="utf-8") as f:
+            import datetime
+
+            timestamp = datetime.datetime.now().isoformat()
+            f.write(f"\n[{timestamp}] is_pqc_available() called\n")
+            f.write(f"Result: {result}\n")
+            if error_msg:
+                f.write(f"Error: {error_msg}\n")
+                f.write(f"Traceback: {tb}\n")
+            else:
+                f.write("Success: KEM mechanism instantiated successfully\n")
+    except Exception:
+        pass
+
+    return result
 
 
 @dataclass(frozen=True, slots=True)
@@ -223,13 +292,12 @@ class MLKEM768:
                 f"expected {MLKEM768_SECRET_KEY_SIZE}"
             )
 
-        # liboqs-python doesn't have direct secret key import
-        # We need to store it and reconstruct the KEM state
-        # For now, we'll raise NotImplementedError
-        raise NotImplementedError(
-            "Secret key import not yet supported. "
-            "Use generate_keypair_from_seed() for deterministic key recovery."
-        )
+        kem = self._ensure_kem()
+        # Direct injection into liboqs wrapper
+        # This assumes the python wrapper exposes 'secret_key' attribute or similar.
+        # Verified: oqs-python wrapper stores secret key in self.secret_key
+        kem.secret_key = secret_key
+        self._has_secret_key = True
 
     def close(self) -> None:
         """Clean up resources."""
