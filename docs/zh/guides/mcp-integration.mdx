@@ -1,0 +1,192 @@
+---
+title: MCP 集成指南
+description: 将 ming-drlms 与 Claude Desktop 等 AI 工具集成
+---
+
+# MCP 集成指南
+
+本指南介绍如何将 ming-drlms 作为 MCP (Model Context Protocol) 服务器与 AI 工具集成。
+
+## 概述
+
+Phase 28 实现了 MCP 接口，使 AI Agent 能够：
+
+- 生成和管理加密身份
+- 安全存储和检索机密
+- 与 ming-drlms 密钥基础设施交互
+
+## 前置要求
+
+- ming-drlms 已安装 (`pip install ming-drlms[dev]`)
+- MCP 依赖已安装 (`mcp>=1.0.0`)
+- Phase 27 PQC 组件可用（可选）
+
+## 快速开始
+
+### 1. 验证安装
+
+```bash
+# 检查 MCP 命令可用
+ming-drlms mcp --help
+
+# 列出可用工具
+ming-drlms mcp list-tools
+```
+
+### 2. 启动 MCP 服务器
+
+```bash
+# 启动 stdio 模式 MCP 服务器
+ming-drlms mcp serve
+```
+
+> **注意**: MCP 服务器通过 stdin/stdout 通信，启动后不会显示任何输出。
+
+## Claude Desktop 集成
+
+### 配置文件位置
+
+| 平台 | 路径 |
+|------|------|
+| Windows | `%APPDATA%\Claude\claude_desktop_config.json` |
+| macOS | `~/Library/Application Support/Claude/claude_desktop_config.json` |
+| Linux | `~/.config/Claude/claude_desktop_config.json` |
+
+### 配置示例
+
+```json
+{
+  "mcpServers": {
+    "ming-drlms": {
+      "command": "ming-drlms",
+      "args": ["mcp", "serve"]
+    }
+  }
+}
+```
+
+### 使用 Python 解释器（推荐用于开发）
+
+```json
+{
+  "mcpServers": {
+    "ming-drlms": {
+      "command": "python",
+      "args": ["-m", "ming_drlms", "mcp", "serve"],
+      "env": {
+        "MING_DRLMS_CONFIG_DIR": "~/.drlms"
+      }
+    }
+  }
+}
+```
+
+## 可用工具
+
+### hello_world
+
+连接测试工具。
+
+```
+输入: { "name": "Claude" }
+输出: "Hello, Claude! ming-drlms MCP server is working."
+```
+
+### generate_identity
+
+生成或恢复加密身份（支持抗量子算法）。
+
+```
+输入: {
+  "username": "alice",
+  "security_level": "quantum"  // "standard" 或 "quantum"
+}
+
+输出: {
+  "username": "alice",
+  "pubkey_hex": "a1b2c3...",
+  "security_level": "quantum",
+  "has_pqc": true,
+  "created": true,
+  "fingerprint": "a1b2c3..."
+}
+```
+
+### store_secret
+
+加密存储机密到 Blossom 网络（Dead Drop）。
+
+```
+输入: {
+  "recipient_pubkey": "a1b2c3...",       // 接收者的公钥 (Hex)
+  "secret_content": "sk-xxx...",         // 要发送的机密内容
+  "ttl_hours": 24                        // 存活时间 (小时)
+}
+
+输出: "blossom://uuid-v4-..."
+```
+
+### retrieve_secret
+
+从 Blossom URI 检索并解密机密。
+
+```
+输入: {
+  "blossom_uri": "blossom://uuid-v4-...",
+  "recipient_username": "alice"          // 接收者本地用户名 (用于解密)
+}
+
+输出: {
+  "success": true,
+  "secret_content": "sk-xxx...",
+  "sender_info": "unknown (anonymous)",
+  "encryption_status": "none (Phase 28.1 pending)"
+}
+```
+
+## 日志和调试
+
+MCP 服务器将日志输出到 `stderr`（不干扰 JSON-RPC 通信）。
+
+### 查看日志
+
+```bash
+# 运行时日志会自动输出到 stderr
+ming-drlms mcp serve 2>&1 | tee mcp.log
+```
+
+### 日志位置
+
+- 默认: `~/.drlms/logs/`
+- 环境变量: `DRLMS_LOG_DIR`
+
+## 故障排除
+
+### Claude Desktop 无法连接
+
+1. 确认 `ming-drlms` 在 PATH 中
+2. 检查配置 JSON 语法
+3. 重启 Claude Desktop
+
+### 工具调用失败
+
+1. 检查用户身份是否存在：`ming-drlms identity show`
+2. 确认 PQC 依赖可用：`ming-drlms dev test pqc`
+
+### 日志显示 "JSON Parse Error"
+
+**原因**: 有输出到 stdout 的内容破坏了 JSON-RPC 协议。
+
+**解决**: 确保所有日志使用 `stderr`，检查代码中的 `print()` 语句。
+
+## 安全最佳实践
+
+1. **密钥隔离**: 不要在 MCP 调用中传递明文私钥
+2. **元数据安全**: `metadata` 字段不加密，仅存放非敏感信息
+3. **本地部署**: MCP 服务器应在本地运行，避免网络暴露
+
+## 相关文档
+
+- [身份管理指南](/zh/guides/identity-management)
+- [E2EE 设置指南](/zh/guides/e2ee-setup)
+- [liboqs 安装指南](/zh/guides/liboqs-install)

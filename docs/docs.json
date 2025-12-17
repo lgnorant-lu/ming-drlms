@@ -67,7 +67,8 @@
                   "zh/guides/liboqs-install",
                   "zh/guides/rooms",
                   "zh/guides/identity-management",
-                  "zh/guides/trust-verification"
+                  "zh/guides/trust-verification",
+                  "zh/guides/mcp-integration"
                 ]
               },
               {
@@ -115,6 +116,7 @@
                 "pages": [
                   "zh/cli-reference/user",
                   "zh/cli-reference/ipc",
+                  "zh/cli-reference/mcp",
                   "zh/cli-reference/help",
                   "zh/cli-reference/demo",
                   "zh/cli-reference/tui",

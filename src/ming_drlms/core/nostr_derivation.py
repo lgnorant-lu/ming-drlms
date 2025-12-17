@@ -18,6 +18,7 @@ try:
     from bip_utils import (
         Bip39MnemonicValidator,
         Bip39SeedGenerator,
+        Bip39MnemonicGenerator,
         Bip32Slip10Secp256k1,
     )
 
@@ -31,6 +32,7 @@ __all__ = [
     "derive_nostr_keys",
     "validate_mnemonic",
     "generate_signal_seed",
+    "generate_mnemonic",
 ]
 
 
@@ -194,3 +196,18 @@ def generate_pqc_seed(mnemonic: str, passphrase: str = "") -> bytes:
         info=b"ming-drlms-mlkem768-v1",
     )
     return hkdf.derive(master_seed)
+
+
+def generate_mnemonic(strength: int = 128) -> str:
+    """Generate a random BIP39 mnemonic phrase.
+
+    Args:
+        strength: Entropy strength (128=12words, 256=24words)
+
+    Returns:
+        Space-separated mnemonic string
+    """
+    if not BIP_UTILS_AVAILABLE:
+        raise ImportError("bip_utils is required")
+
+    return Bip39MnemonicGenerator().FromWordsNumber(12 if strength == 128 else 24)

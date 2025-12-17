@@ -1,0 +1,107 @@
+---
+title: mcp
+description: MCP (Model Context Protocol) 服务器命令
+---
+
+# mcp 命令
+
+`ming-drlms mcp` 命令组用于管理 MCP 服务器，实现 AI Agent 集成。
+
+## 概述
+
+```bash
+ming-drlms mcp <command> [options]
+```
+
+## 子命令
+
+### serve
+
+启动 MCP 服务器 (stdio 传输)。
+
+```bash
+ming-drlms mcp serve
+```
+
+服务器通过 stdin/stdout 使用 JSON-RPC 2.0 协议通信。
+
+<Warning>
+启动后不会显示任何输出，所有日志输出到 stderr。
+</Warning>
+
+### list-tools
+
+列出所有已注册的 MCP 工具。
+
+```bash
+ming-drlms mcp list-tools
+```
+
+输出示例:
+
+```
+┌───────────────────┬───────────────────────────────────────────────────┐
+│ Tool              │ Description                                       │
+├───────────────────┼───────────────────────────────────────────────────┤
+│ hello_world       │ A simple hello world tool for testing...          │
+│ generate_identity │ Generate or restore a cryptographic identity...   │
+│ store_secret      │ Store a secret with E2EE encryption...            │
+│ retrieve_secret   │ Retrieve and decrypt a stored secret...           │
+└───────────────────┴───────────────────────────────────────────────────┘
+```
+
+## MCP 工具
+
+### hello_world
+
+连接测试工具。
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| name | string | 否 | 问候名称 (默认: "World") |
+
+### generate_identity
+
+生成或恢复加密身份（支持抗量子算法）。
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| username | string | 是 | 用户标识符 |
+| security_level | string | 否 | 安全级别: "standard" 或 "quantum" (默认: "standard") |
+
+### store_secret
+
+加密存储机密到 Blossom 网络（Dead Drop）。
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| recipient_pubkey | string | 是 | 接收者公钥 (Hex) |
+| secret_content | string | 是 | 机密内容 |
+| ttl_hours | number | 否 | 存活时间 (小时，默认: 24) |
+
+### retrieve_secret
+
+从 Blossom URI 检索并解密机密。
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| blossom_uri | string | 是 | Blossom URI (例如: blossom://...) |
+| recipient_username | string | 是 | 接收者本地用户名 (用于解密) |
+
+## Claude Desktop 配置
+
+```json
+{
+  "mcpServers": {
+    "ming-drlms": {
+      "command": "ming-drlms",
+      "args": ["mcp", "serve"]
+    }
+  }
+}
+```
+
+## 相关命令
+
+- `ming-drlms identity` - 身份管理
+- `ming-drlms e2ee` - E2EE 密钥管理

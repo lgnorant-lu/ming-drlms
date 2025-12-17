@@ -194,6 +194,7 @@ from . import trust as _trust  # noqa: E402
 from . import relay_room as _relay_room  # noqa: E402
 from . import chat as _chat  # noqa: E402
 from . import ipc as _ipc  # noqa: E402
+from . import mcp as _mcp  # noqa: E402  # Phase 28: MCP server commands
 
 app.add_typer(_config.config_app, name="config")
 app.add_typer(_user.user_app, name="user")
@@ -210,6 +211,7 @@ app.add_typer(_trust.trust_app, name="trust")
 app.add_typer(_relay_room.relay_room_app, name="relay-room")
 app.add_typer(_chat.chat_app, name="chat")
 app.add_typer(_ipc.ipc_app, name="ipc")
+app.add_typer(_mcp.mcp_app, name="mcp")  # Phase 28: MCP server
 _server.register_top_level_aliases(app)
 
 

@@ -218,6 +218,10 @@ zh_texts: Dict[str, str] = {
     "HELP.CHAT.OPT.LIMIT": "消息数量限制",
     "HELP.CHAT.OPT.SINCE": "起始序号",
     "HELP.CHAT.PUBLISH_BUNDLE": "发布密钥包",
+    # MCP (Phase 28)
+    "HELP.MCP.DESC": "[Phase 28] MCP (Model Context Protocol) 服务器 - AI Agent 集成",
+    "HELP.MCP.SERVE": "启动 MCP 服务器 (stdio 传输) 用于 AI Agent 集成",
+    "HELP.MCP.LIST_TOOLS": "列出所有已注册的 MCP 工具",
 }
 
 
