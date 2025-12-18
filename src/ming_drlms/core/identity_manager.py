@@ -24,6 +24,18 @@ from typing import Optional, TYPE_CHECKING
 if TYPE_CHECKING:  # pragma: no cover
     from .e2ee_store import LocalKeyStore, LocalKeyState
     from .pysignal.store import SignalStore
+    from .nostr_signer import NostrSigner
+
+try:
+    from .pqc_kem import MLKEM768, is_pqc_available
+except ImportError:
+    # PQC not available, define dummy values
+    MLKEM768 = None
+    MLKEM768 = None
+
+    def is_pqc_available() -> bool:
+        return False
+
 
 __all__ = [
     "Identity",
@@ -148,15 +160,23 @@ class IdentityManager:
             raise ValueError("Invalid BIP39 mnemonic")
 
         # Derive keys
-        _nostr_keys = derive_nostr_keys(mnemonic, passphrase=passphrase)  # noqa: F841
-        signal_seed = generate_signal_seed(mnemonic, passphrase=passphrase)
+        # _nostr_keys = derive_nostr_keys(mnemonic, passphrase=passphrase)  # noqa: F841
+        # signal_seed = generate_signal_seed(mnemonic, passphrase=passphrase)
 
-        # Create X25519 key from signal seed
+        # Derive keys from mnemonic
+        # 1. X25519 for E2EE
+        signal_seed = generate_signal_seed(mnemonic, passphrase=passphrase)
+        x25519_private_bytes = signal_seed[:32]
         from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 
-        x25519_private = X25519PrivateKey.from_private_bytes(signal_seed)
-        x25519_public = x25519_private.public_key().public_bytes_raw()
-        x25519_private_bytes = x25519_private.private_bytes_raw()
+        x25519_public = (
+            X25519PrivateKey.from_private_bytes(x25519_private_bytes)
+            .public_key()
+            .public_bytes_raw()
+        )
+
+        # 2. Nostr keys (Phase 28.2: NOW PERSISTED, not discarded!)
+        nostr_keys = derive_nostr_keys(mnemonic, passphrase=passphrase)
 
         # Initialize keystore
         ks = keystore if keystore is not None else LocalKeyStore()
@@ -193,12 +213,14 @@ class IdentityManager:
             private_key=x25519_private_bytes,
         )
 
-        # Store identity (this will generate pre-keys etc. if needed)
+        # Phase 28.2: Now including Nostr keys!
         ks.store_identity_only(
             username=username,
             identity_key=identity_key,
             pqc_public_key=pqc_public_key,
             pqc_private_key=pqc_private_key,
+            nostr_private_key=nostr_keys.private_key,
+            nostr_public_key=nostr_keys.public_key_x_only,
         )
 
         # Create and return manager
@@ -218,6 +240,30 @@ class IdentityManager:
         if state is not None:
             self._pqc_public_key = getattr(state, "pqc_public_key", None)
             self._pqc_private_key = getattr(state, "pqc_private_key", None)
+
+    def get_nostr_signer(self) -> "NostrSigner":
+        """Get Nostr signer for this identity (Phase 28.2).
+
+        This provides a clean interface for signing Nostr events without
+        exposing the raw private key to application code.
+
+        Returns:
+            NostrSigner instance for signing events
+
+        Raises:
+            ValueError: If no Nostr key found for this identity
+            ImportError: If secp256k1 library not available
+        """
+        state = self._load_state()
+        if state is None or state.nostr_private_key is None:
+            raise ValueError(
+                f"No Nostr key found for identity '{self.username}'. "
+                "Create identity with IdentityManager.from_mnemonic() first."
+            )
+
+        from .nostr_signer import NostrSigner
+
+        return NostrSigner(state.nostr_private_key)
 
     def get_pqc_public_key(self) -> Optional[bytes]:
         """Get ML-KEM-768 public key if available.

@@ -65,6 +65,8 @@
                   "zh/guides/mp2-mode",
                   "zh/guides/e2ee-setup",
                   "zh/guides/liboqs-install",
+                  "zh/guides/coincurve-guide",
+                  "zh/guides/blossom-setup",
                   "zh/guides/rooms",
                   "zh/guides/identity-management",
                   "zh/guides/trust-verification",

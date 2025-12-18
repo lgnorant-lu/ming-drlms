@@ -16,10 +16,11 @@ from typing import Optional, Dict
 
 logger = logging.getLogger("ming_drlms.core.blossom")
 
-# Default public Blossom servers (Fallback)
+# Default public Blossom servers (Ordered by stability)
 DEFAULT_SERVERS = [
-    "https://nostr.build",
+    "https://nostr.download",  # Most stable for API access
     "https://cdn.nostr.build",
+    "https://nostr.build",  # Sometimes returns HTML
 ]
 
 
@@ -46,101 +47,63 @@ class BlossomClient:
         self.identity_manager = identity_manager
 
     def _create_auth_header(self, blob_sha256: str) -> Optional[str]:
-        """Create Blossom Authorization header (Nostr kind:24242)."""
-        logger.debug(f"DEBUG: Entering _create_auth_header with hash {blob_sha256}")
+        """Create Blossom Authorization header (Nostr kind:24242).
 
+        Phase 28.2: Clean implementation using NostrSigner abstraction.
+        """
         if not self.identity_manager:
-            logger.debug("DEBUG: No identity manager, skipping auth")
+            logger.debug("No identity manager, skipping auth")
             return None
 
         import time
         import base64
         import json
 
-        # 1. Prepare event fields
-        pubkey = self.identity_manager.get_pubkey_hex()
-        created_at = int(time.time())
-        expiration = str(created_at + 3600)  # 1 hour expiry
-
-        tags = [["t", "upload"], ["x", blob_sha256], ["expiration", expiration]]
-        content = "Upload Blob"
-        kind = 24242
-
-        # 2. Serialize for ID (NIP-01)
-        # [0, <pubkey>, <created_at>, <kind>, <tags>, <content>]
-        event_data = [0, pubkey, created_at, kind, tags, content]
-        serialized = json.dumps(
-            event_data, separators=(",", ":"), ensure_ascii=False
-        ).encode("utf-8")
-
-        # 3. Sign
         try:
-            event_id = hashlib.sha256(serialized).hexdigest()
-            logger.debug(f"DEBUG: Event ID: {event_id}")
+            # Get NostrSigner from IdentityManager (Phase 28.2)
+            signer = self.identity_manager.get_nostr_signer()
+        except ValueError as e:
+            logger.warning(f"Cannot get Nostr signer: {e}")
+            return None
+        except ImportError:
+            logger.warning("secp256k1 library not available, skipping auth")
+            return None
 
-            privkey_hex = None
+        # Prepare Nostr event (kind 24242 - Blossom Upload Auth)
+        created_at = int(time.time())
+        event = {
+            "pubkey": signer.get_pubkey_hex(),
+            "created_at": created_at,
+            "kind": 24242,
+            "tags": [
+                ["t", "upload"],
+                ["x", blob_sha256],
+                ["expiration", str(created_at + 3600)],  # 1 hour
+            ],
+            "content": "Upload Blob",
+        }
 
-            # PHASE 28 FIX: Check for explicit Nostr private key first
-            # (IdentityManager currently only stores X25519 E2EE keys)
-            if hasattr(self.identity_manager, "nostr_private_key_hex"):
-                privkey_hex = self.identity_manager.nostr_private_key_hex
-                logger.debug(
-                    f"DEBUG: Using injected nostr_private_key_hex (len={len(privkey_hex)})"
-                )
-            elif hasattr(self.identity_manager, "keystore"):
-                # Legacy/Fallback (Incorrect for Nostr, but kept for structure)
-                privkey_hex = self.identity_manager.keystore.load_key(
-                    self.identity_manager.username
-                )
-                logger.debug("DEBUG: Using load_key from keystore")
-            else:
-                # Try accessing private _keystore if available
-                ks = getattr(self.identity_manager, "_keystore", None)
-                if ks:
-                    # This is likely the X25519 key, not Nostr, but we try
-                    privkey_hex = ks.load_key(self.identity_manager.username)
-                    logger.debug("DEBUG: Using _keystore fallback")
-                else:
-                    logger.warning("No keystore found for auth")
-                    return None
+        try:
+            # Sign event using NostrSigner
+            signature = signer.sign_event(event)
+            event_id = signer._compute_event_id(event)
 
-            if not privkey_hex:
-                logger.warning("No private key found for auth")
-                return None
+            # Construct full event with ID and signature
+            full_event = event.copy()
+            full_event["id"] = event_id
+            full_event["sig"] = signature
 
-            try:
-                import secp256k1
-            except ImportError as ie:
-                logger.error(
-                    f"Failed to import secp256k1: {ie}. Cannot sign auth event."
-                )
-                return None
-
-            logger.debug("DEBUG: Signing with secp256k1...")
-            privkey = secp256k1.PrivateKey(bytes.fromhex(privkey_hex))
-            sig = privkey.schnorr_sign(
-                bytes.fromhex(event_id), bip340tag=None, raw=True
-            ).hex()
-            logger.debug(f"DEBUG: Signature generated: {sig[:8]}...")
-
-            # 4. Construct Full Event
-            event = {
-                "id": event_id,
-                "pubkey": pubkey,
-                "created_at": created_at,
-                "kind": kind,
-                "tags": tags,
-                "content": content,
-                "sig": sig,
-            }
-
-            # 5. Base64 Encode
-            event_json = json.dumps(event, separators=(",", ":"), ensure_ascii=False)
+            # Base64 encode for Authorization header
+            event_json = json.dumps(
+                full_event, separators=(",", ":"), ensure_ascii=False
+            )
             b64_event = base64.b64encode(event_json.encode("utf-8")).decode("ascii")
+
+            logger.info("Generated Blossom auth header (kind:24242)")
             return f"Nostr {b64_event}"
 
         except Exception as e:
-            logger.error(f"Failed to sign auth event: {e}", exc_info=True)
+            logger.error(f"Failed to sign Blossom auth event: {e}", exc_info=True)
             return None
 
     def upload_blob(
@@ -187,11 +150,36 @@ class BlossomClient:
                         "url": resp_json.get("url"),
                         "sha256": resp_json.get("sha256", sha256_local),
                     }
-                except Exception:
-                    # If not json, maybe fallback? But Blossom spec says JSON.
-                    # nostr.build explicitly returns JSON on success.
-                    logger.warning(f"Non-JSON response: {response.text[:200]}")
-                    raise Exception("Invalid response from server (Not JSON)")
+                except Exception as e:
+                    # Diagnostic: Log the actual response for debugging
+                    logger.error(f"JSON Parse Error: {type(e).__name__}: {e}")
+                    logger.error(f"Response Status: {response.status_code}")
+                    logger.error(f"Response Headers: {dict(response.headers)}")
+                    logger.error(
+                        f"Response Content-Type: {response.headers.get('content-type')}"
+                    )
+                    logger.error(
+                        f"Response Body (first 500 chars): {response.text[:500]}"
+                    )
+
+                    # Try to return raw text as fallback
+                    # Some servers might return plain text URL
+                    if response.text and response.text.strip():
+                        logger.warning(
+                            "Attempting to parse non-JSON response as plain text"
+                        )
+                        # Check if it looks like a URL
+                        text = response.text.strip()
+                        if text.startswith("http") or text.startswith("blossom://"):
+                            logger.info(f"Detected plain text URL response: {text}")
+                            return {
+                                "url": text,
+                                "sha256": sha256_local,
+                            }
+
+                    raise Exception(
+                        f"Invalid response from server (Not JSON): {response.text[:200]}"
+                    )
 
             raise Exception(
                 f"Upload failed: HTTP {response.status_code} - {response.text[:200]}"
@@ -210,14 +198,49 @@ class BlossomClient:
         Returns:
             Raw bytes.
         """
+        # Construct proper URL
         if sha256_or_url.startswith("http"):
             url = sha256_or_url
+        elif sha256_or_url.startswith("blossom://"):
+            # Extract SHA256 from blossom:// URI
+            sha256 = sha256_or_url.replace("blossom://", "")
+            # Try CDN endpoint first (more reliable for raw content)
+            url = f"{self.server_url}/{sha256}"
         else:
+            # Direct SHA256
             url = f"{self.server_url}/{sha256_or_url}"
 
+        logger.debug(f"Downloading blob from: {url}")
+
         try:
-            response = httpx.get(url, timeout=self.timeout)
+            response = httpx.get(url, timeout=self.timeout, follow_redirects=True)
             response.raise_for_status()
+
+            # Check if response is HTML (error page)
+            content_type = response.headers.get("content-type", "")
+            if "text/html" in content_type:
+                logger.error("Server returned HTML instead of blob content")
+                logger.error(f"URL: {url}")
+                logger.error(f"Response snippet: {response.text[:300]}")
+
+                # Try alternative URL format with .bin extension
+                alt_url = f"{url}.bin"
+                logger.warning(f"Trying alternative URL: {alt_url}")
+                alt_response = httpx.get(
+                    alt_url, timeout=self.timeout, follow_redirects=True
+                )
+                if (
+                    alt_response.status_code == 200
+                    and "text/html" not in alt_response.headers.get("content-type", "")
+                ):
+                    return alt_response.content
+
+                raise Exception(
+                    f"Server returned HTML instead of blob. "
+                    f"URL might be incorrect or blob doesn't exist. "
+                    f"URL: {url}"
+                )
+
             return response.content
         except Exception as e:
             logger.error("Download failed (%s): %s", url, e)

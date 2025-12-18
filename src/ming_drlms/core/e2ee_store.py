@@ -164,6 +164,9 @@ class LocalKeyState:
     # Phase 27: Post-Quantum key
     pqc_public_key: bytes | None = None
     pqc_private_key: bytes | None = None
+    # Phase 28.2: Nostr keys (Secp256k1)
+    nostr_private_key: bytes | None = None  # 32 bytes
+    nostr_public_key: bytes | None = None  # 32 bytes x-only
 
 
 class LocalKeyStore:
@@ -271,6 +274,21 @@ class LocalKeyStore:
             else None
         )
 
+        # Phase 28.2: Load Nostr keys
+        nostr_private_key_hex = payload.get("nostr_private_key")
+        nostr_private_key = (
+            _decode_bytes(nostr_private_key_hex)
+            if isinstance(nostr_private_key_hex, str)
+            else None
+        )
+
+        nostr_public_key_hex = payload.get("nostr_public_key")
+        nostr_public_key = (
+            _decode_bytes(nostr_public_key_hex)
+            if isinstance(nostr_public_key_hex, str)
+            else None
+        )
+
         return LocalKeyState(
             registration_id=registration_id,
             device_id=device_id,
@@ -281,6 +299,8 @@ class LocalKeyStore:
             sender_keys=sender_keys,
             pqc_public_key=pqc_public_key,
             pqc_private_key=pqc_private_key,
+            nostr_private_key=nostr_private_key,
+            nostr_public_key=nostr_public_key,
         )
 
     # ------------------------------------------------------------------
@@ -335,10 +355,12 @@ class LocalKeyStore:
         identity_key: SignalKeyPair,
         pqc_public_key: bytes | None = None,
         pqc_private_key: bytes | None = None,
+        nostr_private_key: bytes | None = None,
+        nostr_public_key: bytes | None = None,
         registration_id: int = 0,
         device_id: int = 1,
     ) -> LocalKeyState:
-        """Phase 27: Store identity without pre-keys (for mnemonic-based creation).
+        """Phase 27/28.2: Store identity without pre-keys (for mnemonic-based creation).
 
         This is used when creating identity from mnemonic where pre-keys
         will be generated separately.
@@ -347,6 +369,9 @@ class LocalKeyStore:
             username: User identifier
             identity_key: X25519 identity key pair
             pqc_public_key: ML-KEM-768 public key (optional)
+            pqc_private_key: ML-KEM-768 private key (optional)
+            nostr_private_key: Secp256k1 private key (optional, Phase 28.2)
+            nostr_public_key: Secp256k1 x-only public key (optional, Phase 28.2)
             registration_id: Signal registration ID (0 = auto-generate)
             device_id: Device ID (default: 1)
 
@@ -372,6 +397,12 @@ class LocalKeyStore:
             payload["pqc_public_key"] = pqc_public_key.hex()
         if pqc_private_key:
             payload["pqc_private_key"] = pqc_private_key.hex()
+
+        # Phase 28.2: Store Nostr keys
+        if nostr_private_key:
+            payload["nostr_private_key"] = nostr_private_key.hex()
+        if nostr_public_key:
+            payload["nostr_public_key"] = nostr_public_key.hex()
 
         self._store_user_payload(username, payload)
         state = self.load_state(username)

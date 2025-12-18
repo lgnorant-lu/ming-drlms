@@ -19,6 +19,7 @@ import logging
 import json
 import base64
 import os
+from pathlib import Path
 
 # Standard crypto imports (always available)
 from cryptography.hazmat.primitives.asymmetric.x25519 import (
@@ -54,7 +55,29 @@ except ImportError as e:
 
 # Log import result (bypassing stdio hijack)
 try:
-    with open("import_debug.log", "a", encoding="utf-8") as f:
+    import os
+    from pathlib import Path
+
+    def _get_log_path(filename: str) -> Path:
+        log_dir = os.environ.get("DRLMS_LOG_DIR")
+        if log_dir:
+            path = Path(log_dir)
+        else:
+            # Fallback based on OS
+            if os.name == "nt":
+                base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA")
+                path = (
+                    Path(base) / "drlms" / "logs"
+                    if base
+                    else Path.home() / ".drlms" / "logs"
+                )
+            else:
+                path = Path.home() / ".drlms" / "logs"
+
+        path.mkdir(parents=True, exist_ok=True)
+        return path / filename
+
+    with open(_get_log_path("import_debug.log"), "a", encoding="utf-8") as f:
         import datetime
 
         f.write(f"\n[{datetime.datetime.now().isoformat()}] tools.py crypto import\n")
@@ -108,11 +131,17 @@ def generate_identity(
         # Load existing
         manager = IdentityManager(username, keystore=keystore)
 
+    # Determine actual security level from generated/loaded identity
+    # Even if environment check failed ("is_pqc_available() == False"),
+    # we might have loaded an existing identity that HAS valid PQC keys.
+    # We should report the level based on what the identity actually possesses.
+    actual_level = "quantum" if manager.has_pqc_key() else "standard"
+
     # Prepare return dict
     result = {
         "username": username,
         "pubkey_hex": manager.get_pubkey_hex(),
-        "security_level": security_level,
+        "security_level": actual_level,
         "has_pqc": manager.has_pqc_key(),
         "created": created,
         "fingerprint": manager.get_pubkey_hex()[:16],
@@ -127,42 +156,198 @@ def generate_identity(
 
 
 @mcp.tool()
+def list_identities() -> str:
+    """List all locally available cryptographic identities.
+
+    Use this tool to find usernames and public keys before calling other tools.
+
+    Returns:
+        JSON string of identity summaries.
+    """
+    import sys
+
+    sys.stderr.write("[DEBUG] list_identities called\n")
+
+    keystore = LocalKeyStore()
+    sys.stderr.write(f"[DEBUG] Keystore path: {keystore._path}\n")
+
+    results = []
+
+    try:
+        if os.path.exists(keystore._path):
+            with open(keystore._path, "r", encoding="utf-8") as f:
+                root_data = json.load(f)
+
+            # Handle "users" nesting (standard schema)
+            users_data = root_data.get("users", root_data)
+
+            sys.stderr.write(f"[DEBUG] Loaded {len(users_data)} potential entries\n")
+
+            for uname, info in users_data.items():
+                if not isinstance(info, dict):
+                    continue
+
+                # Extract Identity Key (Signal Format)
+                # stored as: "identity": {"public": "hex", "private": "hex"}
+                ident = info.get("identity")
+                pub_hex = "unknown"
+                if isinstance(ident, dict) and "public" in ident:
+                    pub_hex = ident["public"]
+                    # Strip Signal type prefix (0x05) if present (33 bytes -> 32 bytes)
+                    if len(pub_hex) == 66 and pub_hex.startswith("05"):
+                        pub_hex = pub_hex[2:]  # Remove first byte
+                elif isinstance(ident, str):  # Legacy/fallback
+                    pub_hex = ident
+                    if len(pub_hex) == 66 and pub_hex.startswith("05"):
+                        pub_hex = pub_hex[2:]
+
+                # Extract PQC Key (Direct Hex)
+                pqc_hex = info.get("pqc_public_key")
+
+                # Extract Nostr Key (Direct Hex, Phase 28.2)
+                nostr_hex = info.get("nostr_public_key")
+
+                results.append(
+                    {
+                        "username": uname,
+                        "pubkey_hex": pub_hex,
+                        "pqc_pubkey_hex": pqc_hex,
+                        "nostr_pubkey_hex": nostr_hex,
+                        "has_pqc": bool(pqc_hex),
+                    }
+                )
+        else:
+            sys.stderr.write("[DEBUG] Keystore file not found\n")
+            logger.warning(f"Keystore not found at {keystore._path}")
+
+    except Exception as e:
+        logger.error(f"Failed to list identities: {e}")
+        return json.dumps([])
+
+    if not results:
+        sys.stderr.write("[DEBUG] Results empty, adding diagnostic\n")
+        results.append(
+            {
+                "username": "[SYSTEM_DIAGNOSTIC]",
+                "pubkey_hex": f"Keystore Path: {keystore._path} (Exists: {os.path.exists(keystore._path)})",
+                "has_pqc": False,
+            }
+        )
+
+    return json.dumps(results, indent=2)
+
+
+# ============================================================================
+# Ephemeral KeyStore for Temporary Identities
+# ============================================================================
+
+
+class EphemeralKeyStore(LocalKeyStore):
+    """In-memory key store that does not persist to disk.
+
+    Used for creating temporary identities needed for Blossom NIP-98
+    authentication without cluttering the user's permanent keystore.
+
+    Implementation Notes:
+    - Overrides _persist() to prevent disk writes
+    - Initializes with correct {"users": {}} structure
+    - Thread-safe like parent class
+    """
+
+    def __init__(self) -> None:
+        # Initialize path (dummy, never used for I/O)
+        self._path = Path(":memory:")
+
+        # Initialize with correct structure matching LocalKeyStore
+        self._data: dict = {"users": {}}
+
+        # Mark as already loaded to skip file I/O
+        self._loaded = True
+
+        # Thread safety
+        import threading
+
+        self._lock = threading.Lock()
+
+    def _persist(self) -> None:
+        """No-op: ephemeral store doesn't persist to disk.
+
+        This is called by _store_user_payload after updating _data.
+        We skip the file write but keep the data in memory.
+        """
+        pass  # Data stays in self._data, accessible via _load_user_payload
+
+
+@mcp.tool()
 def store_secret(
-    recipient_pubkey: str,
+    recipient_x25519_hex: str,
     secret_content: str,
+    recipient_pqc_hex: str | None = None,
     ttl_hours: int = 24,
 ) -> str:
     """Encrypt and store a secret to the Dead Drop (Blossom Network).
 
-    REAL E2EE IMPLEMENTATION.
-    Supports two modes based on `recipient_pubkey` format:
-    1. Standard (X25519 only): Provide 64-char hex string.
-    2. Quantum (Hybrid): Provide "X25519_HEX+PQC_HEX" string.
+    Real E2EE Implementation.
 
     Args:
-        recipient_pubkey: Hex X25519 key OR "x25519+pqc" combined string.
-        secret_content: The actual secret data.
+        recipient_x25519_hex: The recipient's primary X25519 public key (64-char hex).
+        secret_content: The actual text content to encrypt.
+        recipient_pqc_hex: (Optional) The recipient's PQC public key (ML-KEM-768) for Quantum-Resistant encryption.
+                           If provided, Hybrid Encryption is used. Highly recommended.
         ttl_hours: Time-to-live in hours (default 24).
 
     Returns:
-        A 'blossom://...' URI.
+        A 'blossom://...' URI string that can be shared with the recipient.
     """
     logger.info("encrypting secret... (TTL=%dh)", ttl_hours)
 
-    # 1. Parse Keys
-    pqc_hex = None
-    if "+" in recipient_pubkey:
-        # Combined format
-        parts = recipient_pubkey.split("+")
-        x25519_hex = parts[0]
-        pqc_hex = parts[1]
-    else:
-        x25519_hex = recipient_pubkey
+    # Create Ephemeral Identity for Blossom NIP-98 Authentication
+    # This temporary identity signs the HTTP upload request without polluting keystore
+    auth_manager = None
+    try:
+        from ming_drlms.core.identity_manager import IdentityManager
+        from ming_drlms.core.nostr_derivation import generate_mnemonic
+
+        logger.debug("[MCP] Generating ephemeral BIP39 mnemonic...")
+        temp_mnemonic = generate_mnemonic()
+        temp_username = f"blossom-uploader-{os.urandom(4).hex()}"
+        ephemeral_store = EphemeralKeyStore()
+
+        logger.debug(f"[MCP] Creating ephemeral identity: {temp_username}")
+        auth_manager = IdentityManager.from_mnemonic(
+            temp_mnemonic, temp_username, keystore=ephemeral_store
+        )
+
+        # Diagnostic: Verify identity was created
+        logger.debug(f"[MCP] Ephemeral identity created: {temp_username}")
+        logger.debug(
+            f"[MCP] Keystore users: {list(ephemeral_store._data.get('users', {}).keys())}"
+        )
+
+        # Verify Nostr signer can be retrieved
+        try:
+            test_signer = auth_manager.get_nostr_signer()
+            logger.debug(
+                f"[MCP] Nostr signer OK: pubkey={test_signer.get_pubkey_hex()[:16]}..."
+            )
+        except Exception as e:
+            logger.error(f"[MCP] Failed to get Nostr signer: {e}")
+            raise
+
+    except Exception as e:
+        logger.error(f"[MCP] Failed to create ephemeral auth identity: {e}")
+        import traceback
+
+        logger.error(f"[MCP] Traceback: {traceback.format_exc()}")
+        # Continue without auth (will likely fail) is BAD idea if we know it causes 401s.
+        # Return error immediately so user knows why.
+        error_msg = f"Failed to create ephemeral identity: {e} (Traceback in logs)"
+        return json.dumps({"error": error_msg, "status": "auth_setup_failed"})
 
     try:
-        peer_x25519 = bytes.fromhex(x25519_hex)
+        peer_x25519 = bytes.fromhex(recipient_x25519_hex)
     except ValueError:
-        raise ValueError("Invalid X25519 hex")
+        return json.dumps({"error": "Invalid X25519 hex: must be 64 char hex"})
 
     # 2. Encrypt
     payload_bytes = secret_content.encode("utf-8")
@@ -172,15 +357,15 @@ def store_secret(
     # Diagnostic: Log PQC detection status
     pqc_available = is_pqc_available()
     logger.warning(
-        f"[PQC DIAGNOSTIC] pqc_hex={'present' if pqc_hex else 'absent'}, is_pqc_available()={pqc_available}, HybridCrypto={'loaded' if HybridCrypto else 'missing'}"
+        f"[PQC DIAGNOSTIC] pqc_input={'present' if recipient_pqc_hex else 'absent'}, is_pqc_available()={pqc_available}, HybridCrypto={'loaded' if HybridCrypto else 'missing'}"
     )
 
-    if pqc_hex and pqc_available and HybridCrypto:
+    if recipient_pqc_hex and pqc_available and HybridCrypto:
         # --- QUANTUM HYBRID MODE ---
         try:
-            peer_pqc_bytes = bytes.fromhex(pqc_hex)
+            peer_pqc_bytes = bytes.fromhex(recipient_pqc_hex)
         except ValueError:
-            raise ValueError("Invalid PQC hex")
+            return json.dumps({"error": "Invalid PQC hex string"})
 
         logger.info("Using Hybrid PQC Encryption")
         # HybridCrypto returns a Result object, we need to serialize it
@@ -196,6 +381,11 @@ def store_secret(
 
     else:
         # --- STANDARD MODE (Fallback) ---
+        if recipient_pqc_hex and not pqc_available:
+            logger.warning(
+                "PQC key provided but local PQC environment is missing. Falling back to Standard Mode."
+            )
+
         logger.info("Using Standard X25519 Encryption")
 
         # Ephemeral Sender
@@ -232,11 +422,14 @@ def store_secret(
         blob_b64 = base64.b64encode(combined_blob).decode("ascii")
         alg = "standard-v1"
 
-    # 3. Upload to Blossom
+    # 3. Upload to Blossom with Authentication
     envelope = {"alg": alg, "blob": blob_b64}
 
-    client = BlossomClient()
-    blob_descr = client.upload_blob(json.dumps(envelope).encode("utf-8"))
+    client = BlossomClient(identity_manager=auth_manager)
+    try:
+        blob_descr = client.upload_blob(json.dumps(envelope).encode("utf-8"))
+    except Exception as e:
+        return json.dumps({"error": f"Upload failed: {e}", "status": "network_error"})
 
     if "sha256" in blob_descr:
         uri = f"blossom://{blob_descr['sha256']}"
@@ -255,6 +448,7 @@ def store_secret(
             "uri": uri,
             "encryption_mode": alg,
             "pqc_status": "available" if pqc_available else "unavailable",
+            "note": "Share provided URI with the recipient.",
         }
     )
 
@@ -385,4 +579,4 @@ def retrieve_secret(blossom_uri: str, recipient_username: str) -> dict:
 @mcp.tool()
 def hello_world(name: str = "World") -> str:
     """A simple hello world tool for testing."""
-    return f"Hello, {name}! Phase 28.1 E2EE is ACTIVE and CONNECTED."
+    return f"Hello, {name}! Phase 28.1 E2EE is ACTIVE. Build: 2025-12-19-FIXED"

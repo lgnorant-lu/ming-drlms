@@ -1,0 +1,291 @@
+---
+title: "Blossom 网络配置"
+description: "配置 DRLMS 连接到 Blossom 去中心化存储网络"
+---
+
+## 概述
+
+Blossom 是去中心化的 blob 存储网络，用于 DRLMS Phase 28 MCP Dead Drop 功能。
+
+<Note>
+Blossom 集成需要 **coincurve** 库（提供 secp256k1 支持）用于 Nostr 签名认证。
+该库已包含在项目依赖中。
+</Note>
+
+---
+
+## 快速开始
+
+### 默认配置
+
+DRLMS 开箱即用，使用默认 Blossom 服务器列表：
+
+1. `https://nostr.download` (主服务器，稳定)
+2. `https://cdn.nostr.build` (备用)
+3. `https://nostr.build` (备用，偶尔返回 HTML 错误)
+
+无需配置即可使用 MCP Dead Drop 功能。
+
+---
+
+## 自定义服务器
+
+### 环境变量配置
+
+在 `.env.local` 中设置：
+
+```bash
+# 主 Blossom 服务器
+MING_DRLMS_BLOSSOM_SERVER=https://nostr.download
+
+# 备用服务器（逗号分隔）
+MING_DRLMS_BLOSSOM_FALLBACK_SERVERS=https://cdn.nostr.build,https://nostr.build
+
+# 上传/下载超时（秒）
+MING_DRLMS_BLOSSOM_TIMEOUT=30
+```
+
+### TOML 配置文件
+
+在 `config.toml` 中配置：
+
+```toml
+[blossom]
+# 主服务器 URL
+server = "https://nostr.download"
+
+# 备用服务器列表
+fallback_servers = [
+    "https://cdn.nostr.build",
+    "https://nostr.build"
+]
+
+# 超时配置
+timeout = 30.0
+```
+
+---
+
+## Blossom 服务器
+
+### 公共服务器
+
+| 服务器 | URL | 状态 | 备注 |
+|--------|-----|------|------|
+| nostr.download | `https://nostr.download` | ✅ 稳定 | **推荐** (API 支持良好) |
+| CDN Nostr | `https://cdn.nostr.build` | ✅ 活跃 | 备用 |
+| nostr.build | `https://nostr.build` | ⚠️ 不稳定 | 上传接口偶尔返回 HTML |
+| Primal | `https://blossom.primal.net` | ❓ 待测 | 备用 |
+
+<Warning>
+公共服务器可能有上传限制或认证要求。建议测试连接性。
+</Warning>
+
+### 自托管服务器
+
+可使用 [Blossom Server](https://github.com/hzrd149/blossom) 自建服务器：
+
+```bash
+# 克隆仓库
+git clone https://github.com/hzrd149/blossom.git
+cd blossom
+
+# 运行服务器
+npm install
+npm start
+```
+
+配置 DRLMS 连接：
+
+```bash
+MING_DRLMS_BLOSSOM_SERVER=http://localhost:3000
+```
+
+---
+
+## Nostr 认证
+
+### NIP-98 HTTP Auth
+
+Blossom 使用 Nostr NIP-98 进行上传认证：
+
+1. **生成 kind:24242 事件**：包含上传元数据
+2. **Schnorr 签名**：使用 Nostr 私钥签名事件
+3. **Authorization 头**：`Nostr <base64_event>`
+
+### 身份准备
+
+确保身份已创建并包含 Nostr 密钥：
+
+```bash
+# 方法 1: 从助记词创建身份 (推荐)
+ming-drlms identity create --name myuser --mnemonic "your 12/24 words"
+
+# 方法 2: 生成新身份 (自动生成助记词)
+ming-drlms identity create --name myuser
+```
+
+<Note>
+Phase 28.2 已实现 Nostr 密钥持久化，无需手动管理密钥。
+</Note>
+
+---
+
+## 测试连接
+
+### 验证 Blossom 可用性
+
+```python
+from ming_drlms.core.blossom import BlossomClient
+
+# 测试上传
+client = BlossomClient()
+test_data = b"Hello Blossom"
+
+try:
+    result = client.upload_blob(test_data)
+    print(f"✅ 上传成功: {result['url']}")
+    print(f"   SHA256: {result['sha256']}")
+except Exception as e:
+    print(f"❌ 上传失败: {e}")
+```
+
+### MCP Dead Drop 测试
+
+通过 Claude Desktop 测试：
+
+1. 配置 MCP 服务器（见 [MCP 集成](/zh/guides/mcp-integration)）
+
+2. 在 Claude 中执行：
+
+```
+请帮我：
+1. 生成一个新的加密身份（用户名：test-user）
+2. 存储一个秘密消息到 Dead Drop
+3. 检索并验证该消息
+```
+
+3. 检查输出中的 `encryption_mode` 是否包含 Blossom URI
+
+---
+
+## 高级配置
+
+### 连接故障转移
+
+DRLMS 自动实现故障转移：
+
+1. 尝试主服务器 (`MING_DRLMS_BLOSSOM_SERVER`)
+2. 失败时依次尝试备用服务器
+3. 所有服务器失败时抛出异常
+
+### 超时调优
+
+根据网络条件调整超时：
+
+```bash
+# 快速网络
+MING_DRLMS_BLOSSOM_TIMEOUT=10
+
+# 慢速网络或大文件
+MING_DRLMS_BLOSSOM_TIMEOUT=60
+```
+
+### 代理配置
+
+Blossom 客户端遵循系统代理设置：
+
+<Tabs>
+  <Tab title="Windows">
+    ```powershell
+    # 设置 HTTP 代理
+    $env:HTTP_PROXY = "http://proxy.example.com:8080"
+    $env:HTTPS_PROXY = "http://proxy.example.com:8080"
+    
+    # 取消代理
+    $env:HTTP_PROXY = ""
+    ```
+  </Tab>
+  <Tab title="Linux/macOS">
+    ```bash
+    # 设置代理
+    export HTTP_PROXY=http://proxy.example.com:8080
+    export HTTPS_PROXY=http://proxy.example.com:8080
+    
+    # 取消代理
+    unset HTTP_PROXY HTTPS_PROXY
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## 故障排查
+
+### HTTP 400: Missing Auth Event
+
+**原因**: 服务器未接受 Nostr 认证事件
+
+**解决方案**:
+
+1. 确认 coincurve 已安装（通常已预装）：
+```bash
+python -c "import coincurve; print('OK')"
+```
+
+2. 验证身份包含 Nostr 密钥：
+```bash
+ming-drlms identity show --name myuser
+# 应显示 "nostr_pubkey" 字段
+```
+
+3. 检查服务器日志（如自托管）
+
+### HTTP 404: Not Found
+
+**原因**: 服务器端点不存在
+
+**解决方案**:
+
+- 确认服务器 URL 正确（`/upload` 端点可用）
+- 尝试其他备用服务器
+
+### Invalid Response (Not JSON)
+
+**原因**: 服务器返回 HTML 而非 JSON
+
+**解决方案**:
+
+- 检查服务器 URL 是否为 Blossom API 端点
+- 尝试使用默认服务器
+
+---
+
+## 安全考虑
+
+### 数据隐私
+
+- ✅ blob 在上传前已使用 E2EE 加密
+- ✅ Blossom 服务器仅存储密文
+- ⚠️ 服务器可见 blob 大小和上传时间
+
+### 服务器信任
+
+- ⚠️ 依赖服务器正确存储 blob
+- ⚠️ 服务器可能删除或修改 blob
+- ✅ SHA256 验证确保数据完整性
+
+### 推荐做法
+
+1. **多副本**: 使用多个备用服务器
+2. **校验**: 下载后验证 SHA256
+3. **自托管**: 关键数据使用自建服务器
+
+---
+
+## 相关文档
+
+- [MCP 集成](/zh/guides/mcp-integration) - Dead Drop 使用
+- [Coincurve 指南](/zh/guides/coincurve-guide) - 认证依赖
+- [身份管理](/zh/guides/identity-management) - Nostr 密钥
+- [环境变量](/zh/setup/environment-variables) - 完整配置参考

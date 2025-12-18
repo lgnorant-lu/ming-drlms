@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Optional, Tuple
+from pathlib import Path
 
 import os
 import platform
@@ -45,10 +46,30 @@ if LIBOQS_DIR and platform.system() == "Windows":
         if search_path not in os.environ["PATH"]:
             os.environ["PATH"] += os.pathsep + search_path
 
-try:
-    import oqs
+# Strict Pre-check: Do not import oqs if we can't find the DLL on Windows.
+# This prevents liboqs-python from triggering its "auto-install" (git clone) logic which causes SystemExit.
+should_import = True
+if platform.system() == "Windows":
+    # If LIBOQS_DIR is not set, or doesn't contain bin/oqs.dll, skip import
+    if not LIBOQS_DIR:
+        should_import = False
+    else:
+        # Check specific DLL existence
+        # Usually in bin/oqs.dll
+        dll_candidate = os.path.join(LIBOQS_DIR, "bin", "oqs.dll")
+        if not os.path.exists(dll_candidate):
+            # Try root
+            dll_candidate_root = os.path.join(LIBOQS_DIR, "oqs.dll")
+            if not os.path.exists(dll_candidate_root):
+                should_import = False
 
-    LIBOQS_AVAILABLE = True
+try:
+    if should_import:
+        import oqs
+
+        LIBOQS_AVAILABLE = True
+    else:
+        LIBOQS_AVAILABLE = False
 except (ImportError, RuntimeError, OSError, AttributeError, SystemExit):
     # SystemExit is raised by oqs.py if DLL load fails
     LIBOQS_AVAILABLE = False
@@ -77,6 +98,9 @@ def is_pqc_available() -> bool:
     This ensures correct detection even in subprocesses where
     DLL paths are injected after module import.
     """
+    if not LIBOQS_AVAILABLE:
+        return False
+
     result = False
     error_msg = None
 
@@ -94,8 +118,27 @@ def is_pqc_available() -> bool:
         tb = "".join(traceback.format_tb(e.__traceback__))
 
     # ALWAYS log (both success and failure)
+
+    def _get_log_path(filename: str) -> Path:
+        log_dir = os.environ.get("DRLMS_LOG_DIR")
+        if log_dir:
+            path = Path(log_dir)
+        else:
+            if os.name == "nt":
+                base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA")
+                path = (
+                    Path(base) / "drlms" / "logs"
+                    if base
+                    else Path.home() / ".drlms" / "logs"
+                )
+            else:
+                path = Path.home() / ".drlms" / "logs"
+
+        path.mkdir(parents=True, exist_ok=True)
+        return path / filename
+
     try:
-        with open("pqc_debug.log", "a", encoding="utf-8") as f:
+        with open(_get_log_path("pqc_debug.log"), "a", encoding="utf-8") as f:
             import datetime
 
             timestamp = datetime.datetime.now().isoformat()

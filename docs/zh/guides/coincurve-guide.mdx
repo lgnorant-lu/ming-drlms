@@ -1,0 +1,208 @@
+---
+title: "Coincurve (secp256k1)"
+description: "Nostr 签名库 coincurve 的配置说明"
+---
+
+## 概述
+
+coincurve 是 `libsecp256k1` 的 Python CFFI 封装，为 DRLMS Phase 28 提供 Nostr 协议 Schnorr 签名（BIP-340）支持。
+
+<Note>
+coincurve 已作为 Phase 27 PQC 依赖自动安装，无需单独配置。
+</Note>
+
+---
+
+## 安装状态
+
+### 自动安装
+
+coincurve 在安装 ming-drlms 时已自动包含：
+
+```bash
+# 已包含 coincurve>=21.0.0
+pip install ming-drlms
+```
+
+### 验证安装
+
+```bash
+python -c "from coincurve import PrivateKey; print('✅ Coincurve OK')"
+```
+
+---
+
+## 为什么选择 Coincurve？
+
+### vs. secp256k1 (PyPI)
+
+| 特性 | coincurve | secp256k1 |
+|------|-----------|-----------|
+| **Windows 支持** | ✅ 预编译 wheel | ❌ 需手动编译 |
+| **安装难度** | ⭐ 简单 | ⭐⭐⭐ 困难 |
+| **Schnorr 签名** | ✅ `sign_schnorr()` | ✅ `schnorr_sign()` |
+| **依赖冗余** | ✅ 已在 Phase 27 | ❌ 额外依赖 |
+
+<Note>
+**架构决策**: 使用已有的 coincurve 而非引入新的 secp256k1 依赖，避免在虚拟环境中重复安装两套 libsecp256k1。
+</Note>
+
+---
+
+## Nostr 功能支持
+
+### BIP-340 Schnorr 签名
+
+```python
+from coincurve import PrivateKey
+
+# 创建私钥
+privkey = PrivateKey(secret=bytes(32))
+
+# BIP-340 Schnorr 签名
+message = b"Hello Nostr"
+signature = privkey.sign_schnorr(message)
+
+print(f"Signature: {signature.hex()} ({len(signature)} bytes)")
+# 输出: 64 字节签名
+```
+
+### DRLMS 集成
+
+NostrSigner 内部使用 coincurve：
+
+```python
+from ming_drlms.core.nostr_signer import NostrSigner
+from ming_drlms.core.identity_manager import IdentityManager
+
+# 从身份获取签名器
+identity = IdentityManager.from_mnemonic(mnemonic, "myuser")
+signer = identity.get_nostr_signer()
+
+# 签名 Nostr 事件
+event = {
+    "pubkey": signer.get_pubkey_hex(),
+    "kind": 1,
+    "tags": [],
+    "content": "Message",
+    "created_at": 1234567890
+}
+signature = signer.sign_event(event)
+```
+
+---
+
+## Blossom NIP-98 认证
+
+Phase 28.2 使用 coincurve 生成 `kind:24242` 授权事件：
+
+```python
+from ming_drlms.core.blossom import BlossomClient
+
+# BlossomClient 自动使用 coincurve 签名
+client = BlossomClient(identity_manager=identity)
+result = client.upload_blob(b"secret data")
+# 内部调用 coincurve.PrivateKey.sign_schnorr()
+```
+
+---
+
+## 平台兼容性
+
+### Windows ✅
+
+```powershell
+# 直接安装（有 wheel）
+pip install coincurve
+```
+
+<Note>
+无需 Visual Studio、MinGW 或 MSYS2。
+</Note>
+
+### Linux ✅
+
+```bash
+# 直接安装
+pip install coincurve
+```
+
+### macOS ✅
+
+```bash
+pip install coincurve
+```
+
+---
+
+## 技术细节
+
+### 架构
+
+```
+ming-drlms (Phase 28)
+    └── NostrSigner
+        └── coincurve.PrivateKey
+            └── libsecp256k1 (bundled C library)
+```
+
+### 依赖链
+
+```toml
+# pyproject.toml
+dependencies = [
+    "coincurve>=21.0.0",  # Phase 27 + Phase 28 共用
+]
+```
+
+### Schnorr vs. ECDSA
+
+- **ECDSA**: 比特币旧签名方案（coincurve 默认）
+- **Schnorr (BIP-340)**: Nostr 协议标准（`sign_schnorr()`）
+
+```python
+# ❌ 错误：ECDSA 签名
+sig_ecdsa = privkey.sign(message)  # 70-72 字节，可变长度
+
+# ✅ 正确：Schnorr 签名
+sig_schnorr = privkey.sign_schnorr(message)  # 固定 64 字节
+```
+
+---
+
+## 故障排查
+
+### ImportError: cannot import name 'PrivateKey'
+
+**原因**: coincurve 未安装
+
+**解决方案**:
+```bash
+pip install coincurve
+```
+
+### AttributeError: 'PrivateKey' object has no attribute 'sign_schnorr'
+
+**原因**: coincurve 版本过旧（< 13.0.0）
+
+**解决方案**:
+```bash
+pip install --upgrade coincurve>=21.0.0
+```
+
+### ValueError: Secret scalar must be greater than 0
+
+**原因**: 私钥无效（全零或超出范围）
+
+**解决方案**:
+- 使用有效的随机私钥（1 到 `n-1`，其中 `n` 是 secp256k1 曲线阶）
+- 通过 BIP39 助记词派生
+
+---
+
+## 相关文档
+
+- [Blossom 设置](/zh/guides/blossom-setup) - Blossom 网络配置
+- [MCP 集成](/zh/guides/mcp-integration) - Dead Drop 使用
+- [身份管理](/zh/guides/identity-management) - Nostr 密钥派生
+- [coincurve GitHub](https://github.com/ofek/coincurve) - 官方仓库

@@ -37,7 +37,7 @@ dependencies = [
     
     # Phase 27: Quantum-Resistant Cryptography
     "liboqs-python>=0.14.1",
-    "coincurve>=21.0.0",
+    "coincurve>=21.0.0",  # Also provides secp256k1 (Schnorr/BIP-340) for Phase 28
     "bip_utils>=2.10.0",
     
     # Phase 28: MCP (Model Context Protocol) for AI Agent integration
